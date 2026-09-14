@@ -99,6 +99,7 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
     private volatile Thread mEmulationThread = null;
     private boolean mSetupWizardActive = false;
     private boolean mHudVisible = false;
+    private boolean mFastForwardEnabled = false;
     private InputManager mInputManager;
     
     // Track joystick directional pressed state to avoid duplicate down events
@@ -208,7 +209,10 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
 
         if (llJoy != null) {
             ConstraintLayout.LayoutParams lp = safeCLP(llJoy);
-            lp.bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID;
+            boolean portrait = orientation != Configuration.ORIENTATION_LANDSCAPE && llSelectStart != null;
+            // Leave the bottom row free for Fast Forward, Select, and Start on narrow screens.
+            lp.bottomToBottom = portrait ? ConstraintLayout.LayoutParams.UNSET : ConstraintLayout.LayoutParams.PARENT_ID;
+            lp.bottomToTop = portrait ? llSelectStart.getId() : ConstraintLayout.LayoutParams.UNSET;
             lp.startToStart = ConstraintLayout.LayoutParams.PARENT_ID;
             lp.endToEnd = ConstraintLayout.LayoutParams.UNSET;
             lp.topToTop = ConstraintLayout.LayoutParams.UNSET;
@@ -289,6 +293,19 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
             lp.bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID;
             lp.setMargins(0,0,0,dp(orientation == Configuration.ORIENTATION_LANDSCAPE ? 8 : 0));
             llSelectStart.setLayoutParams(lp);
+        }
+
+        View fastForward = findViewById(R.id.btn_fast_forward);
+        if (fastForward != null && llSelectStart != null && llJoy != null) {
+            ConstraintLayout.LayoutParams lp = safeCLP(fastForward);
+            boolean landscape = orientation == Configuration.ORIENTATION_LANDSCAPE;
+            // Portrait puts this below the stick, immediately before Select.
+            lp.startToEnd = landscape ? llJoy.getId() : ConstraintLayout.LayoutParams.UNSET;
+            lp.endToStart = llSelectStart.getId();
+            lp.startToStart = ConstraintLayout.LayoutParams.UNSET;
+            lp.bottomToBottom = llSelectStart.getId();
+            lp.bottomToTop = ConstraintLayout.LayoutParams.UNSET;
+            fastForward.setLayoutParams(lp);
         }
     }
 
@@ -1003,6 +1020,15 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         // Visibility toggle removed
 
         // PAD
+        MaterialButton fastForward = findViewById(R.id.btn_fast_forward);
+        fastForward.setOnClickListener(v -> {
+            if (!NativeApp.isVMActive() || NativeApp.isPaused() || mActivityPauseRequested
+                    || mUserPauseRequested || isAutomaticPauseRequested()) {
+                fastForward.setChecked(mFastForwardEnabled);
+                return;
+            }
+            setFastForwardEnabled(!mFastForwardEnabled);
+        });
         MaterialButton btn_pad_select = findViewById(R.id.btn_pad_select);
         if(btn_pad_select != null) {
             btn_pad_select.setOnTouchListener((v, event) -> {
@@ -1215,11 +1241,26 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
 
     // Visibility toggle removed; no global hidden state flag
 
+    private void setFastForwardEnabled(boolean enabled) {
+        if (mFastForwardEnabled != enabled) {
+            mFastForwardEnabled = enabled;
+            NativeApp.setFastForward(enabled);
+        }
+        MaterialButton button = findViewById(R.id.btn_fast_forward);
+        if (button != null) {
+            button.setChecked(enabled);
+            button.setContentDescription(getString(enabled
+                    ? R.string.fast_forward_disable : R.string.fast_forward_enable));
+        }
+    }
+
     private void setControlsVisible(boolean visible) {
         if (!visible) {
+            setFastForwardEnabled(false);
             releaseVirtualStickInputs();
         }
         int vis = visible ? View.VISIBLE : View.GONE;
+        findViewById(R.id.btn_fast_forward).setVisibility(vis);
         View llDpad = findViewById(R.id.ll_pad_dpad);
         View llRight = findViewById(R.id.ll_pad_right_buttons);
         View llSelectStart = findViewById(R.id.ll_pad_select_start);
@@ -1974,6 +2015,7 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
 
     @Override
     protected void onPause() {
+        setFastForwardEnabled(false);
         mActivityPauseRequested = true;
         applyRequestedPauseState("activity paused");
         super.onPause();
@@ -2143,6 +2185,7 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
     }
 
     private void restartEmuThread() {
+        setFastForwardEnabled(false);
         // Ensure BIOS present before starting/restarting emulation
         if (!ensureBiosOrPrompt()) return;
         mUserPauseRequested = false;
@@ -3373,6 +3416,9 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
 
     private void applyRequestedPauseState(String reason) {
         try {
+            if (mUserPauseRequested || isAutomaticPauseRequested()) {
+                setFastForwardEnabled(false);
+            }
             if (!hasSelectedGame() || !isThread()) {
                 updatePausePlayButton();
                 return;
@@ -3623,6 +3669,8 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
     }
     
     private void hideGamepadControls() {
+        setFastForwardEnabled(false);
+        findViewById(R.id.btn_fast_forward).setVisibility(View.GONE);
         View joy = findViewById(R.id.ll_pad_joy);
         if (joy != null) joy.setVisibility(View.GONE);
 

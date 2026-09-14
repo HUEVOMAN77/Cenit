@@ -1838,6 +1838,35 @@ Java_com_izzy2lost_psx2_NativeApp_isPaused(JNIEnv *env, jclass clazz) {
 }
 
 extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setFastForward(JNIEnv *, jclass, jboolean enabled) {
+    const uint64_t generation = s_vm_start_generation.load(std::memory_order_acquire);
+    Host::RunOnCPUThread([generation, enabled = (enabled == JNI_TRUE)] {
+        // Speed changes belong to this game and must run on the emulation thread.
+        if (s_vm_start_generation.load(std::memory_order_acquire) != generation)
+            return;
+        const VMState state = VMManager::GetState();
+        if (state != VMState::Running && state != VMState::Paused)
+            return;
+
+        static uint64_t previous_generation = 0;
+        static std::optional<LimiterModeType> previous_mode;
+        if (previous_generation != generation) {
+            previous_generation = generation;
+            previous_mode.reset();
+        }
+        if (enabled && state == VMState::Running) {
+            if (!previous_mode.has_value())
+                previous_mode = VMManager::GetLimiterMode();
+            VMManager::SetLimiterMode(LimiterModeType::Turbo);
+        } else if (previous_mode.has_value()) {
+            VMManager::SetLimiterMode(*previous_mode);
+            previous_mode.reset();
+        }
+    });
+}
+
+extern "C"
 JNIEXPORT jboolean JNICALL
 Java_com_izzy2lost_psx2_NativeApp_isVMActive(JNIEnv *env, jclass clazz) {
     return VMManager::GetState() != VMState::Shutdown;

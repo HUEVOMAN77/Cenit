@@ -120,7 +120,26 @@
 
     </LinearLayout>
 
-      <!-- Left-bottom Joystick -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_fast_forward"
+        style="@style/PSX2.ElevatedTransparentButton"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:minWidth="0dp"
+        android:padding="0dp"
+        android:text=""
+        android:contentDescription="@string/fast_forward_enable"
+        android:checkable="true"
+        app:icon="@drawable/fast_forward_24px"
+        app:iconSize="24dp"
+        app:iconPadding="0dp"
+        app:iconGravity="textStart"
+        app:iconTint="@color/fast_forward_tint"
+        app:layout_constraintStart_toEndOf="@id/ll_pad_joy"
+        app:layout_constraintEnd_toStartOf="@id/ll_pad_select_start"
+        app:layout_constraintBottom_toBottomOf="@id/ll_pad_select_start" />
+
+    <!-- Left-bottom Joystick -->
       <LinearLayout
           android:id="@+id/ll_pad_joy"
           android:layout_width="wrap_content"
