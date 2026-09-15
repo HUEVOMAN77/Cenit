@@ -1582,51 +1582,22 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
 
     private void applySavedSettings() {
         SharedPreferences prefs = getSharedPreferences("app_prefs", MODE_PRIVATE);
-        // Renderer constants (match the drawer's renderer toggle)
-        final int RENDERER_OPENGL = 12;
-        final int RENDERER_SOFTWARE = 13;
-        final int RENDERER_VULKAN = 14;
-        
-        // Default to Automatic (-1) so the core can select a compatible renderer on older devices
-        int renderer = prefs.getInt("renderer", -1);
-        NativeApp.renderGpu(renderer);
-
-        // Resolution scale multiplier (float), default 1.0
-        float scale = prefs.getFloat("upscale_multiplier", 1.0f);
-        NativeApp.renderUpscalemultiplier(scale);
-
-        // Aspect ratio: 0=Stretch, 1=Auto 4:3/3:2, 2=4:3, 3=16:9, 4=10:7
-        int aspectRatio = prefs.getInt("aspect_ratio", 1); // Default to Auto 4:3/3:2
-        NativeApp.setAspectRatio(aspectRatio);
-
-        // Widescreen patches
-        boolean widescreenPatches = prefs.getBoolean("widescreen_patches", true);
-        NativeApp.setWidescreenPatches(widescreenPatches);
-
-        // No interlacing patches
-        boolean noInterlacingPatches = prefs.getBoolean("no_interlacing_patches", true);
-        NativeApp.setNoInterlacingPatches(noInterlacingPatches);
-
-        // Texture loading options
-        boolean loadTextures = prefs.getBoolean("load_textures", false);
-        NativeApp.setLoadTextures(loadTextures);
-        
-        boolean asyncTextureLoading = prefs.getBoolean("async_texture_loading", true);
-        NativeApp.setAsyncTextureLoading(asyncTextureLoading);
-
-        // HUD visibility
-        boolean hudVisible = prefs.getBoolean("hud_visible", false);
-        NativeApp.setHudVisible(hudVisible);
-
-        // Edge cropping: trims the junk columns a CRT's overscan used to hide
-        int edgeCrop = prefs.getInt("edge_crop", DEFAULT_EDGE_CROP);
-        NativeApp.setEdgeCrop(edgeCrop);
-        
-        // Set brighter default brightness (60 instead of 50)
-        NativeApp.setShadeBoost(true);
-        NativeApp.setShadeBoostBrightness(60);
-        NativeApp.setShadeBoostContrast(50);
-        NativeApp.setShadeBoostSaturation(50);
+        // Apply synchronously before boot, so the first GS open sees the saved values.
+        // Game-specific overrides are loaded by runVMThread after this global baseline.
+        NativeApp.applyGlobalSettingsBatch(
+                prefs.getInt("renderer", -1),
+                prefs.getFloat("upscale_multiplier", 1.0f),
+                prefs.getInt("aspect_ratio", 1),
+                prefs.getInt("blending_accuracy", 1),
+                prefs.getBoolean("widescreen_patches", true),
+                prefs.getBoolean("no_interlacing_patches", true),
+                prefs.getBoolean("load_textures", false),
+                prefs.getBoolean("async_texture_loading", true),
+                prefs.getBoolean("vsync_enabled", false),
+                prefs.getBoolean("hud_visible", false));
+        NativeApp.setPrecacheTextureReplacements(prefs.getBoolean("precache_textures", false));
+        NativeApp.setEdgeCrop(prefs.getInt("edge_crop", DEFAULT_EDGE_CROP));
+        AudioOutputPreference.apply(this);
     }
 
     public final ActivityResultLauncher<Intent> startActivityResultLocalFilePlay = registerForActivityResult(
@@ -2131,6 +2102,9 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
             }
 
             final String gameFile = m_szGamefile;
+            // Reapply on every boot, including surface-triggered starts and game switches.
+            // This also clears graphics overrides left in the base layer by the last game.
+            applySavedSettings();
             // Restore global cards, then apply this exact file URI's overrides before boot.
             MemoryCardSettings.applyForGame(this, gameFile);
             // Must run before prepareVMStart/runVMThread: the first MTGS::Open (inside
@@ -2191,8 +2165,6 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         mUserPauseRequested = false;
         final int generation = mEmulationRestartGeneration.incrementAndGet();
         final String requestedGame = m_szGamefile;
-        final int renderer = getSharedPreferences("app_prefs", MODE_PRIVATE)
-                .getInt("renderer", -1);
 
         // Shutdown and Thread.join() can take several seconds for some arcade games.
         // Never wait for the emulation thread from Android's UI thread.
@@ -2217,9 +2189,6 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                     }
                 }
                 if (generation != mEmulationRestartGeneration.get()) return;
-                android.util.Log.d("MainActivity",
-                        "Applying global renderer before game restart: " + renderer);
-                NativeApp.renderGpu(renderer);
                 runOnUiThread(() -> {
                     if (generation != mEmulationRestartGeneration.get()
                             || isFinishing() || isDestroyed()
@@ -3091,49 +3060,12 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
 
     private void loadAndApplyStoredSettings() {
         try {
-            SharedPreferences prefs = getSharedPreferences("app_prefs", MODE_PRIVATE);
-            
-            // Apply aspect ratio setting
-            int aspectRatio = prefs.getInt("aspect_ratio", 1);
-            NativeApp.setAspectRatio(aspectRatio);
-            
-            // Apply blending accuracy setting
-            int blendingAccuracy = prefs.getInt("blending_accuracy", 1);
-            NativeApp.setBlendingAccuracy(blendingAccuracy);
-            
-            // Apply other settings
-            boolean widescreenPatches = prefs.getBoolean("widescreen_patches", true);
-            NativeApp.setWidescreenPatches(widescreenPatches);
-            
-            boolean noInterlacing = prefs.getBoolean("no_interlacing_patches", true);
-            NativeApp.setNoInterlacingPatches(noInterlacing);
-            
-            boolean loadTextures = prefs.getBoolean("load_textures", false);
-            NativeApp.setLoadTextures(loadTextures);
-            
-            boolean asyncTextures = prefs.getBoolean("async_texture_loading", true);
-            NativeApp.setAsyncTextureLoading(asyncTextures);
-            
-            boolean precacheTextures = prefs.getBoolean("precache_textures", false);
-            NativeApp.setPrecacheTextureReplacements(precacheTextures);
-
-            boolean vsyncEnabled = prefs.getBoolean("vsync_enabled", false);
-            NativeApp.setVsyncEnabled(vsyncEnabled);
-
-            int edgeCrop = prefs.getInt("edge_crop", DEFAULT_EDGE_CROP);
-            NativeApp.setEdgeCrop(edgeCrop);
-
-            AudioOutputPreference.apply(this);
-            
-            // Apply renderer setting
-            int renderer = prefs.getInt("renderer", -1);
-            NativeApp.renderGpu(renderer);
-
+            applySavedSettings();
             MemoryCardSettings.applyForGame(this, "");
-
             applyOrientationPreference();
-            
-        } catch (Throwable ignored) {}
+        } catch (Throwable error) {
+            android.util.Log.e("MainActivity", "Unable to apply saved startup settings", error);
+        }
     }
 
     private void showControllerHintIfNeeded() {
