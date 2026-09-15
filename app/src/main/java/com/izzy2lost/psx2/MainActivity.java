@@ -2360,8 +2360,11 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         try {
             is = assetMgr.open(srcFile);
             boolean exists = new File(destFile).exists();
-            if (srcFile.contains("shaders")) {
-                exists = false; // always refresh shaders
+            if (srcFile.startsWith("resources/shaders/")
+                    || srcFile.equals("resources/GameIndex.yaml")
+                    || srcFile.equals("resources/game_controller_db.txt")) {
+                // These bundled resources track the core revision, including on app upgrades.
+                exists = false;
             }
             if (!exists) {
                 File parent = new File(destFile).getParentFile();

@@ -49,6 +49,7 @@ const char* ShaderEntryPoint(ShaderConvert value)
 		case ShaderConvert::RGB5A1_TO_DEPTH16:      return "ps_convert_rgb5a1_depth16";
 		case ShaderConvert::DEPTH32_TO_DEPTH24:     return "ps_convert_depth32_depth24";
 		case ShaderConvert::DEPTH_COPY:             return "ps_depth_copy";
+		case ShaderConvert::PRIMID_TO_RGBA8:        return "ps_convert_primid_rgba8";
 		case ShaderConvert::DOWNSAMPLE_COPY:        return "ps_downsample_copy";
 		case ShaderConvert::RGBA_TO_8I:             return "ps_convert_rgba_8i";
 		case ShaderConvert::RGB5A1_TO_8I:           return "ps_convert_rgb5a1_8i";
@@ -109,6 +110,7 @@ const char* ShaderConvertName(ShaderConvert shader)
 		ENTRY(RGBA8_TO_DEPTH16);
 		ENTRY(RGB5A1_TO_DEPTH16);
 		ENTRY(DEPTH32_TO_DEPTH24);
+		ENTRY(PRIMID_TO_RGBA8);
 		ENTRY(DOWNSAMPLE_COPY);
 		ENTRY(RGBA_TO_8I);
 		ENTRY(RGB5A1_TO_8I);
@@ -375,8 +377,69 @@ GSVector4i GSDevice::ProcessCopyArea(const GSVector4i& rtsize, const GSVector4i&
 	return snapped_drawarea;
 }
 
+#ifdef BAKE_SHADERS_IN_CPP
+#include "common_fxaa.cpp"
+#include "vulkan_convert.cpp"
+#include "vulkan_imgui.cpp"
+#include "vulkan_interlace.cpp"
+#include "vulkan_merge.cpp"
+#include "vulkan_present.cpp"
+#include "vulkan_shadeboost.cpp"
+#include "vulkan_tfx.cpp"
+#include "opengl_convert.cpp"
+#include "opengl_imgui.cpp"
+#include "opengl_interlace.cpp"
+#include "opengl_merge.cpp"
+#include "opengl_present.cpp"
+#include "opengl_shadeboost.cpp"
+#include "opengl_tfx_fs.cpp"
+#include "opengl_tfx_vgs.cpp"
+#ifdef _WIN32
+#include "dx11_convert.cpp"
+#include "dx11_imgui.cpp"
+#include "dx11_interlace.cpp"
+#include "dx11_merge.cpp"
+#include "dx11_present.cpp"
+#include "dx11_shadeboost.cpp"
+#include "dx11_tfx.cpp"
+#endif
+
+static const std::map<std::string, const unsigned char*> baked_shaders = {
+	{ "shaders/common/fxaa.fx"         , common_fxaa},
+	{ "shaders/vulkan/convert.glsl"    , vulkan_convert},
+	{ "shaders/vulkan/imgui.glsl"      , vulkan_imgui},
+	{ "shaders/vulkan/interlace.glsl"  , vulkan_interlace},
+	{ "shaders/vulkan/merge.glsl"      , vulkan_merge },
+	{ "shaders/vulkan/present.glsl"    , vulkan_present },
+	{ "shaders/vulkan/shadeboost.glsl" , vulkan_shadeboost },
+	{ "shaders/vulkan/tfx.glsl"        , vulkan_tfx },
+	{ "shaders/opengl/convert.glsl"    , opengl_convert },
+	{ "shaders/opengl/imgui.glsl"      , opengl_imgui },
+	{ "shaders/opengl/interlace.glsl"  , opengl_interlace },
+	{ "shaders/opengl/merge.glsl"      , opengl_merge },
+	{ "shaders/opengl/present.glsl"    , opengl_present },
+	{ "shaders/opengl/shadeboost.glsl" , opengl_shadeboost },
+	{ "shaders/opengl/tfx_fs.glsl"     , opengl_tfx_fs },
+	{ "shaders/opengl/tfx_vgs.glsl"    , opengl_tfx_vgs },
+#ifdef _WIN32
+	{ "shaders/direct3d/convert.fx"    , dx11_convert },
+	{ "shaders/direct3d/imgui.fx"      , dx11_imgui },
+	{ "shaders/direct3d/interlace.fx"  , dx11_interlace },
+	{ "shaders/direct3d/merge.fx"      , dx11_merge },
+	{ "shaders/direct3d/present.fx"    , dx11_present },
+	{ "shaders/direct3d/shadeboost.fx" , dx11_shadeboost },
+	{ "shaders/direct3d/tfx.fx"        , dx11_tfx },
+#endif
+};
+#endif
+
 std::optional<std::string> GSDevice::ReadShaderSource(const char* filename)
 {
+#ifdef BAKE_SHADERS_IN_CPP
+	const auto it = baked_shaders.find(filename);
+	if (it != baked_shaders.end())
+		return reinterpret_cast<const char*>(it->second);
+#endif
 	return FileSystem::ReadFileToString(Path::Combine(EmuFolders::Resources, filename).c_str());
 }
 

@@ -293,9 +293,7 @@ bool GameList::GetIsoSerialAndCRC(const std::string& path, s32* disc_type, std::
 
 	// TODO: we could include the version in the game list?
 	*disc_type = DoCDVDdetectDiskType();
-	
-	cdvdGetDiscInfo(serial, nullptr, nullptr, crc, nullptr);
-	
+	cdvdGetDiscInfo(serial, nullptr, nullptr, nullptr, crc, nullptr);
 	DoCDVDclose();
 	
 	// Restore previous CDVD state
@@ -1270,9 +1268,15 @@ std::string GameList::FormatTimestamp(std::time_t timestamp)
 		}
 		else
 		{
+#ifdef _WIN32
+			wchar_t buf[128];
+			std::wcsftime(buf, std::size(buf), L"%x", &ttime);
+			ret = StringUtil::WideStringToUTF8String(buf);
+#else
 			char buf[128];
 			std::strftime(buf, std::size(buf), "%x", &ttime);
 			ret.assign(buf);
+#endif
 		}
 	}
 

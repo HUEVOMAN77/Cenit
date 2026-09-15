@@ -154,7 +154,7 @@ static std::string GetGameSerialForPath(const std::string& game_path)
     if (CDVD->open(game_path, &error))
     {
         (void)DoCDVDdetectDiskType();
-        cdvdGetDiscInfo(&serial, nullptr, nullptr, nullptr, nullptr);
+        cdvdGetDiscInfo(&serial, nullptr, nullptr, nullptr, nullptr, nullptr);
         DoCDVDclose();
     }
     CDVD = prev;
@@ -570,7 +570,7 @@ Java_com_izzy2lost_psx2_NativeApp_getGameCrc(JNIEnv* env, jclass, jstring p_uri)
     if (CDVD->open(path, &error))
     {
         (void)DoCDVDdetectDiskType();
-        cdvdGetDiscInfo(nullptr, nullptr, nullptr, &crc, nullptr);
+        cdvdGetDiscInfo(nullptr, nullptr, nullptr, nullptr, &crc, nullptr);
         DoCDVDclose();
     }
     CDVD = prev;

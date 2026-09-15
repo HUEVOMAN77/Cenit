@@ -1081,7 +1081,6 @@ void DEV9write32(u32 addr, u32 value)
 
 void DEV9readDMA8Mem(u32* pMem, int size)
 {
-	size >>= 1;
 
 	if (!ACJV::GetGameId().empty())
 	{
@@ -1142,7 +1141,6 @@ void DEV9readDMA8Mem(u32* pMem, int size)
 
 void DEV9writeDMA8Mem(u32* pMem, int size)
 {
-	size >>= 1;
 	if (!ACJV::GetGameId().empty() && ACCORE::DMA::PendTrasnfType == ACCORE::DMA::ATA_WRITE) {
 		ACATA::TH::IO_Write(pMem, size);
 		ACCORE::DMA::PendTrasnfType = ACCORE::DMA::NONE;

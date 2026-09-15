@@ -289,16 +289,12 @@ bool GSDevice12::CreateDevice(u32& vendor_id)
 
 	// Create the actual device.
 	// Intel Haswell DX12 support is specific:
-	// Newerest drivers have dx12 support disabled so the last driver to support dx12 is 15.40.42.5063.
+	// Newer drivers have dx12 support disabled so the last driver to support dx12 is 15.40.42.5063.
 	// Shader cache must be also disabled, and make sure Debug Device option is disabled as well.
-	// Let's enable it on dev/debug for testing purposes so we don't have to change this all the time.
+	// Let's enable it for testing purposes so we don't have to change this all the time, and
+	// might be handy for the tweakers that want to run dx12.
 	// TODO: Find out the status of Broadwell.
-#ifdef PCSX2_DEVBUILD
 	hr = D3D12CreateDevice(m_adapter.get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&m_device));
-#else
-	const bool isIntel = (vendor_id == 0x163C || vendor_id == 0x8086 || vendor_id == 0x8087);
-	hr = D3D12CreateDevice(m_adapter.get(), isIntel ? D3D_FEATURE_LEVEL_12_0 : D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&m_device));
-#endif
 
 	if (FAILED(hr))
 	{
@@ -488,36 +484,8 @@ void GSDevice12::MoveToNextCommandList()
 	if (res.sampler_allocator.ShouldReset())
 		res.sampler_allocator.Reset();
 
-	if (res.has_timestamp_query)
-	{
-		// readback timestamp from the last time this cmdlist was used.
-		// we don't need to worry about disjoint in dx12, the frequency is reliable within a single cmdlist.
-		const u32 offset = (m_current_command_list * (sizeof(u64) * NUM_TIMESTAMP_QUERIES_PER_CMDLIST));
-		const D3D12_RANGE read_range = {offset, offset + (sizeof(u64) * NUM_TIMESTAMP_QUERIES_PER_CMDLIST)};
-		void* map;
-		HRESULT hr = m_timestamp_query_buffer->Map(0, &read_range, &map);
-		if (SUCCEEDED(hr))
-		{
-			u64 timestamps[2];
-			std::memcpy(timestamps, static_cast<const u8*>(map) + offset, sizeof(timestamps));
-			m_accumulated_gpu_time +=
-				static_cast<float>(static_cast<double>(timestamps[1] - timestamps[0]) / m_timestamp_frequency);
-
-			const D3D12_RANGE write_range = {};
-			m_timestamp_query_buffer->Unmap(0, &write_range);
-		}
-		else
-		{
-			Console.Warning("D3D12: Map() for timestamp query failed: %08X", hr);
-		}
-	}
-
-	res.has_timestamp_query = m_gpu_timing_enabled;
-	if (m_gpu_timing_enabled)
-	{
-		res.command_lists[1].list4->EndQuery(m_timestamp_query_heap.get(), D3D12_QUERY_TYPE_TIMESTAMP,
-			m_current_command_list * NUM_TIMESTAMP_QUERIES_PER_CMDLIST);
-	}
+	ReadGPUTiming();
+	StartGPUTiming();
 
 	if (res.pipeline_statistics_query == QueryState::Ready)
 	{
@@ -587,15 +555,7 @@ bool GSDevice12::ExecuteCommandList(WaitType wait_for_completion)
 	m_vertex_constant_buffer.FlushMemory();
 	m_pixel_constant_buffer.FlushMemory();
 
-	if (res.has_timestamp_query)
-	{
-		// write the timestamp back at the end of the cmdlist
-		res.command_lists[1].list4->EndQuery(m_timestamp_query_heap.get(), D3D12_QUERY_TYPE_TIMESTAMP,
-			(m_current_command_list * NUM_TIMESTAMP_QUERIES_PER_CMDLIST) + 1);
-		res.command_lists[1].list4->ResolveQueryData(m_timestamp_query_heap.get(), D3D12_QUERY_TYPE_TIMESTAMP,
-			m_current_command_list * NUM_TIMESTAMP_QUERIES_PER_CMDLIST, NUM_TIMESTAMP_QUERIES_PER_CMDLIST,
-			m_timestamp_query_buffer.get(), m_current_command_list * (sizeof(u64) * NUM_TIMESTAMP_QUERIES_PER_CMDLIST));
-	}
+	EndGPUTiming();
 
 	if ((res.pipeline_statistics_query == QueryState::Querying) || (res.pipeline_statistics_query == QueryState::Ready))
 	{
@@ -855,6 +815,64 @@ bool GSDevice12::SetGPUPipelineStatisticsEnabled(bool enabled)
 {
 	m_gpu_pipeline_statistics_enabled = enabled;
 	return true;
+}
+
+void GSDevice12::StartGPUTiming()
+{
+	if (m_gpu_timing_enabled)
+	{
+		CommandListResources& res = m_command_lists[m_current_command_list];
+		res.command_lists[1].list4->EndQuery(m_timestamp_query_heap.get(), D3D12_QUERY_TYPE_TIMESTAMP,
+			m_current_command_list * NUM_TIMESTAMP_QUERIES_PER_CMDLIST);
+		res.timestamp_query_state = QueryState::Querying;
+	}
+}
+
+void GSDevice12::EndGPUTiming()
+{
+	CommandListResources& res = m_command_lists[m_current_command_list];
+	if (res.timestamp_query_state == QueryState::Querying)
+	{
+		// write the timestamp back at the end of the cmdlist
+		if (InRenderPass())
+			EndRenderPass(); // Can't end query in a render pass
+		res.command_lists[1].list4->EndQuery(m_timestamp_query_heap.get(), D3D12_QUERY_TYPE_TIMESTAMP,
+			(m_current_command_list * NUM_TIMESTAMP_QUERIES_PER_CMDLIST) + 1);
+		res.command_lists[1].list4->ResolveQueryData(m_timestamp_query_heap.get(), D3D12_QUERY_TYPE_TIMESTAMP,
+			m_current_command_list * NUM_TIMESTAMP_QUERIES_PER_CMDLIST, NUM_TIMESTAMP_QUERIES_PER_CMDLIST,
+			m_timestamp_query_buffer.get(), m_current_command_list * (sizeof(u64) * NUM_TIMESTAMP_QUERIES_PER_CMDLIST));
+		res.timestamp_query_state = QueryState::Ready;
+	}
+}
+
+void GSDevice12::ReadGPUTiming()
+{
+	CommandListResources& res = m_command_lists[m_current_command_list];
+	if (res.timestamp_query_state == QueryState::Ready)
+	{
+		// readback timestamp from the last time this cmdlist was used.
+		// we don't need to worry about disjoint in dx12, the frequency is reliable within a single cmdlist.
+		const u32 offset = (m_current_command_list * (sizeof(u64) * NUM_TIMESTAMP_QUERIES_PER_CMDLIST));
+		const D3D12_RANGE read_range = { offset, offset + (sizeof(u64) * NUM_TIMESTAMP_QUERIES_PER_CMDLIST) };
+		void* map;
+		HRESULT hr = m_timestamp_query_buffer->Map(0, &read_range, &map);
+		if (SUCCEEDED(hr))
+		{
+			u64 timestamps[2];
+			std::memcpy(timestamps, static_cast<const u8*>(map) + offset, sizeof(timestamps));
+			m_accumulated_gpu_time +=
+				static_cast<float>(static_cast<double>(timestamps[1] - timestamps[0]) / m_timestamp_frequency);
+
+			const D3D12_RANGE write_range = {};
+			m_timestamp_query_buffer->Unmap(0, &write_range);
+		}
+		else
+		{
+			Console.Warning("D3D12: Map() for timestamp query failed: %08X", hr);
+		}
+
+		res.timestamp_query_state = QueryState::None;
+	}
 }
 
 bool GSDevice12::AllocatePreinitializedGPUBuffer(u32 size, ID3D12Resource** gpu_buffer,
@@ -2361,7 +2379,7 @@ void GSDevice12::RenderImGui()
 {
 	ImGui::Render();
 	const ImDrawData* draw_data = ImGui::GetDrawData();
-	if (draw_data->CmdListsCount == 0)
+	if (draw_data->CmdLists.Size == 0)
 		return;
 
 	UpdateImGuiTextures();
@@ -2402,7 +2420,7 @@ void GSDevice12::RenderImGui()
 	// this is for presenting, we don't want to screw with the viewport/scissor set by display
 	m_dirty_flags &= ~(DIRTY_FLAG_RENDER_TARGET | DIRTY_FLAG_VIEWPORT | DIRTY_FLAG_SCISSOR);
 
-	for (int n = 0; n < draw_data->CmdListsCount; n++)
+	for (int n = 0; n < draw_data->CmdLists.Size; n++)
 	{
 		const ImDrawList* cmd_list = draw_data->CmdLists[n];
 
@@ -2877,6 +2895,8 @@ bool GSDevice12::CompileConvertPipelines()
 
 		ShaderMacro sm;
 		sm.AddMacro("PIXEL_SHADER", 1);
+		sm.AddMacro("PRIMID_MAX", GSShader::PRIMID_MAX);
+		sm.AddMacro("PRIMID_MIN", GSShader::PRIMID_MIN);
 		sm.AddMacro("HAS_BILN", static_cast<int>(shader.Biln()));
 		sm.AddMacro("HAS_STENCIL_OUTPUT", static_cast<int>(shader.StencilOutput()));
 		sm.AddMacro("HAS_INTEGER_OUTPUT", static_cast<int>(shader.IntegerOutputBpp() != 0));
@@ -2930,6 +2950,8 @@ bool GSDevice12::CompileConvertPipelines()
 
 		ShaderMacro sm;
 		sm.AddMacro("PIXEL_SHADER", "1");
+		sm.AddMacro("PRIMID_MAX", GSShader::PRIMID_MAX);
+		sm.AddMacro("PRIMID_MIN", GSShader::PRIMID_MIN);
 		sm.AddMacro(entry_point_macro.c_str(), "1");
 
 		ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(*source, sm.GetPtr(), entry_point.c_str()));

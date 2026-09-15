@@ -435,6 +435,8 @@ bool GSDeviceOGL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 			const char* name = shader.EntryPoint();
 
 			std::string macro;
+			macro += fmt::format("#define PRIMID_MAX {}\n", GSShader::PRIMID_MAX);
+			macro += fmt::format("#define PRIMID_MIN {}\n", GSShader::PRIMID_MIN);
 			macro += fmt::format("#define HAS_BILN {}\n", static_cast<int>(shader.Biln()));
 			macro += fmt::format("#define HAS_STENCIL_OUTPUT {}\n", static_cast<int>(shader.StencilOutput()));
 			macro += fmt::format("#define HAS_INTEGER_OUTPUT {}\n", static_cast<int>(shader.IntegerOutputBpp() != 0));
@@ -614,9 +616,13 @@ bool GSDeviceOGL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 		for (size_t i = 0; i < std::size(m_date.primid_ps); i++)
 		{
+			std::string macro;
+			macro += fmt::format("#define PRIMID_MAX {}\n", GSShader::PRIMID_MAX);
+			macro += fmt::format("#define PRIMID_MIN {}\n", GSShader::PRIMID_MIN);
+
 			const std::string ps(GetShaderSource(
 				fmt::format("ps_primid_image_init_{}", i),
-				GL_FRAGMENT_SHADER, *convert_glsl));
+				GL_FRAGMENT_SHADER, *convert_glsl, macro));
 			m_shader_cache.GetProgram(&m_date.primid_ps[i], m_convert.vs, ps);
 			m_date.primid_ps[i].SetFormattedName("PrimID Destination Alpha Init %d", i);
 		}
@@ -723,9 +729,9 @@ bool GSDeviceOGL::CreateTextureFX()
 
 bool GSDeviceOGL::CheckFeatures()
 {
-	//bool vendor_id_amd = false;
-	//bool vendor_id_nvidia = false;
-	//bool vendor_id_intel = false;
+	bool vendor_id_amd = false;
+	bool vendor_id_nvidia = false;
+	bool vendor_id_intel = false;
 
 	memset(&m_bugs, 0, sizeof(m_bugs));
 
@@ -738,18 +744,18 @@ bool GSDeviceOGL::CheckFeatures()
 		std::strstr(vendor, "ATI"))
 	{
 		Console.WriteLn(Color_StrongRed, "GL: AMD GPU detected.");
-		//vendor_id_amd = true;
+		vendor_id_amd = true;
 	}
 	else if (std::strstr(vendor, "NVIDIA Corporation"))
 	{
 		Console.WriteLn(Color_StrongGreen, "GL: NVIDIA GPU detected.");
-		//vendor_id_nvidia = true;
+		vendor_id_nvidia = true;
 		m_bugs.broken_blend_coherency = true;
 	}
 	else if (std::strstr(vendor, "Intel"))
 	{
 		Console.WriteLn(Color_StrongBlue, "GL: Intel GPU detected.");
-		//vendor_id_intel = true;
+		vendor_id_intel = true;
 	}
 	else if (is_mali)
 	{
@@ -921,15 +927,27 @@ bool GSDeviceOGL::CheckFeatures()
 	glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
 	m_max_texture_size = std::max(1024u, static_cast<u32>(max_texture_size));
 
-	Console.WriteLn("GL: Using %s for point expansion, %s for line expansion and %s for sprite expansion.",
-		m_features.point_expand ? "hardware" : (m_features.vs_expand ? "vertex expanding" : "UNSUPPORTED"),
-		m_features.line_expand ? "hardware" : (m_features.vs_expand ? "vertex expanding" : "UNSUPPORTED"),
-		m_features.vs_expand ? "vertex expanding" : "CPU");
+	// Unlikely to be supported on Windows if device is stuck on GL 3.3 which is usually equivalent to feature level 10.0.
+	// This should also target any proprietary drivers on linux.
+	// Open source drivers shouldn't be hit since they have different vendor names.
+	if ((vendor_id_amd || vendor_id_nvidia || vendor_id_intel) && GLAD_GL_VERSION_3_3 && !GLAD_GL_VERSION_4_0)
+		m_rgba16_unorm_hw_blend = false;
+	else
+		m_rgba16_unorm_hw_blend = true;
 
 	if (!GLAD_GL_ARB_conservative_depth)
 	{
 		Console.Warning("GLAD_GL_ARB_conservative_depth is not supported. This will reduce performance.");
 	}
+
+	Console.WriteLn("GL: Using %s for point expansion, %s for line expansion and %s for sprite expansion.",
+		m_features.point_expand ? "hardware" : (m_features.vs_expand ? "vertex expanding" : "UNSUPPORTED"),
+		m_features.line_expand ? "hardware" : (m_features.vs_expand ? "vertex expanding" : "UNSUPPORTED"),
+		m_features.vs_expand ? "vertex expanding" : "CPU");
+	
+	Console.WriteLnFmt("GL: DXTn Texture Compression: {}", m_features.dxt_textures ? "Supported" : "Not Supported");
+	Console.WriteLnFmt("GL: BC6/7 Texture Compression: {}", m_features.bptc_textures ? "Supported" : "Not Supported");
+	Console.WriteLnFmt("GL: RGBA16 UNORM Hardware Blending: {}", m_rgba16_unorm_hw_blend ? "Supported" : "Not Supported");
 	
 	m_features.aa1 = GSConfig.HWAA1 && m_features.vs_expand && m_features.feedback_loops();
 	
@@ -2561,7 +2579,7 @@ void GSDeviceOGL::RenderImGui()
 {
 	ImGui::Render();
 	const ImDrawData* draw_data = ImGui::GetDrawData();
-	if (draw_data->CmdListsCount == 0)
+	if (draw_data->CmdLists.Size == 0)
 		return;
 
 	UpdateImGuiTextures();
@@ -2592,7 +2610,7 @@ void GSDeviceOGL::RenderImGui()
 	GSVector4i last_scissor = GSVector4i::xffffffff();
 
 	// Render command lists
-	for (int n = 0; n < draw_data->CmdListsCount; n++)
+	for (int n = 0; n < draw_data->CmdLists.Size; n++)
 	{
 		const ImDrawList* cmd_list = draw_data->CmdLists[n];
 
@@ -2947,7 +2965,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 		{
 			config.colclip_update_area = config.drawarea;
 
-			colclip_rt = CreateFeedbackTarget(rtsize.x, rtsize.y, GSTexture::Format::ColorClip, false);
+			colclip_rt = CreateFeedbackTarget(rtsize.x, rtsize.y, m_rgba16_unorm_hw_blend ? GSTexture::Format::ColorClip : GSTexture::Format::ColorHDR, false);
 
 			if (!colclip_rt)
 			{
