@@ -3,10 +3,10 @@
 #include "MemoryTypes.h"
 #include "common/Pcsx2Types.h"
 #include "common/Pcsx2Defs.h"
+#include "Config.h" // InputBindingInfo debe estar completo: std::span<> lo exige con libc++ del NDK 28
 #include "common/ARCADE.h"
 
 class SettingsInterface;
-struct InputBindingInfo;
 
 #define ACJV_BASE_ADDDR 0x12400000
 #define ACJV_RANGE      0x1240
