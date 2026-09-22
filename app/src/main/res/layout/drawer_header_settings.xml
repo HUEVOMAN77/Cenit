@@ -14,11 +14,19 @@
         android:paddingBottom="16dp"
         android:paddingTop="32dp">
 
+        <ImageView
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginBottom="6dp"
+            android:contentDescription="Cenit"
+            android:src="@drawable/cenit_logo" />
+
         <TextView
             android:id="@+id/drawer_title"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Settings"
+            android:text="Cenit · Ajustes"
             android:textStyle="bold"
             android:textSize="20sp"
             android:textColor="@color/brand_primary"
@@ -512,7 +520,7 @@
             style="@style/Widget.Material3Expressive.Button.OutlinedButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="About PSX2"
+            android:text="Acerca de Cenit"
             android:textColor="@android:color/white"
             android:textAllCaps="false"
             app:icon="@drawable/info_24px"

@@ -36,9 +36,9 @@ public class SetupWizardDialogFragment extends DialogFragment {
     private Runnable periodicCheck;
 
     private final List<SetupStep> steps = Arrays.asList(
-            new SetupStep(StepType.BIOS, R.drawable.memory_24px, "BIOS files", "Import a verified USA, Europe, or Japan BIOS. One is enough; adding all three lets PSX2 match game regions automatically.", "Import BIOS"),
-            new SetupStep(StepType.DATA, R.drawable.data_table_24px, "Data folder", "Pick a writable PSX2 data folder for saves, states, and config.", "Choose data"),
-            new SetupStep(StepType.GAMES, R.drawable.stadia_controller_24px, "Games library", "Point PSX2 to your games folder so covers and sorting work.", "Choose games")
+            new SetupStep(StepType.BIOS, R.drawable.memory_24px, "Archivos BIOS", "Importa una BIOS verificada de USA, Europa o Japón. Con una basta; con las tres Cenit ajusta la región de cada juego automáticamente.", "Importar BIOS"),
+            new SetupStep(StepType.DATA, R.drawable.data_table_24px, "Carpeta de datos", "Elige una carpeta con permiso de escritura para partidas, estados y configuración.", "Elegir datos"),
+            new SetupStep(StepType.GAMES, R.drawable.stadia_controller_24px, "Biblioteca de juegos", "Indícale a Cenit dónde guardas tus juegos para que funcione el orden y las carátulas.", "Elegir juegos")
     );
 
     private SetupPagerAdapter adapter;
@@ -171,13 +171,13 @@ public class SetupWizardDialogFragment extends DialogFragment {
 
     private void showFinishAnywayPrompt(int target) {
         MaterialAlertDialogBuilder b = new MaterialAlertDialogBuilder(requireContext());
-        b.setTitle("Some steps are still pending");
-        b.setMessage("You can finish now. The BIOS can be imported later from the side menu, and your games folder from the library button.");
-        b.setPositiveButton("Finish anyway", (d, w) -> completeAndDismiss());
-        b.setNeutralButton("Go to pending step", (d, w) -> {
+        b.setTitle("Aún hay pasos pendientes");
+        b.setMessage("Puedes terminar ahora. La BIOS se puede importar después desde el menú lateral, y la carpeta de juegos desde la biblioteca.");
+        b.setPositiveButton("Terminar de todos modos", (d, w) -> completeAndDismiss());
+        b.setNeutralButton("Ir al paso pendiente", (d, w) -> {
             if (target >= 0) pager.setCurrentItem(target, true);
         });
-        b.setNegativeButton("Keep reviewing", null);
+        b.setNegativeButton("Seguir revisando", null);
         b.show();
     }
 
@@ -207,7 +207,7 @@ public class SetupWizardDialogFragment extends DialogFragment {
     }
 
     private void updateHeader(int position) {
-        String stepLabel = String.format(Locale.getDefault(), "Step %d of %d", position + 1, steps.size());
+        String stepLabel = String.format(Locale.getDefault(), "Paso %d de %d", position + 1, steps.size());
         tvStep.setText(stepLabel);
         tvSubtitle.setText(steps.get(position).title);
     }
@@ -215,7 +215,7 @@ public class SetupWizardDialogFragment extends DialogFragment {
     private void updateNextButtonState(int position) {
         boolean allDone = areAllStepsComplete();
         boolean last = position == steps.size() - 1;
-        btnNext.setText(allDone ? "Start playing" : (last ? "Done" : "Next"));
+        btnNext.setText(allDone ? "Empezar a jugar" : (last ? "Listo" : "Siguiente"));
         // Siempre habilitado: en la última página "Done" ofrece terminar aunque falten pasos.
         btnNext.setEnabled(true);
     }
@@ -357,7 +357,7 @@ public class SetupWizardDialogFragment extends DialogFragment {
     private String getStepStatusText(StepType type) {
         return switch (type) {
             case BIOS -> BiosVerifier.describeVerifiedRegions(requireContext());
-            default -> isStepComplete(type) ? "Complete" : "Pending";
+            default -> isStepComplete(type) ? "Listo" : "Pendiente";
         };
     }
 

@@ -4,12 +4,16 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_margin="6dp"
+    android:checkable="false"
     android:clickable="true"
     android:focusable="true"
     app:cardBackgroundColor="@color/md_theme_surfaceContainer"
-    app:cardCornerRadius="14dp"
-    app:cardElevation="2dp"
-    app:strokeWidth="0dp">
+    app:cardCornerRadius="16dp"
+    app:cardElevation="3dp"
+    app:cardPreventCornerOverlap="true"
+    app:rippleColor="#33FFFFFF"
+    app:strokeColor="#14FFFFFF"
+    app:strokeWidth="1dp">
 
     <androidx.constraintlayout.widget.ConstraintLayout
         android:layout_width="match_parent"

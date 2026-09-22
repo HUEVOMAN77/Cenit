@@ -2,5 +2,7 @@
 <resources>
     <!-- Ensure these IDs exist even if not present in some layout variants -->
     <item type="id" name="recycler_letters" />
+    <!-- Clave para saber si una tarjeta ya reprodujo su animación de entrada -->
+    <item type="id" name="home_entrance_tag" />
 </resources>
 

@@ -54,6 +54,9 @@ public final class HomeScreenController {
 
     // Última publicación ganadora: si llegan dos escaneos, solo se pinta el más nuevo.
     private volatile long libraryToken = 0L;
+    // La primera biblioteca que llega entra escalonada; al volver de un juego o
+    // refrescar se pinta sin animación, salvo que la cortinilla la vuelva a pedir.
+    private boolean animateNextLibrary = true;
 
     private View root;
     private View continueSection;
@@ -157,8 +160,55 @@ public final class HomeScreenController {
         return 3;
     }
 
+    /**
+     * Llamado al terminar la cortinilla: la biblioteca que esté en pantalla entra
+     * escalonada. Si todavía no llegó ninguna, la animación queda armada (latch) y
+     * se usa con la primera tanda de datos, cuando el inicio ya sea visible.
+     */
+    public void playEntranceAnimation() {
+        animateNextLibrary = true;
+        paintEntranceIfNeeded();
+    }
+
+    /** Consume el latch solo cuando tiene sentido animar: inicio visible y algo que mostrar. */
+    private void paintEntranceIfNeeded() {
+        if (!animateNextLibrary || !isVisible() || entries.isEmpty()) return;
+        animateNextLibrary = false;
+        animateHeader();
+        if (adapter != null) adapter.startEntranceAnimation();
+    }
+
+    /** La cabecera sube suavemente: logo, nombre y estado, uno tras otro. */
+    private void animateHeader() {
+        View logo = root.findViewById(R.id.home_logo);
+        View wordmark = root.findViewById(R.id.home_wordmark);
+        View tagline = root.findViewById(R.id.home_tagline);
+        View status = root.findViewById(R.id.home_status_card);
+        rise(logo, 0);
+        rise(wordmark, 60);
+        rise(tagline, 130);
+        rise(status, 210);
+    }
+
+    private void rise(@Nullable View view, int startDelayMs) {
+        if (view == null) return;
+        view.setAlpha(0f);
+        view.setTranslationY(dp(12));
+        view.animate().alpha(1f).translationY(0f)
+                .setStartDelay(startDelayMs)
+                .setDuration(420)
+                .setInterpolator(ENTRANCE_INTERPOLATOR)
+                .start();
+    }
+
+    private static final android.view.animation.Interpolator ENTRANCE_INTERPOLATOR =
+            new android.view.animation.PathInterpolator(0.16f, 1f, 0.3f, 1f);
+
     public void setVisible(boolean visible) {
-        if (root != null) root.setVisibility(visible ? View.VISIBLE : View.GONE);
+        if (root == null) return;
+        boolean wasVisible = isVisible();
+        root.setVisibility(visible ? View.VISIBLE : View.GONE);
+        if (visible && !wasVisible) paintEntranceIfNeeded();
     }
 
     public boolean isVisible() {
@@ -246,6 +296,7 @@ public final class HomeScreenController {
             libraryTitle.setText(entries.isEmpty() ? "Biblioteca" : "Biblioteca · " + entries.size());
         }
         if (adapter != null) adapter.notifyDataSetChanged();
+        paintEntranceIfNeeded();
         renderContinue();
         renderEmpty(false);
     }

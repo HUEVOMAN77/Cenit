@@ -126,6 +126,8 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
     // Pantalla de inicio. Antes de existir, la raíz de la app era el surface del
     // juego, así que al abrir se veían mandos táctiles sobre un lienzo negro.
     private HomeScreenController mHomeScreen;
+    private CenitIntroController mIntro;
+    private boolean mPendingSetupWizard;
     private boolean mHomeScreenVisible = true;
     // Un reinicio de juego apaga la VM antes de volver a encenderla. Sin esta marca,
     // el vigilante interpretaría ese hueco como "el usuario salió del juego".
@@ -813,10 +815,16 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         // abría un diálogo flotante sobre un lienzo negro con mandos táctiles.
         setupHomeScreen();
 
+        // Cortinilla de presentación: solo en la primera apertura, saltable con un toque.
+        boolean introPlaying = maybePlayIntro();
+
         if (!firstRunDone) {
-            SetupWizardDialogFragment f = SetupWizardDialogFragment.newInstance();
-            f.setCancelable(false);
-            f.show(getSupportFragmentManager(), "setup_wizard");
+            if (introPlaying) {
+                // El asistente espera a que baje el telón (ver callback de la intro).
+                mPendingSetupWizard = true;
+            } else {
+                showFirstRunWizard();
+            }
         }
 
         // Setup right drawer quick actions
@@ -903,6 +911,39 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         });
         applyHomeScreenState("created");
         refreshHomeScreenData();
+    }
+
+    /** Reproduce la intro la primera vez que se abre Cenit en el dispositivo. */
+    private boolean maybePlayIntro() {
+        SharedPreferences prefs = getSharedPreferences("app_prefs", MODE_PRIVATE);
+        if (prefs.getBoolean("intro_seen", false)) return false;
+        if (mIntro == null) mIntro = new CenitIntroController();
+        boolean shown = mIntro.show(this, true, this::onIntroFinished);
+        if (!shown) {
+            prefs.edit().putBoolean("intro_seen", true).apply();
+        }
+        return shown;
+    }
+
+    /** Cerrada la cortinilla: animar la biblioteca y dejar pasar al asistente. */
+    private void onIntroFinished() {
+        try {
+            getSharedPreferences("app_prefs", MODE_PRIVATE).edit()
+                    .putBoolean("intro_seen", true).apply();
+            if (isFinishing() || isDestroyed() || mHomeScreen == null) return;
+            mHomeScreen.playEntranceAnimation();
+            if (mPendingSetupWizard) {
+                mPendingSetupWizard = false;
+                showFirstRunWizard();
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    private void showFirstRunWizard() {
+        if (getSupportFragmentManager().findFragmentByTag("setup_wizard") != null) return;
+        SetupWizardDialogFragment f = SetupWizardDialogFragment.newInstance();
+        f.setCancelable(false);
+        f.show(getSupportFragmentManager(), "setup_wizard");
     }
 
     private void showSetupWizard() {
@@ -1032,6 +1073,11 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         OnBackPressedCallback callback = new OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
+                // Atrás durante la cortinilla simplemente la salta.
+                if (mIntro != null && mIntro.isShowing()) {
+                    mIntro.hide(MainActivity.this::onIntroFinished);
+                    return;
+                }
                 // Con la pantalla de inicio por delante, atrás significa salir de la app;
                 // durante el juego, pedir confirmación como antes.
                 if (mHomeScreenVisible) {
@@ -2208,6 +2254,11 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
 
     @Override
     protected void onDestroy() {
+        // La cortinilla vive en el content view: al recrearse la activity (giro,
+        // cambio de idioma) hay que quitarla o quedaría tapando la interfaz nueva.
+        if (mIntro != null) {
+            try { mIntro.cancel(); } catch (Throwable ignored) {}
+        }
         try {
             // Tear the client down, but do not log out: Achievements::Logout() deletes the
             // stored username and token, so signing in would be required on every launch
@@ -2607,7 +2658,7 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         new MaterialAlertDialogBuilder(this,
                 com.google.android.material.R.style.ThemeOverlay_Material3_MaterialAlertDialog)
                 .setCustomTitle(UiUtils.centeredDialogTitle(this, "Exit App"))
-                .setMessage("Do you want to exit PSX2?")
+                .setMessage("¿Quieres salir de Cenit?")
                 .setIcon(android.R.drawable.ic_dialog_alert)
                 .setPositiveButton("Exit", (dialog, which) -> {
                     // Stop emulator first
@@ -3391,24 +3442,24 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
     }
 
     public void showAboutDialog() {
-        String aboutMessage = "PSX2 - PlayStation 2 Emulator for Android\n\n" +
+        String aboutMessage = "Cenit - PlayStation 2 Emulator for Android\n\n" +
                 "This is an Android port of PCSX2, the renowned PlayStation 2 emulator.\n\n" +
                 "Based on:\n" +
                 "• PCSX2: https://github.com/PCSX2/pcsx2\n" +
                 "• PCSX2_ARM64: https://github.com/pontos2024/PCSX2_ARM64\n\n" +
-                "Free Version: Follow the build instructions in the repository to compile from source.\n" +
-                "Paid Version: Get convenient automatic updates through the Play Store.\n\n" +
+                "Cenit es una versión libre y gratuita, distribuida sin fines de lucro.\n\n" +
                 "Important:\n" +
                 "• No games or BIOS files are included\n" +
                 "• You must own original PlayStation 2 games and console\n" +
                 "• This emulator is for educational and preservation purposes\n\n" +
                 "Licensed under GNU General Public License v3.0\n" +
-                "Source code: https://github.com/izzy2lost/PSX2\n" +
+                "Cenit source: https://github.com/HUEVOMAN77/Cenit\n" +
+                "Based on PSX2: https://github.com/izzy2lost/PSX2\n" +
                 "View full license: https://github.com/izzy2lost/PSX2/blob/master/LICENSE";
 
         new MaterialAlertDialogBuilder(this,
                 com.google.android.material.R.style.ThemeOverlay_Material3_MaterialAlertDialog)
-                .setTitle("About PSX2")
+                .setTitle("Acerca de Cenit")
                 .setMessage(aboutMessage)
                 .setPositiveButton("OK", null)
                 .setNeutralButton("Privacy Policy", (dialog, which) -> {
@@ -3708,8 +3759,8 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                             if (drawer != null) drawer.closeDrawer(androidx.core.view.GravityCompat.END);
                             // Show confirmation dialog
                             new MaterialAlertDialogBuilder(this)
-                                    .setTitle("Exit App")
-                                    .setMessage("Quit PSX2?")
+                                    .setTitle("Salir de la app")
+                                    .setMessage("¿Salir de Cenit?")
                                     .setNegativeButton("Cancel", null)
                                     .setPositiveButton("Quit", (d,w) -> { 
                                         try { NativeApp.shutdown(); } catch (Throwable ignored) {} 

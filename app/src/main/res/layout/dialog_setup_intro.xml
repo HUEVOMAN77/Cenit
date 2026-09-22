@@ -25,11 +25,19 @@
             android:orientation="vertical"
             android:gravity="center">
 
+            <!-- Logo de Cenit -->
+            <ImageView
+                android:layout_width="54dp"
+                android:layout_height="54dp"
+                android:layout_marginBottom="8dp"
+                android:contentDescription="Cenit"
+                android:src="@drawable/cenit_logo" />
+
             <TextView
                 android:id="@+id/tv_step"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Step 1 of 3"
+                android:text="Paso 1 de 3"
                 android:textColor="@color/md_theme_onPrimary"
                 android:textSize="12sp"
                 android:alpha="0.85"
@@ -39,7 +47,7 @@
                 android:id="@+id/tv_title"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Welcome to PSX2"
+                android:text="Bienvenido a Cenit"
                 android:textColor="@color/md_theme_onPrimary"
                 android:textSize="24sp"
                 android:textStyle="bold" />
@@ -48,7 +56,7 @@
                 android:id="@+id/tv_subtitle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Three quick steps to start playing"
+                android:text="Tres pasos rápidos para empezar a jugar"
                 android:textColor="@color/md_theme_onPrimary"
                 android:textSize="14sp"
                 android:alpha="0.9"
@@ -73,7 +81,7 @@
         android:id="@+id/swipe_hint"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="← Swipe to navigate →"
+        android:text="Desliza para navegar"
         android:textSize="13sp"
         android:textColor="@color/md_theme_tertiary"
         android:textStyle="bold"
@@ -99,7 +107,7 @@
         style="@style/Widget.Material3.Button.TonalButton"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:text="Next"
+        android:text="Siguiente"
         android:textAllCaps="false"
         android:layout_marginStart="20dp"
         android:layout_marginEnd="20dp"

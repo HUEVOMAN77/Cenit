@@ -1,7 +1,7 @@
 <resources>
     <string name="fast_forward_enable">Enable fast forward</string>
     <string name="fast_forward_disable">Disable fast forward</string>
-    <string name="app_name">PSX2</string>
+    <string name="app_name">Cenit</string>
     <string name="covers_hint_long_press">Long press on cover for per game settings &amp; custom cover</string>
     <string name="add_game_folder">Add game folder</string>
 </resources>

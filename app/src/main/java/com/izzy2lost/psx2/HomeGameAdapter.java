@@ -43,11 +43,31 @@ public class HomeGameAdapter extends RecyclerView.Adapter<HomeGameAdapter.VH> {
     private final Context context;
     private final List<Entry> entries;
     private final Callback callback;
+    private final int duration;
+    private final int stagger;
+    private final float riseDp;
+
+    // Marca temporal de la última carga completa: al refrescar la biblioteca las
+    // tarjetas entran escalonadas, pero al reciclearse durante el scroll no.
+    private long animationBatchId = -1L;
 
     public HomeGameAdapter(Context context, List<Entry> entries, Callback callback) {
         this.context = context;
         this.entries = entries;
         this.callback = callback;
+        float density = context.getResources().getDisplayMetrics().density;
+        duration = (int) (340 * density);
+        stagger = (int) (45 * density);
+        riseDp = 18f * density;
+    }
+
+    /**
+     * Marca una nueva tanda de datos: las tarjetas que se creen a partir de ahora
+     * entran escalonadas. Se usa notifyDataSetChanged porque la lista cambia completa.
+     */
+    public void startEntranceAnimation() {
+        animationBatchId = System.currentTimeMillis();
+        notifyDataSetChanged();
     }
 
     @NonNull
@@ -76,7 +96,35 @@ public class HomeGameAdapter extends RecyclerView.Adapter<HomeGameAdapter.VH> {
             }
             return false;
         });
+
+        Object tagged = holder.itemView.getTag(R.id.home_entrance_tag);
+        boolean alreadyPlayed = tagged instanceof Long && (Long) tagged == animationBatchId;
+        if (!alreadyPlayed && animationBatchId >= 0) {
+            holder.itemView.setTag(R.id.home_entrance_tag, animationBatchId);
+            playEntrance(holder.itemView, position);
+        }
     }
+
+    /** Aparición suave: cada tarjeta sube un poco con retardo escalonado. */
+    private void playEntrance(View itemView, int position) {
+        int delay = Math.min(position, 14) * stagger;
+        itemView.setAlpha(0f);
+        itemView.setTranslationY(riseDp);
+        itemView.setScaleX(0.94f);
+        itemView.setScaleY(0.94f);
+        itemView.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .setStartDelay(delay)
+                .setDuration(duration)
+                .setInterpolator(INTERPOLATOR)
+                .start();
+    }
+
+    private static final android.view.animation.Interpolator INTERPOLATOR =
+            new android.view.animation.PathInterpolator(0.16f, 1f, 0.3f, 1f);
 
     private void loadImage(@Nullable String localPath, @Nullable String remoteUrl, ShapeableImageView target) {
         RequestBuilder<Drawable> placeholder = Glide.with(context)
