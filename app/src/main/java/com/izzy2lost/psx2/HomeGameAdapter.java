@@ -112,7 +112,7 @@ public class HomeGameAdapter extends RecyclerView.Adapter<HomeGameAdapter.VH> {
                     .load(remoteUrl)
                     .diskCacheStrategy(DiskCacheStrategy.AUTOMATIC)
                     .fitCenter()
-                    .placeholder(placeholder)
+                    .thumbnail(placeholder)
                     .error(placeholder)
                     .into(target);
             return;
