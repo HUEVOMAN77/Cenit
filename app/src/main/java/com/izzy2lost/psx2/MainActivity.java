@@ -3004,7 +3004,7 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
             spScale.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
                 @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {
                     float scale = Math.max(1, Math.min(8, position + 1));
-                    if (Math.abs(prefs.getFloat("upscale_multiplier", PerfProfile.defaultUpscale(this)) - scale) < 0.001f) return;
+                    if (Math.abs(prefs.getFloat("upscale_multiplier", PerfProfile.defaultUpscale(MainActivity.this)) - scale) < 0.001f) return;
                     prefs.edit().putFloat("upscale_multiplier", scale).apply();
                     NativeApp.renderUpscalemultiplierAsync(scale);
                 }
