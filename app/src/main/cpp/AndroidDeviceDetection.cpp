@@ -263,6 +263,6 @@ namespace AndroidDeviceDetection
 			return true;
 		return false;
 	}
-
+}
 
 #endif // __ANDROID__
