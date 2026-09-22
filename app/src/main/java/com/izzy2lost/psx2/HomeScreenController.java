@@ -57,6 +57,9 @@ public final class HomeScreenController {
     // La primera biblioteca que llega entra escalonada; al volver de un juego o
     // refrescar se pinta sin animación, salvo que la cortinilla la vuelva a pedir.
     private boolean animateNextLibrary = true;
+    // Mientras la cortinilla está arriba no se anima nada: la función se corre al
+    // bajar el telón, no bajo la cortina.
+    private boolean entranceBlocked = false;
 
     private View root;
     private View continueSection;
@@ -172,22 +175,25 @@ public final class HomeScreenController {
 
     /** Consume el latch solo cuando tiene sentido animar: inicio visible y algo que mostrar. */
     private void paintEntranceIfNeeded() {
-        if (!animateNextLibrary || !isVisible() || entries.isEmpty()) return;
+        if (entranceBlocked || !animateNextLibrary || !isVisible() || entries.isEmpty()) return;
         animateNextLibrary = false;
         animateHeader();
         if (adapter != null) adapter.startEntranceAnimation();
     }
 
-    /** La cabecera sube suavemente: logo, nombre y estado, uno tras otro. */
+    public void setEntranceBlocked(boolean blocked) {
+        entranceBlocked = blocked;
+        if (!blocked) paintEntranceIfNeeded();
+    }
+
+    /** La cabecera sube suavemente: logo, nombre, lema y estado, uno tras otro. */
     private void animateHeader() {
-        View logo = root.findViewById(R.id.home_logo);
-        View wordmark = root.findViewById(R.id.home_wordmark);
-        View tagline = root.findViewById(R.id.home_tagline);
-        View status = root.findViewById(R.id.home_status_card);
-        rise(logo, 0);
-        rise(wordmark, 60);
-        rise(tagline, 130);
-        rise(status, 210);
+        rise(root.findViewById(R.id.home_logo), 0);
+        rise(root.findViewById(R.id.home_wordmark), 60);
+        rise(root.findViewById(R.id.home_tagline), 130);
+        rise(root.findViewById(R.id.home_status_card), 210);
+        rise(root.findViewById(R.id.home_continue_section), 260);
+        rise(root.findViewById(R.id.home_library_header), 320);
     }
 
     private void rise(@Nullable View view, int startDelayMs) {

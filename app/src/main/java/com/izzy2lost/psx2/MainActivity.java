@@ -918,7 +918,9 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         SharedPreferences prefs = getSharedPreferences("app_prefs", MODE_PRIVATE);
         if (prefs.getBoolean("intro_seen", false)) return false;
         if (mIntro == null) mIntro = new CenitIntroController();
+        if (mHomeScreen != null) mHomeScreen.setEntranceBlocked(true);
         boolean shown = mIntro.show(this, true, this::onIntroFinished);
+        if (!shown && mHomeScreen != null) mHomeScreen.setEntranceBlocked(false);
         if (!shown) {
             prefs.edit().putBoolean("intro_seen", true).apply();
         }
@@ -928,6 +930,7 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
     /** Cerrada la cortinilla: animar la biblioteca y dejar pasar al asistente. */
     private void onIntroFinished() {
         try {
+            if (mHomeScreen != null) mHomeScreen.setEntranceBlocked(false);
             getSharedPreferences("app_prefs", MODE_PRIVATE).edit()
                     .putBoolean("intro_seen", true).apply();
             if (isFinishing() || isDestroyed() || mHomeScreen == null) return;
@@ -2657,10 +2660,10 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
     private void showExitDialog() {
         new MaterialAlertDialogBuilder(this,
                 com.google.android.material.R.style.ThemeOverlay_Material3_MaterialAlertDialog)
-                .setCustomTitle(UiUtils.centeredDialogTitle(this, "Exit App"))
+                .setCustomTitle(UiUtils.centeredDialogTitle(this, "Salir de la app"))
                 .setMessage("¿Quieres salir de Cenit?")
                 .setIcon(android.R.drawable.ic_dialog_alert)
-                .setPositiveButton("Exit", (dialog, which) -> {
+                .setPositiveButton("Salir", (dialog, which) -> {
                     // Stop emulator first
                     NativeApp.shutdown();
                     // Quit the app
@@ -2669,7 +2672,7 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                     // As a fallback ensure process exit
                     System.exit(0);
                 })
-                .setNegativeButton("Cancel", null)
+                .setNegativeButton("Cancelar", null)
                 .show();
     }
 
@@ -3442,44 +3445,43 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
     }
 
     public void showAboutDialog() {
-        String aboutMessage = "Cenit - PlayStation 2 Emulator for Android\n\n" +
-                "This is an Android port of PCSX2, the renowned PlayStation 2 emulator.\n\n" +
-                "Based on:\n" +
+        String aboutMessage = "Cenit · Emulador de PlayStation 2 para Android\n\n" +
+                "Port para Android de PCSX2, el emulador de PS2 de referencia.\n\n" +
+                "Basado en:\n" +
                 "• PCSX2: https://github.com/PCSX2/pcsx2\n" +
                 "• PCSX2_ARM64: https://github.com/pontos2024/PCSX2_ARM64\n\n" +
-                "Cenit es una versión libre y gratuita, distribuida sin fines de lucro.\n\n" +
-                "Important:\n" +
-                "• No games or BIOS files are included\n" +
-                "• You must own original PlayStation 2 games and console\n" +
-                "• This emulator is for educational and preservation purposes\n\n" +
-                "Licensed under GNU General Public License v3.0\n" +
-                "Cenit source: https://github.com/HUEVOMAN77/Cenit\n" +
-                "Based on PSX2: https://github.com/izzy2lost/PSX2\n" +
-                "View full license: https://github.com/izzy2lost/PSX2/blob/master/LICENSE";
+                "Cenit es libre y gratuito, distribuido sin fines de lucro.\n\n" +
+                "Importante:\n" +
+                "• No incluye juegos ni BIOS\n" +
+                "• Debes ser dueño de tu consola y de tus juegos originales\n" +
+                "• Uso educativo y de preservación\n\n" +
+                "Licencia GNU GPL v3.0\n" +
+                "Código de Cenit: https://github.com/HUEVOMAN77/Cenit\n" +
+                "Base PSX2: https://github.com/izzy2lost/PSX2";
 
         new MaterialAlertDialogBuilder(this,
                 com.google.android.material.R.style.ThemeOverlay_Material3_MaterialAlertDialog)
                 .setTitle("Acerca de Cenit")
                 .setMessage(aboutMessage)
-                .setPositiveButton("OK", null)
-                .setNeutralButton("Privacy Policy", (dialog, which) -> {
+                .setPositiveButton("Entendido", null)
+                .setNeutralButton("Política de privacidad", (dialog, which) -> {
                     // Open Privacy Policy on GitHub Pages
                     Intent intent = new Intent(Intent.ACTION_VIEW);
                     intent.setData(Uri.parse("https://izzy2lost.github.io/PSX2/privacy-policy.html"));
                     try {
                         startActivity(intent);
                     } catch (Exception e) {
-                        Toast.makeText(this, "Could not open privacy policy link", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(this, "No se pudo abrir el enlace", Toast.LENGTH_SHORT).show();
                     }
                 })
-                .setNegativeButton("View License", (dialog, which) -> {
+                .setNegativeButton("Ver licencia", (dialog, which) -> {
                     // Open official GNU GPL v3 license
                     Intent intent = new Intent(Intent.ACTION_VIEW);
                     intent.setData(Uri.parse("https://www.gnu.org/licenses/gpl-3.0.html"));
                     try {
                         startActivity(intent);
                     } catch (Exception e) {
-                        Toast.makeText(this, "Could not open license link", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(this, "No se pudo abrir el enlace", Toast.LENGTH_SHORT).show();
                     }
                 })
                 .show();
