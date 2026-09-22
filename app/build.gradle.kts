@@ -40,7 +40,7 @@ if (hasReleaseSigning) {
 android {
     namespace = "com.izzy2lost.psx2"
     compileSdk = 36
-    ndkVersion = "30.0.15729638-beta2"
+    ndkVersion = "28.2.13676358"
 
     signingConfigs {
         create("release") {
