@@ -43,6 +43,8 @@
 #include <mutex>
 #ifdef __ANDROID__
 #include "SDL3/SDL.h"
+#include "AndroidDeviceDetection.h"
+#include <thread>
 #endif
 
 
@@ -119,6 +121,102 @@ static void ClearTouchscreenPointerUpdates()
 static int NormalizeAndroidRenderer(int renderer)
 {
     return renderer;
+}
+
+// ---------------------------------------------------------------------------
+// Hardware performance profile
+//
+// Applied once at startup, BEFORE the user's saved settings are pushed, so any
+// explicit choice in the drawer still wins. It only touches global baselines:
+// speedhacks (the big EE-side wins), GS defaults that stop the GPU waiting on
+// the CPU, and log verbosity. Per-game recommendations from GameIndex.yaml are
+// layered on top of this by the normal game-settings layer.
+// ---------------------------------------------------------------------------
+static void ApplyHardwarePerformanceProfile()
+{
+#ifdef __ANDROID__
+    const AndroidDeviceDetection::GPUVendor vendor = AndroidDeviceDetection::DetectGPUVendor();
+    const bool snapdragon = (vendor == AndroidDeviceDetection::GPUVendor::Qualcomm);
+    const bool high_end = snapdragon && AndroidDeviceDetection::IsHighEndSnapdragon();
+
+    Console.WriteLn("Perf profile: vendor=%d snapdragon=%d high_end=%d soc=%u",
+        static_cast<int>(vendor), static_cast<int>(snapdragon), static_cast<int>(high_end),
+        snapdragon ? AndroidDeviceDetection::GetQualcommSocModel() : 0u);
+
+    // Speedhacks: these are the recommendations from the official compatibility
+    // database for mid-tier ARM devices and they are what carries 30/60 fps on
+    // the Snapdragon 778G class.
+    //   IntcStat / WaitLoop  - safe on effectively every game, big EE win.
+    //   vuFlagHack           - microVU flag stall skip; needs no MTVU.
+    //   vu1Instant           - instant VU1 transfer when VU1 is not threaded.
+    //   fastCDVD             - removes fake disc-read latency from ISO reads.
+    //   vuThread (MTVU)      - the hardware-dependent defaults already enable it
+    //                          for >=3-core SoCs and turn on thread pinning on
+    //                          big.LITTLE (that is what keeps the EE/VU threads
+    //                          on the 778G's gold cores), so mirror it here.
+    s_settings_interface.SetBoolValue("EmuCore/Speedhacks", "IntcStat", true);
+    s_settings_interface.SetBoolValue("EmuCore/Speedhacks", "WaitLoop", true);
+    s_settings_interface.SetBoolValue("EmuCore/Speedhacks", "vuFlagHack", true);
+    s_settings_interface.SetBoolValue("EmuCore/Speedhacks", "vu1Instant", true);
+    s_settings_interface.SetBoolValue("EmuCore/Speedhacks", "fastCDVD", true);
+    s_settings_interface.SetBoolValue("EmuCore/Speedhacks", "vuThread",
+        std::thread::hardware_concurrency() >= 3);
+    // Neutral cycle rate/skip: cycle skipping can break audio/video timing and
+    // the 778G does not need it. Games that do are handled by GameIndex.yaml.
+    s_settings_interface.SetIntValue("EmuCore/Speedhacks", "EECycleRate", 0);
+    s_settings_interface.SetIntValue("EmuCore/Speedhacks", "EECycleSkip", 0);
+
+    // Recompilers must be on (they are by default) — fastmem is the single
+    // biggest EE memory win on arm64; assert it rather than trust the default.
+    s_settings_interface.SetBoolValue("EmuCore/CPU/Recompiler", "EnableEE", true);
+    s_settings_interface.SetBoolValue("EmuCore/CPU/Recompiler", "EnableIOP", true);
+    s_settings_interface.SetBoolValue("EmuCore/CPU/Recompiler", "EnableVU0", true);
+    s_settings_interface.SetBoolValue("EmuCore/CPU/Recompiler", "EnableVU1", true);
+    s_settings_interface.SetBoolValue("EmuCore/CPU/Recompiler", "EnableFastmem", true);
+    s_settings_interface.SetBoolValue("EmuCore/CPU/Recompiler", "EnableVUProgramCache", true);
+
+    // GS: stop the CPU spinning on GPU readbacks (huge on Adreno). The hardware
+    // renderer default download mode already keeps MTGS off the EE's critical
+    // path; per-game UserHacks come from GameIndex.yaml via the game-settings
+    // layer, so nothing manual is set here on purpose.
+    s_settings_interface.SetBoolValue("EmuCore/GS", "HWSpinCPUForReadbacks", false);
+    s_settings_interface.SetBoolValue("EmuCore/GS", "HWSpinGPUForReadbacks", false);
+    s_settings_interface.SetBoolValue("EmuCore/GS", "SkipDuplicateFrames", true);
+
+    // Renderer/upscale are NOT set here: MainActivity pushes the user's saved
+    // values after initialize() (applyGlobalSettingsBatch), so a native write
+    // would just be overwritten. The device tier is exposed via
+    // getDevicePerformanceTier() and Java uses it as the FIRST-RUN default for
+    // upscale_multiplier instead.
+
+    // Logging: EnableSystemConsole+EnableVerbose ship on and dump every log line
+    // through a JNI call per line, which is measurable on its own at 60 fps.
+    // File logging defaults to ON as well (an emulog.txt write per line). Keep
+    // errors only; the HUD switch in the drawer still shows OSD stats.
+    s_settings_interface.SetBoolValue("Logging", "EnableVerbose", false);
+    s_settings_interface.SetBoolValue("Logging", "EnableSystemConsole", false);
+    s_settings_interface.SetBoolValue("Logging", "EnableTimestamps", false);
+    s_settings_interface.SetBoolValue("Logging", "EnableFileLogging", false);
+
+    // Audio: 150/40 is what the defaults use; keep the buffer but let it mix on
+    // a real-time thread (Oboe already does) — nothing to write, left documented.
+#endif
+}
+
+// Device performance tier for first-run defaults (see PerfProfile on the Java
+// side): 2 = Snapdragon 8-series or 7-series >= ~765 (778G class), 1 = other
+// Snapdragon / mid hardware, 0 = everything else (Mali, unknown).
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getDevicePerformanceTier(JNIEnv*, jclass)
+{
+#ifdef __ANDROID__
+    if (AndroidDeviceDetection::DetectGPUVendor() == AndroidDeviceDetection::GPUVendor::Qualcomm)
+        return AndroidDeviceDetection::IsHighEndSnapdragon() ? 2 : 1;
+    return 0;
+#else
+    return 2;
+#endif
 }
 
 // Fallback JNI access for content:// when SDL's Android env is not yet ready
@@ -481,6 +579,12 @@ Java_com_izzy2lost_psx2_NativeApp_initialize(JNIEnv *env, jclass clazz,
         si.SetBoolValue("Achievements", "SpectatorMode", false);
         si.SetBoolValue("Achievements", "UnofficialTestMode", false);
     }
+
+    // Hardware-tuned baseline: speedhacks, readback spins, log noise and upscale
+    // for this device class. Runs before LoadStartupSettings() so the values land
+    // in EmuConfig too, and before Java pushes the user's saved prefs, so any
+    // explicit choice in the drawer still overrides everything set here.
+    ApplyHardwarePerformanceProfile();
 
     VMManager::Internal::LoadStartupSettings();
     

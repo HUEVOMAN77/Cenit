@@ -1858,11 +1858,17 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
 
     private void applySavedSettings() {
         SharedPreferences prefs = getSharedPreferences("app_prefs", MODE_PRIVATE);
+        // Primer arranque: la escala inicial sigue al hardware (2x en gama alta
+        // Snapdragon como el 778G, 1x en Mali). En cuanto el usuario toca la
+        // escala en los ajustes, ese valor manda para siempre.
+        if (!prefs.contains("upscale_multiplier")) {
+            prefs.edit().putFloat("upscale_multiplier", PerfProfile.defaultUpscale(this)).apply();
+        }
         // Apply synchronously before boot, so the first GS open sees the saved values.
         // Game-specific overrides are loaded by runVMThread after this global baseline.
         NativeApp.applyGlobalSettingsBatch(
                 prefs.getInt("renderer", -1),
-                prefs.getFloat("upscale_multiplier", 1.0f),
+                prefs.getFloat("upscale_multiplier", PerfProfile.defaultUpscale(this)),
                 prefs.getInt("aspect_ratio", 1),
                 prefs.getInt("blending_accuracy", 1),
                 prefs.getBoolean("widescreen_patches", true),
@@ -2991,14 +2997,14 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
             }
             ArrayAdapter<?> adapter = (ArrayAdapter<?>) spScale.getAdapter();
             if (adapter != null) {
-                float savedScale = prefs.getFloat("upscale_multiplier", 1.0f);
+                float savedScale = prefs.getFloat("upscale_multiplier", PerfProfile.defaultUpscale(this));
                 int scaleIndex = Math.max(0, Math.min(adapter.getCount() - 1, Math.round(savedScale) - 1));
                 spScale.setSelection(scaleIndex, false);
             }
             spScale.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
                 @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {
                     float scale = Math.max(1, Math.min(8, position + 1));
-                    if (Math.abs(prefs.getFloat("upscale_multiplier", 1.0f) - scale) < 0.001f) return;
+                    if (Math.abs(prefs.getFloat("upscale_multiplier", PerfProfile.defaultUpscale(this)) - scale) < 0.001f) return;
                     prefs.edit().putFloat("upscale_multiplier", scale).apply();
                     NativeApp.renderUpscalemultiplierAsync(scale);
                 }
@@ -3229,7 +3235,7 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
             try {
                 Spinner spScale = header.findViewById(R.id.drawer_sp_scale);
                 if (spScale != null && spScale.getAdapter() != null) {
-                    float savedScale = prefs.getFloat("upscale_multiplier", 1.0f);
+                    float savedScale = prefs.getFloat("upscale_multiplier", PerfProfile.defaultUpscale(this));
                     ArrayAdapter<?> scaleAdapter = (ArrayAdapter<?>) spScale.getAdapter();
                     int scaleIndex = Math.max(0, Math.min(scaleAdapter.getCount() - 1, Math.round(savedScale) - 1));
                     spScale.setSelection(scaleIndex, false);

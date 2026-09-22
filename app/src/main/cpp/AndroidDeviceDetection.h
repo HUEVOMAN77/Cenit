@@ -35,6 +35,14 @@ namespace AndroidDeviceDetection
 
 	// Get GPU renderer string (requires GL context or Vulkan device)
 	std::string GetGPURenderer();
+
+	// Qualcomm SoC model number parsed from ro.soc.model / ro.hardware, e.g. 778.
+	// Returns 0 when unknown. Used to size CPU/GPU profiles per generation.
+	unsigned GetQualcommSocModel();
+
+	// True when the SoC is Adreno-class strong enough to run hardware GS at 2x
+	// comfortably (SD 8-series or SD 778+).
+	bool IsHighEndSnapdragon();
 }
 
 #endif // __ANDROID__

@@ -51,14 +51,25 @@ android {
                 keyPassword = keystoreProperties.getProperty("keyPassword")
             }
         }
+        // Cenit ships free and unofficial: the "debug" keystore is committed to
+        // the repo so CI signs every build with the SAME key. Android then lets
+        // a new version install over the previous one instead of failing with
+        // INSTALL_FAILED_UPDATE_INCOMPATIBLE, which the ephemeral AGP-generated
+        // debug key made impossible.
+        getByName("debug") {
+            storeFile = rootProject.file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     defaultConfig {
         applicationId = "com.izzy2lost.psx2"
         minSdk = 26
         targetSdk = 36
-        versionCode = 35
-        versionName = "0.5.0"
+        versionCode = 36
+        versionName = "0.6.0"
 
         externalNativeBuild {
             cmake {
@@ -105,7 +116,12 @@ android {
         debug {
             isMinifyEnabled = false
             isShrinkResources = false
-            isDebuggable = true
+            // Not debuggable: with FLAG_DEBUGGABLE set, ART refuses to AOT/JIT-compile
+            // the app's Java code (input polling, UI updates) and keeps a debugger
+            // watcher alive. The heavy lifting is native and already Release, but
+            // this removes what little the framework throttles on the UI side, and
+            // the CI debug keystore keeps installs upgradable either way.
+            isDebuggable = false
         }
     }
 

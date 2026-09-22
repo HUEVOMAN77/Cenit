@@ -851,14 +851,14 @@ public class GamesCoverDialogFragment extends DialogFragment {
             }
             android.widget.ArrayAdapter<?> adapter = (android.widget.ArrayAdapter<?>) spScale.getAdapter();
             if (adapter != null) {
-                float savedScale = prefs.getFloat("upscale_multiplier", 1.0f);
+                float savedScale = prefs.getFloat("upscale_multiplier", PerfProfile.defaultUpscale(requireContext()));
                 int scaleIndex = Math.max(0, Math.min(adapter.getCount() - 1, Math.round(savedScale) - 1));
                 spScale.setSelection(scaleIndex, false);
             }
             spScale.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
                 @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {
                     float scale = Math.max(1, Math.min(8, position + 1));
-                    if (Math.abs(prefs.getFloat("upscale_multiplier", 1.0f) - scale) < 0.001f) return;
+                    if (Math.abs(prefs.getFloat("upscale_multiplier", PerfProfile.defaultUpscale(requireContext())) - scale) < 0.001f) return;
                     prefs.edit().putFloat("upscale_multiplier", scale).apply();
                     NativeApp.renderUpscalemultiplierAsync(scale);
                 }
@@ -1853,7 +1853,7 @@ public class GamesCoverDialogFragment extends DialogFragment {
 
             android.widget.Spinner spScale = header.findViewById(R.id.drawer_sp_scale);
             if (spScale != null && spScale.getAdapter() != null) {
-                float savedScale = prefs.getFloat("upscale_multiplier", 1.0f);
+                float savedScale = prefs.getFloat("upscale_multiplier", PerfProfile.defaultUpscale(requireContext()));
                 android.widget.ArrayAdapter<?> scaleAdapter = (android.widget.ArrayAdapter<?>) spScale.getAdapter();
                 int scaleIndex = Math.max(0, Math.min(scaleAdapter.getCount() - 1, Math.round(savedScale) - 1));
                 spScale.setSelection(scaleIndex);

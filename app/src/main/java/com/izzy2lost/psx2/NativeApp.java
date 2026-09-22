@@ -372,6 +372,10 @@ public class NativeApp {
                                                    String japanBios, String arcadeBios);
     public static native boolean isVMActive();
 
+    // 0 = Mali/other, 1 = mid Snapdragon, 2 = high-end Snapdragon (778G+).
+    // Drives the first-run upscale default and the native speedhacks profile.
+    public static native int getDevicePerformanceTier();
+
 	public static native void pause();
 	public static native void resume();
 	public static native boolean isPaused();
