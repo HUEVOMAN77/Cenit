@@ -107,4 +107,68 @@
         <item name="android:paddingEnd">14dp</item>
         <item name="android:minHeight">48dp</item>
     </style>
+
+    <!-- ============ Filas del panel de ajustes del inicio ============ -->
+    <style name="Cenit.SettingsRow" parent="">
+        <item name="android:orientation">horizontal</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:background">@drawable/cenit_row_bg</item>
+        <item name="android:foreground">?attr/selectableItemBackground</item>
+        <item name="android:padding">14dp</item>
+        <item name="android:layout_marginBottom">10dp</item>
+    </style>
+
+    <style name="Cenit.SettingsRowIcon" parent="">
+        <item name="android:layout_width">22dp</item>
+        <item name="android:layout_height">22dp</item>
+        <item name="android:layout_marginEnd">14dp</item>
+        <item name="tint">@color/cenit_neon_blue</item>
+    </style>
+
+    <style name="Cenit.SettingsRowText" parent="">
+        <item name="android:orientation">vertical</item>
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_weight">1</item>
+    </style>
+
+    <style name="Cenit.SettingsRowTitle" parent="">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textColor">@color/cenit_settings_text</item>
+        <item name="android:textSize">15sp</item>
+    </style>
+
+    <style name="Cenit.SettingsRowSub" parent="">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">2dp</item>
+        <item name="android:textColor">@color/cenit_settings_muted</item>
+        <item name="android:textSize">12sp</item>
+    </style>
+
+    <!-- ============ Barra de pestañas inferior ============ -->
+    <style name="Cenit.BottomTab" parent="">
+        <item name="android:orientation">vertical</item>
+        <item name="android:gravity">center</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:background">?attr/selectableItemBackgroundBorderless</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+    </style>
+
+    <style name="Cenit.BottomTabIcon" parent="">
+        <item name="android:layout_width">24dp</item>
+        <item name="android:layout_height">24dp</item>
+        <item name="tint">@color/home_tab_tint</item>
+    </style>
+
+    <style name="Cenit.BottomTabLabel" parent="">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">3dp</item>
+        <item name="android:textColor">@color/home_tab_tint</item>
+        <item name="android:textSize">11sp</item>
+        <item name="android:includeFontPadding">false</item>
+    </style>
 </resources>

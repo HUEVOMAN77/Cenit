@@ -908,6 +908,26 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                 DrawerLayout drawer = findViewById(R.id.drawer_layout);
                 if (drawer != null) drawer.openDrawer(androidx.core.view.GravityCompat.START);
             }
+
+            @Override
+            public void onImportBios() {
+                showBiosPrompt();
+            }
+
+            @Override
+            public void onPickDataFolder() {
+                pickDataRootFolder();
+            }
+
+            @Override
+            public void onOpenGamesManager() {
+                openGamesDialog();
+            }
+
+            @Override
+            public void onRefreshLibrary() {
+                refreshGameLibraryCacheAsync();
+            }
         });
         applyHomeScreenState("created");
         refreshHomeScreenData();

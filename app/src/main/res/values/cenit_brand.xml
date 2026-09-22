@@ -15,4 +15,10 @@
     <color name="cenit_settings_divider">#16202E</color>
     <color name="cenit_settings_text">#E8F1FB</color>
     <color name="cenit_settings_muted">#8FA3BC</color>
+
+    <!-- Inicio: negro puro y grises de la maqueta -->
+    <color name="home_black">#000000</color>
+    <color name="home_muted">#9AA3AD</color>
+    <color name="home_surface">#10151B</color>
+    <color name="home_divider">#1A222C</color>
 </resources>

@@ -1,305 +1,455 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<!--
+  Pantalla de inicio de Cenit, réplica de la captura:
+  header negro (logo + Cenit / PS2 EMULATOR + buscar + 3 puntos),
+  grilla de cajas PS2 de 4 columnas y barra inferior
+  Inicio · Biblioteca · Carpetas · Ajustes.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/home_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/md_theme_background"
-    android:clipToPadding="false"
-    android:fillViewport="true">
+    android:background="@color/home_black"
+    android:orientation="vertical">
 
+    <!-- ============ HEADER ============ -->
     <LinearLayout
+        android:id="@+id/home_header"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical">
+        android:background="@color/home_black"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="14dp"
+        android:paddingTop="14dp"
+        android:paddingEnd="6dp"
+        android:paddingBottom="10dp">
 
-        <!-- Encabezado -->
-        <FrameLayout
-            android:id="@+id/home_header"
-            android:layout_width="match_parent"
+        <ImageView
+            android:id="@+id/home_logo"
+            android:layout_width="42dp"
+            android:layout_height="42dp"
+            android:layout_marginEnd="10dp"
+            android:contentDescription="Cenit"
+            android:src="@drawable/cenit_logo" />
+
+        <LinearLayout
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:background="@drawable/bg_home_header"
-            android:minHeight="210dp"
-            android:paddingStart="20dp"
-            android:paddingTop="34dp"
-            android:paddingEnd="20dp"
-            android:paddingBottom="22dp">
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/home_wordmark"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:text="Cenit"
+                android:textColor="@android:color/white"
+                android:textSize="26sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/home_tagline"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:letterSpacing="0.22"
+                android:text="PS2 EMULATOR"
+                android:textColor="#9AA3AD"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <ImageButton
+            android:id="@+id/btn_home_search"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Buscar juegos"
+            android:padding="12dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/search_24px"
+            app:tint="@android:color/white" />
+
+        <ImageButton
+            android:id="@+id/btn_home_overflow"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Más opciones"
+            android:padding="12dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/more_vert_24px"
+            app:tint="@android:color/white" />
+    </LinearLayout>
+
+    <!-- Aviso fino de configuración pendiente (solo si falta algo) -->
+    <LinearLayout
+        android:id="@+id/home_status_card"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#10151B"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="8dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/home_status_text"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Comprobando configuración…"
+            android:textColor="#C7D0DA"
+            android:textSize="12sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_home_setup"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minHeight="0dp"
+            android:text="Configurar"
+            android:textColor="@color/cenit_neon_blue"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <!-- Fila de búsqueda (aparece al tocar la lupa) -->
+    <LinearLayout
+        android:id="@+id/home_search_row"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#0B0E13"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingTop="6dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="6dp"
+        android:visibility="gone">
+
+        <EditText
+            android:id="@+id/home_search_input"
+            android:layout_width="0dp"
+            android:layout_height="42dp"
+            android:layout_weight="1"
+            android:background="@drawable/cenit_search_field"
+            android:drawableStart="@drawable/search_24px"
+            android:drawablePadding="10dp"
+            android:drawableTint="#6B7683"
+            android:hint="Buscar juego…"
+            android:imeOptions="actionSearch"
+            android:importantForAutofill="no"
+            android:inputType="text"
+            android:maxLines="1"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@android:color/white"
+            android:textColorHint="#6B7683"
+            android:textSize="14sp" />
+    </LinearLayout>
+
+    <!-- ============ CONTENIDO ============ -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <androidx.core.widget.NestedScrollView
+            android:id="@+id/home_scroll"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@color/home_black"
+            android:clipToPadding="false"
+            android:fillViewport="true"
+            android:paddingBottom="12dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical">
 
-                <LinearLayout
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/home_grid"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
+                    android:layout_marginStart="7dp"
+                    android:layout_marginTop="8dp"
+                    android:layout_marginEnd="7dp"
+                    android:nestedScrollingEnabled="false"
+                    android:overScrollMode="never" />
+
+                <LinearLayout
+                    android:id="@+id/home_empty"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_horizontal"
+                    android:orientation="vertical"
+                    android:paddingTop="72dp"
+                    android:paddingBottom="40dp"
+                    android:visibility="gone">
 
                     <ImageView
-                        android:id="@+id/home_logo"
-                        android:layout_width="44dp"
-                        android:layout_height="44dp"
-                        android:layout_marginEnd="12dp"
-                        android:contentDescription="Cenit"
-                        android:src="@drawable/cenit_logo" />
+                        android:layout_width="54dp"
+                        android:layout_height="54dp"
+                        android:alpha="0.35"
+                        android:contentDescription="@null"
+                        android:src="@drawable/stadia_controller_24px"
+                        app:tint="#9AA3AD" />
 
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
-
-                        <TextView
-                            android:id="@+id/home_wordmark"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:letterSpacing="0.32"
-                            android:text="CENIT"
-                            android:textColor="@color/md_theme_onSurface"
-                            android:textSize="30sp"
-                            android:textStyle="bold" />
-
-                        <TextView
-                            android:id="@+id/home_tagline"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="2dp"
-                            android:alpha="0.75"
-                            android:letterSpacing="0.06"
-                            android:text="Emulador de PlayStation 2"
-                            android:textColor="@color/md_theme_onSurface"
-                            android:textSize="13sp" />
-                    </LinearLayout>
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btn_home_menu"
-                        style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
-                        android:layout_width="46dp"
-                        android:layout_height="46dp"
-                        android:contentDescription="Ajustes"
-                        android:insetBottom="0dp"
-                        android:insetTop="0dp"
-                        app:icon="@drawable/settings_24px"
-                        app:iconGravity="textStart"
-                        app:iconPadding="0dp"
-                        app:iconSize="22dp" />
-                </LinearLayout>
-
-                <!-- Estado de la configuración -->
-                <com.google.android.material.card.MaterialCardView
-                    android:id="@+id/home_status_card"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="18dp"
-                    app:cardBackgroundColor="#26000000"
-                    app:cardCornerRadius="16dp"
-                    app:cardElevation="0dp"
-                    app:strokeColor="#33FFFFFF"
-                    app:strokeWidth="1dp">
-
-                    <LinearLayout
+                    <TextView
+                        android:id="@+id/home_empty_text"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal"
-                        android:paddingStart="14dp"
-                        android:paddingTop="10dp"
-                        android:paddingEnd="6dp"
-                        android:paddingBottom="10dp">
-
-                        <TextView
-                            android:id="@+id/home_status_text"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="Comprobando configuración…"
-                            android:textColor="@color/md_theme_onSurface"
-                            android:textSize="12sp" />
-
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/btn_home_setup"
-                            style="@style/Widget.Material3.Button.TextButton"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Configurar"
-                            android:textSize="12sp"
-                            android:visibility="gone" />
-                    </LinearLayout>
-                </com.google.android.material.card.MaterialCardView>
-            </LinearLayout>
-        </FrameLayout>
-
-        <!-- Continuar jugando -->
-        <LinearLayout
-            android:id="@+id/home_continue_section"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:paddingStart="16dp"
-            android:paddingTop="18dp"
-            android:paddingEnd="16dp"
-            android:visibility="gone">
-
-            <TextView
-                style="@style/Cenit.Home.SectionTitle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="4dp"
-                android:text="Continuar" />
-
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/home_continue_card"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:clickable="true"
-                android:focusable="true"
-                app:cardBackgroundColor="@color/md_theme_surfaceContainer"
-                app:cardCornerRadius="18dp"
-                app:cardElevation="0dp"
-                app:strokeColor="#1AFFFFFF"
-                app:strokeWidth="1dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal"
-                    android:padding="12dp">
-
-                    <com.google.android.material.imageview.ShapeableImageView
-                        android:id="@+id/home_continue_cover"
-                        android:layout_width="52dp"
-                        android:layout_height="80dp"
-                        android:contentDescription="@null"
-                        android:scaleType="centerCrop"
-                        app:shapeAppearanceOverlay="@style/ShapeAppearance.Cenit.Cover" />
-
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="14dp"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
-
-                        <TextView
-                            android:id="@+id/home_continue_title"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:ellipsize="end"
-                            android:maxLines="1"
-                            android:textColor="@color/md_theme_onSurface"
-                            android:textSize="15sp"
-                            android:textStyle="bold" />
-
-                        <TextView
-                            android:id="@+id/home_continue_subtitle"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="2dp"
-                            android:alpha="0.7"
-                            android:ellipsize="end"
-                            android:maxLines="1"
-                            android:textColor="@color/md_theme_onSurface"
-                            android:textSize="12sp" />
-                    </LinearLayout>
+                        android:layout_marginTop="16dp"
+                        android:gravity="center"
+                        android:paddingStart="32dp"
+                        android:paddingEnd="32dp"
+                        android:text="Todavía no hay juegos. Añade una carpeta con tus copias de PS2 (ISO, CHD o CSO)."
+                        android:textColor="#8A949F"
+                        android:textSize="13sp" />
 
                     <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btn_home_play"
-                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:id="@+id/btn_home_empty_action"
+                        style="@style/Widget.Material3.Button.TextButton"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:text="Jugar"
-                        app:icon="@drawable/play_circle_24px" />
+                        android:layout_marginTop="10dp"
+                        android:text="Añadir carpeta de juegos"
+                        android:textColor="@color/cenit_neon_blue" />
                 </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-        </LinearLayout>
+            </LinearLayout>
+        </androidx.core.widget.NestedScrollView>
 
-        <!-- Biblioteca -->
+        <!-- ============ PESTAÑA AJUSTES (panel propio) ============ -->
+        <ScrollView
+            android:id="@+id/home_settings_panel"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@color/home_black"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:layout_marginBottom="10dp"
+                    android:text="Configuración"
+                    android:textColor="@android:color/white"
+                    android:textSize="20sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:id="@+id/home_set_bios"
+                    style="@style/Cenit.SettingsRow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content">
+
+                    <ImageView
+                        style="@style/Cenit.SettingsRowIcon"
+                        android:src="@drawable/memory_24px" />
+
+                    <LinearLayout style="@style/Cenit.SettingsRowText">
+
+                        <TextView
+                            style="@style/Cenit.SettingsRowTitle"
+                            android:text="Importar BIOS" />
+
+                        <TextView
+                            android:id="@+id/home_set_bios_sub"
+                            style="@style/Cenit.SettingsRowSub"
+                            android:text="Necesaria para iniciar cualquier juego" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/home_set_data"
+                    style="@style/Cenit.SettingsRow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content">
+
+                    <ImageView
+                        style="@style/Cenit.SettingsRowIcon"
+                        android:src="@drawable/data_table_24px" />
+
+                    <LinearLayout style="@style/Cenit.SettingsRowText">
+
+                        <TextView
+                            style="@style/Cenit.SettingsRowTitle"
+                            android:text="Carpeta de datos" />
+
+                        <TextView
+                            android:id="@+id/home_set_data_sub"
+                            style="@style/Cenit.SettingsRowSub"
+                            android:text="Partidas, estados y configuración" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/home_set_games"
+                    style="@style/Cenit.SettingsRow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content">
+
+                    <ImageView
+                        style="@style/Cenit.SettingsRowIcon"
+                        android:src="@drawable/folder_24px" />
+
+                    <LinearLayout style="@style/Cenit.SettingsRowText">
+
+                        <TextView
+                            style="@style/Cenit.SettingsRowTitle"
+                            android:text="Carpetas de juegos" />
+
+                        <TextView
+                            android:id="@+id/home_set_games_sub"
+                            style="@style/Cenit.SettingsRowSub"
+                            android:text="Añade o cambia las carpetas de tu biblioteca" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/home_set_setup"
+                    style="@style/Cenit.SettingsRow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content">
+
+                    <ImageView
+                        style="@style/Cenit.SettingsRowIcon"
+                        android:src="@drawable/settings_24px" />
+
+                    <LinearLayout style="@style/Cenit.SettingsRowText">
+
+                        <TextView
+                            style="@style/Cenit.SettingsRowTitle"
+                            android:text="Asistente de configuración" />
+
+                        <TextView
+                            style="@style/Cenit.SettingsRowSub"
+                            android:text="Revisar los pasos iniciales" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/home_set_advanced"
+                    style="@style/Cenit.SettingsRow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content">
+
+                    <ImageView
+                        style="@style/Cenit.SettingsRowIcon"
+                        android:src="@drawable/tune_24px" />
+
+                    <LinearLayout style="@style/Cenit.SettingsRowText">
+
+                        <TextView
+                            style="@style/Cenit.SettingsRowTitle"
+                            android:text="Ajustes avanzados" />
+
+                        <TextView
+                            style="@style/Cenit.SettingsRowSub"
+                            android:text="Motor gráfico, imagen, audio, parches y más" />
+                    </LinearLayout>
+                </LinearLayout>
+            </LinearLayout>
+        </ScrollView>
+    </FrameLayout>
+
+    <!-- ============ BARRA INFERIOR ============ -->
+    <LinearLayout
+        android:id="@+id/home_bottom_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/home_black"
+        android:orientation="vertical">
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#1A222C" />
+
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:paddingStart="16dp"
-            android:paddingTop="22dp"
-            android:paddingEnd="16dp">
+            android:layout_height="64dp"
+            android:orientation="horizontal">
 
             <LinearLayout
-                android:id="@+id/home_library_header"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <TextView
-                    android:id="@+id/home_library_title"
-                    style="@style/Cenit.Home.SectionTitle"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="4dp"
-                    android:layout_weight="1"
-                    android:text="Biblioteca" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btn_home_add_folder"
-                    style="@style/Widget.Material3.Button.TextButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Añadir carpeta"
-                    android:textSize="12sp"
-                    app:icon="@drawable/create_new_folder_24px"
-                    app:iconSize="18dp" />
-            </LinearLayout>
-
-            <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/home_grid"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:layout_marginBottom="12dp"
-                android:nestedScrollingEnabled="false"
-                android:overScrollMode="never" />
-
-            <LinearLayout
-                android:id="@+id/home_empty"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_horizontal"
-                android:orientation="vertical"
-                android:paddingTop="26dp"
-                android:paddingBottom="40dp"
-                android:visibility="gone">
+                android:id="@+id/tab_home"
+                style="@style/Cenit.BottomTab"
+                android:layout_width="0dp"
+                android:layout_height="match_parent">
 
                 <ImageView
-                    android:layout_width="56dp"
-                    android:layout_height="56dp"
-                    android:alpha="0.45"
-                    android:contentDescription="@null"
-                    android:src="@drawable/stadia_controller_24px"
-                    app:tint="@color/md_theme_onSurface" />
+                    android:id="@+id/tab_home_icon"
+                    style="@style/Cenit.BottomTabIcon"
+                    android:src="@drawable/home_24px" />
 
                 <TextView
-                    android:id="@+id/home_empty_text"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    android:alpha="0.8"
-                    android:gravity="center"
-                    android:text="Todavía no hay juegos. Añade una carpeta con tus copias de PS2 (ISO, CHD o CSO)."
-                    android:textColor="@color/md_theme_onSurface"
-                    android:textSize="13sp" />
+                    android:id="@+id/tab_home_label"
+                    style="@style/Cenit.BottomTabLabel"
+                    android:text="Inicio" />
+            </LinearLayout>
 
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btn_home_empty_action"
-                    style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    android:text="Elegir carpeta de juegos"
-                    app:icon="@drawable/create_new_folder_24px" />
+            <LinearLayout
+                android:id="@+id/tab_library"
+                style="@style/Cenit.BottomTab"
+                android:layout_width="0dp"
+                android:layout_height="match_parent">
+
+                <ImageView
+                    android:id="@+id/tab_library_icon"
+                    style="@style/Cenit.BottomTabIcon"
+                    android:src="@drawable/apps_24px" />
+
+                <TextView
+                    android:id="@+id/tab_library_label"
+                    style="@style/Cenit.BottomTabLabel"
+                    android:text="Biblioteca" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tab_folders"
+                style="@style/Cenit.BottomTab"
+                android:layout_width="0dp"
+                android:layout_height="match_parent">
+
+                <ImageView
+                    android:id="@+id/tab_folders_icon"
+                    style="@style/Cenit.BottomTabIcon"
+                    android:src="@drawable/folder_24px" />
+
+                <TextView
+                    android:id="@+id/tab_folders_label"
+                    style="@style/Cenit.BottomTabLabel"
+                    android:text="Carpetas" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tab_settings"
+                style="@style/Cenit.BottomTab"
+                android:layout_width="0dp"
+                android:layout_height="match_parent">
+
+                <ImageView
+                    android:id="@+id/tab_settings_icon"
+                    style="@style/Cenit.BottomTabIcon"
+                    android:src="@drawable/settings_24px" />
+
+                <TextView
+                    android:id="@+id/tab_settings_label"
+                    style="@style/Cenit.BottomTabLabel"
+                    android:text="Ajustes" />
             </LinearLayout>
         </LinearLayout>
     </LinearLayout>
-</androidx.core.widget.NestedScrollView>
+</LinearLayout>

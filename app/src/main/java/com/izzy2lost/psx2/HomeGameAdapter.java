@@ -5,7 +5,6 @@ import android.graphics.drawable.Drawable;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -17,14 +16,15 @@ import com.bumptech.glide.load.engine.DiskCacheStrategy;
 import com.google.android.material.imageview.ShapeableImageView;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.List;
 
 /** Cuadrícula de la pantalla de inicio. No repite ítems: la biblioteca es finita. */
 public class HomeGameAdapter extends RecyclerView.Adapter<HomeGameAdapter.VH> {
 
     public interface Callback {
-        void onGameClick(int position);
-        void onGameLongClick(int position);
+        void onGameClick(Entry entry);
+        void onGameLongClick(Entry entry);
     }
 
     /** Entrada de la biblioteca tal y como la resuelve el escáner de carátulas. */
@@ -41,7 +41,11 @@ public class HomeGameAdapter extends RecyclerView.Adapter<HomeGameAdapter.VH> {
     }
 
     private final Context context;
-    private final List<Entry> entries;
+    // La lista maestra es la biblioteca completa; "shown" es lo que pinta la
+    // cuadrícula tras aplicar el filtro de búsqueda.
+    private final List<Entry> master = new ArrayList<>();
+    private final List<Entry> shown = new ArrayList<>();
+    private String query = "";
     private final Callback callback;
     private final int duration;
     private final int stagger;
@@ -51,14 +55,43 @@ public class HomeGameAdapter extends RecyclerView.Adapter<HomeGameAdapter.VH> {
     // tarjetas entran escalonadas, pero al reciclearse durante el scroll no.
     private long animationBatchId = -1L;
 
-    public HomeGameAdapter(Context context, List<Entry> entries, Callback callback) {
+    public HomeGameAdapter(Context context, Callback callback) {
         this.context = context;
-        this.entries = entries;
         this.callback = callback;
         float density = context.getResources().getDisplayMetrics().density;
         duration = (int) (340 * density);
         stagger = (int) (45 * density);
         riseDp = 18f * density;
+    }
+
+    /** Reemplaza la biblioteca completa y repinta respetando la búsqueda activa. */
+    public void setEntries(@Nullable List<Entry> entries) {
+        master.clear();
+        if (entries != null) master.addAll(entries);
+        rebuildShown();
+        notifyDataSetChanged();
+    }
+
+    /** Filtra por título. Cadena vacía o nula muestra todo. */
+    public void setFilter(@Nullable String text) {
+        String next = text == null ? "" : text.trim().toLowerCase(java.util.Locale.ROOT);
+        if (next.equals(query)) return;
+        query = next;
+        rebuildShown();
+        notifyDataSetChanged();
+    }
+
+    private void rebuildShown() {
+        shown.clear();
+        if (query.isEmpty()) {
+            shown.addAll(master);
+            return;
+        }
+        for (Entry e : master) {
+            if (e.title != null && e.title.toLowerCase(java.util.Locale.ROOT).contains(query)) {
+                shown.add(e);
+            }
+        }
     }
 
     /**
@@ -80,18 +113,19 @@ public class HomeGameAdapter extends RecyclerView.Adapter<HomeGameAdapter.VH> {
 
     @Override
     public void onBindViewHolder(@NonNull VH holder, int position) {
-        Entry entry = entries.get(position);
-        holder.title.setText(entry.title);
+        Entry entry = shown.get(position);
         loadImage(entry.coverPath, entry.coverUrl, holder.cover);
 
         holder.itemView.setOnClickListener(v -> {
             int pos = holder.getBindingAdapterPosition();
-            if (pos != RecyclerView.NO_POSITION && callback != null) callback.onGameClick(pos);
+            if (pos != RecyclerView.NO_POSITION && pos < shown.size() && callback != null) {
+                callback.onGameClick(shown.get(pos));
+            }
         });
         holder.itemView.setOnLongClickListener(v -> {
             int pos = holder.getBindingAdapterPosition();
-            if (pos != RecyclerView.NO_POSITION && callback != null) {
-                callback.onGameLongClick(pos);
+            if (pos != RecyclerView.NO_POSITION && pos < shown.size() && callback != null) {
+                callback.onGameLongClick(shown.get(pos));
                 return true;
             }
             return false;
@@ -170,17 +204,15 @@ public class HomeGameAdapter extends RecyclerView.Adapter<HomeGameAdapter.VH> {
 
     @Override
     public int getItemCount() {
-        return entries.size();
+        return shown.size();
     }
 
     static class VH extends RecyclerView.ViewHolder {
         final ShapeableImageView cover;
-        final TextView title;
 
         VH(@NonNull View itemView) {
             super(itemView);
             cover = itemView.findViewById(R.id.image_cover);
-            title = itemView.findViewById(R.id.text_title);
         }
     }
 }

@@ -2,20 +2,20 @@ package com.izzy2lost.psx2;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.text.Editable;
 import android.text.TextUtils;
+import android.text.TextWatcher;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.EditText;
+import android.widget.ImageButton;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
-
-import com.bumptech.glide.Glide;
-import com.bumptech.glide.load.engine.DiskCacheStrategy;
-import com.google.android.material.imageview.ShapeableImageView;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -26,10 +26,12 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Pantalla de inicio real: cabecera, "continuar jugando" y biblioteca con carátulas.
+ * Pantalla de inicio de Cenit, réplica de la maqueta: cabecera negra con logo,
+ * buscar y menú de tres puntos; rejilla de cajas PS2 a cuatro columnas sin
+ * títulos, y barra inferior Inicio · Biblioteca · Carpetas · Ajustes.
+ *
  * Existe porque la app usaba el surface del juego como pantalla raíz, así que al
  * abrir mostraba mandos táctiles sobre un lienzo negro en lugar de una interfaz.
- *
  * Solo dibuja; quién escanea la biblioteca y lanza juegos es MainActivity.
  */
 public final class HomeScreenController {
@@ -44,11 +46,14 @@ public final class HomeScreenController {
         void onAddGamesFolder();
         void onOpenSetup();
         void onOpenSettings();
+        void onImportBios();
+        void onPickDataFolder();
+        void onOpenGamesManager();
+        void onRefreshLibrary();
     }
 
     private final Context context;
     private final Host host;
-    private final List<HomeGameAdapter.Entry> entries = new ArrayList<>();
     private final android.os.Handler mainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private HomeGameAdapter adapter;
 
@@ -60,23 +65,24 @@ public final class HomeScreenController {
     // Mientras la cortinilla está arriba no se anima nada: la función se corre al
     // bajar el telón, no bajo la cortina.
     private boolean entranceBlocked = false;
+    // Biblioteca ya resuelta, para poder repintar al cambiar de pestaña.
+    private final List<HomeGameAdapter.Entry> entries = new ArrayList<>();
+    // Último estado de escaneo publicado, para no reescribir el aviso al cambiar de pestaña.
+    private boolean lastScanning = false;
 
     private View root;
-    private View continueSection;
-    private ShapeableImageView continueCover;
-    private TextView continueTitle;
-    private TextView continueSubtitle;
+    private View statusCard;
     private TextView statusText;
     private View statusAction;
+    private View searchRow;
+    private EditText searchInput;
+    private View scroll;
+    private View settingsPanel;
     private View emptyState;
     private TextView emptyText;
     private View emptyAction;
-    private TextView libraryTitle;
 
-    @Nullable private String lastPlayedUri;
-    @Nullable private String lastPlayedTitle;
-    @Nullable private String lastPlayedCoverPath;
-    @Nullable private String lastPlayedCoverUrl;
+    private View tabHome, tabLibrary, tabFolders, tabSettings;
 
     public HomeScreenController(@NonNull Context context, @NonNull ViewGroup parent, @NonNull Host host) {
         this.context = context;
@@ -109,57 +115,164 @@ public final class HomeScreenController {
     }
 
     private void bindViews() {
-        continueSection = root.findViewById(R.id.home_continue_section);
-        continueCover = root.findViewById(R.id.home_continue_cover);
-        continueTitle = root.findViewById(R.id.home_continue_title);
-        continueSubtitle = root.findViewById(R.id.home_continue_subtitle);
+        statusCard = root.findViewById(R.id.home_status_card);
         statusText = root.findViewById(R.id.home_status_text);
         statusAction = root.findViewById(R.id.btn_home_setup);
+        searchRow = root.findViewById(R.id.home_search_row);
+        searchInput = root.findViewById(R.id.home_search_input);
+        scroll = root.findViewById(R.id.home_scroll);
+        settingsPanel = root.findViewById(R.id.home_settings_panel);
         emptyState = root.findViewById(R.id.home_empty);
         emptyText = root.findViewById(R.id.home_empty_text);
         emptyAction = root.findViewById(R.id.btn_home_empty_action);
-        libraryTitle = root.findViewById(R.id.home_library_title);
+
+        tabHome = root.findViewById(R.id.tab_home);
+        tabLibrary = root.findViewById(R.id.tab_library);
+        tabFolders = root.findViewById(R.id.tab_folders);
+        tabSettings = root.findViewById(R.id.tab_settings);
 
         View grid = root.findViewById(R.id.home_grid);
         if (grid instanceof RecyclerView rv) {
-            rv.setHasFixedSize(true);
+            rv.setHasFixedSize(false);
+            rv.setNestedScrollingEnabled(false);
             rv.setLayoutManager(new GridLayoutManager(context, spanCount()));
-            adapter = new HomeGameAdapter(context, entries, new HomeGameAdapter.Callback() {
-                @Override public void onGameClick(int position) {
-                    if (position < 0 || position >= entries.size()) return;
-                    host.onPlayGame(entries.get(position).uri);
+            adapter = new HomeGameAdapter(context, new HomeGameAdapter.Callback() {
+                @Override public void onGameClick(HomeGameAdapter.Entry e) {
+                    if (e != null) host.onPlayGame(e.uri);
                 }
 
-                @Override public void onGameLongClick(int position) {
-                    if (position < 0 || position >= entries.size()) return;
-                    HomeGameAdapter.Entry e = entries.get(position);
-                    host.onGameLongPress(e.title, e.uri);
+                @Override public void onGameLongClick(HomeGameAdapter.Entry e) {
+                    if (e != null) host.onGameLongPress(e.title, e.uri);
                 }
             });
             rv.setAdapter(adapter);
         }
 
-        View menu = root.findViewById(R.id.btn_home_menu);
-        if (menu != null) menu.setOnClickListener(v -> host.onOpenSettings());
+        // Cabecera: lupa que despliega el campo de búsqueda y menú de tres puntos.
+        ImageButton searchBtn = root.findViewById(R.id.btn_home_search);
+        if (searchBtn != null) searchBtn.setOnClickListener(v -> toggleSearch());
+        ImageButton overflow = root.findViewById(R.id.btn_home_overflow);
+        if (overflow != null) overflow.setOnClickListener(this::showOverflowMenu);
+
+        if (searchInput != null) {
+            searchInput.addTextChangedListener(new TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
+                @Override public void onTextChanged(CharSequence s, int st, int b, int c) {}
+                @Override public void afterTextChanged(Editable s) {
+                    if (adapter != null) {
+                        adapter.setFilter(s == null ? "" : s.toString());
+                        renderEmpty();
+                    }
+                }
+            });
+        }
+
         if (statusAction != null) statusAction.setOnClickListener(v -> host.onOpenSetup());
-        View add = root.findViewById(R.id.btn_home_add_folder);
-        if (add != null) add.setOnClickListener(v -> host.onAddGamesFolder());
         if (emptyAction != null) emptyAction.setOnClickListener(v -> host.onAddGamesFolder());
-        View play = root.findViewById(R.id.btn_home_play);
-        if (play != null) play.setOnClickListener(v -> {
-            if (!TextUtils.isEmpty(lastPlayedUri)) host.onPlayGame(lastPlayedUri);
+
+        if (tabHome != null) tabHome.setOnClickListener(v -> selectTab(TAB_HOME));
+        if (tabLibrary != null) tabLibrary.setOnClickListener(v -> {
+            // "Biblioteca" repintea la rejilla y la recarga desde el disco.
+            selectTab(TAB_LIBRARY);
+            host.onRefreshLibrary();
         });
-        View playCard = root.findViewById(R.id.home_continue_card);
-        if (playCard != null) playCard.setOnClickListener(v -> {
-            if (!TextUtils.isEmpty(lastPlayedUri)) host.onPlayGame(lastPlayedUri);
+        if (tabFolders != null) tabFolders.setOnClickListener(v -> {
+            // "Carpetas" no es una vista propia: lleva directo a añadir una carpeta.
+            tabFolders.setSelected(true);
+            host.onAddGamesFolder();
+            mainHandler.postDelayed(() -> tabFolders.setSelected(false), 400);
         });
+        if (tabSettings != null) tabSettings.setOnClickListener(v ->
+                selectTab(tabSettings.isSelected() ? TAB_HOME : TAB_SETTINGS));
+
+        bindSettingsPanelRows();
+        selectTab(TAB_HOME);
+    }
+
+    /** Las filas del panel "Ajustes" reutilizan los flujos que ya existen. */
+    private void bindSettingsPanelRows() {
+        View bios = root.findViewById(R.id.home_set_bios);
+        if (bios != null) bios.setOnClickListener(v -> host.onImportBios());
+        View data = root.findViewById(R.id.home_set_data);
+        if (data != null) data.setOnClickListener(v -> host.onPickDataFolder());
+        View games = root.findViewById(R.id.home_set_games);
+        if (games != null) games.setOnClickListener(v -> host.onOpenGamesManager());
+        View setup = root.findViewById(R.id.home_set_setup);
+        if (setup != null) setup.setOnClickListener(v -> host.onOpenSetup());
+        View advanced = root.findViewById(R.id.home_set_advanced);
+        if (advanced != null) advanced.setOnClickListener(v -> host.onOpenSettings());
+    }
+
+    // ------------------------------------------------------------------
+    // Pestañas
+    // ------------------------------------------------------------------
+
+    private static final int TAB_HOME = 0;
+    private static final int TAB_LIBRARY = 1;
+    private static final int TAB_SETTINGS = 2;
+    private int currentTab = TAB_HOME;
+
+    /** Inicio y Biblioteca muestran la rejilla; Ajustes abre su panel a pantalla completa. */
+    private void selectTab(int tab) {
+        currentTab = tab;
+        boolean settings = tab == TAB_SETTINGS;
+        if (scroll != null) scroll.setVisibility(settings ? View.GONE : View.VISIBLE);
+        if (settingsPanel != null) settingsPanel.setVisibility(settings ? View.VISIBLE : View.GONE);
+        if (searchRow != null && searchRow.getVisibility() == View.VISIBLE && settings) {
+            searchRow.setVisibility(View.GONE);
+            if (searchInput != null) {
+                searchInput.setText("");
+                if (adapter != null) adapter.setFilter("");
+            }
+        }
+        setSelected(tabHome, tab == TAB_HOME);
+        setSelected(tabLibrary, tab == TAB_LIBRARY);
+        setSelected(tabSettings, settings);
+        if (!settings) renderEmpty();
+    }
+
+    private void setSelected(@Nullable View tab, boolean selected) {
+        if (tab != null) tab.setSelected(selected);
+    }
+
+    private void toggleSearch() {
+        if (searchRow == null || searchInput == null) return;
+        boolean open = searchRow.getVisibility() == View.VISIBLE;
+        if (open) {
+            searchInput.setText("");
+            if (adapter != null) adapter.setFilter("");
+            searchRow.setVisibility(View.GONE);
+        } else {
+            selectTab(currentTab == TAB_SETTINGS ? TAB_HOME : currentTab);
+            searchRow.setVisibility(View.VISIBLE);
+            searchInput.requestFocus();
+        }
+        // Con filtro vacío vuelve la biblioteca completa; si estaba vacía, el aviso.
+        renderEmpty();
+    }
+
+    private void showOverflowMenu(View anchor) {
+        android.widget.PopupMenu menu = new android.widget.PopupMenu(context, anchor);
+        menu.getMenu().add("Añadir carpeta de juegos");
+        menu.getMenu().add("Gestionar juegos");
+        menu.getMenu().add("Asistente de configuración");
+        menu.setOnMenuItemClickListener(item -> {
+            String t = item.getTitle() == null ? "" : item.getTitle().toString();
+            switch (t) {
+                case "Añadir carpeta de juegos": host.onAddGamesFolder(); return true;
+                case "Gestionar juegos": host.onOpenGamesManager(); return true;
+                case "Asistente de configuración": host.onOpenSetup(); return true;
+                default: return false;
+            }
+        });
+        menu.show();
     }
 
     private int spanCount() {
         int widthDp = (int) (context.getResources().getDisplayMetrics().widthPixels
                 / context.getResources().getDisplayMetrics().density);
         if (widthDp >= 720) return 5;
-        if (widthDp >= 480) return 4;
+        if (widthDp >= 400) return 4;
         return 3;
     }
 
@@ -192,9 +305,9 @@ public final class HomeScreenController {
         rise(root.findViewById(R.id.home_logo), 0);
         rise(root.findViewById(R.id.home_wordmark), 60);
         rise(root.findViewById(R.id.home_tagline), 130);
-        rise(root.findViewById(R.id.home_status_card), 210);
-        rise(root.findViewById(R.id.home_continue_section), 260);
-        rise(root.findViewById(R.id.home_library_header), 320);
+        rise(statusCard, 210);
+        rise(root.findViewById(R.id.home_grid), 260);
+        rise(root.findViewById(R.id.home_bottom_bar), 320);
     }
 
     private void rise(@Nullable View view, int startDelayMs) {
@@ -225,10 +338,11 @@ public final class HomeScreenController {
     /** Ajusta los márgenes superiores/inferiores a las barras del sistema. */
     public void applyInsets(int left, int top, int right, int bottom) {
         if (root == null) return;
-        root.setPadding(left, 0, right, bottom);
         View header = root.findViewById(R.id.home_header);
         if (header != null) header.setPadding(header.getPaddingLeft(), top + dp(14),
                 header.getPaddingRight(), header.getPaddingBottom());
+        View bar = root.findViewById(R.id.home_bottom_bar);
+        if (bar != null) bar.setPadding(left, bar.getPaddingTop(), right, bottom);
     }
 
     private int dp(int d) {
@@ -240,14 +354,13 @@ public final class HomeScreenController {
      * fuera del hilo de UI y se publica el resultado al terminar.
      */
     public void submitLibrary(String[] names, String[] uris, boolean scanning) {
-        renderEmpty(scanning || names == null || uris == null || names.length == 0);
+        lastScanning = scanning || names == null || uris == null || names.length == 0;
+        renderEmpty();
         final String[] nameSnapshot = names == null ? new String[0] : names;
         final String[] uriSnapshot = uris == null ? new String[0] : uris;
         final long token = ++libraryToken;
         LIBRARY_EXECUTOR.execute(() -> {
             List<HomeGameAdapter.Entry> built = new ArrayList<>();
-            String[] newest = null; // {uri, title, coverPath, coverUrl}
-            long newestAt = 0L;
             try {
                 SharedPreferences prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE);
                 File coversDir = coversDir();
@@ -272,82 +385,58 @@ public final class HomeScreenController {
                         e.coverUrl = COVER_BASE_URL + serial + ".png";
                     }
                     built.add(e);
-
-                    long played = prefs.getLong("last_played:" + e.uri, 0L);
-                    if (played > newestAt) {
-                        newestAt = played;
-                        newest = new String[]{e.uri, e.title, e.coverPath, e.coverUrl};
-                    }
                 }
             } catch (Throwable error) {
                 android.util.Log.w("HomeScreen", "Unable to resolve covers", error);
             }
             final List<HomeGameAdapter.Entry> finalEntries = built;
-            final String[] finalNewest = newest;
             mainHandler.post(() -> {
                 if (token != libraryToken) return; // una publicación más nueva ya ganó
-                applyLibrary(finalEntries, finalNewest);
+                applyLibrary(finalEntries);
             });
         });
     }
 
-    private void applyLibrary(List<HomeGameAdapter.Entry> built, @Nullable String[] newest) {
+    private void applyLibrary(List<HomeGameAdapter.Entry> built) {
         entries.clear();
         entries.addAll(built);
-        lastPlayedUri = newest != null ? newest[0] : null;
-        lastPlayedTitle = newest != null ? newest[1] : null;
-        lastPlayedCoverPath = newest != null ? newest[2] : null;
-        lastPlayedCoverUrl = newest != null ? newest[3] : null;
 
-        if (libraryTitle != null) {
-            libraryTitle.setText(entries.isEmpty() ? "Biblioteca" : "Biblioteca · " + entries.size());
-        }
+        if (adapter != null) adapter.setEntries(entries);
         // paintEntranceIfNeeded ya refresca (con animación) si la entrada quedó armada;
         // si no, hay que repintar la cuadrícula de todos modos.
         boolean animated = paintEntranceIfNeeded();
         if (adapter != null && !animated) adapter.notifyDataSetChanged();
-        renderContinue();
-        renderEmpty(false);
+        lastScanning = false;
+        renderEmpty();
     }
 
-    private void renderContinue() {
-        if (continueSection == null) return;
-        if (TextUtils.isEmpty(lastPlayedUri)) {
-            continueSection.setVisibility(View.GONE);
-            return;
-        }
-        continueSection.setVisibility(View.VISIBLE);
-        if (continueTitle != null) continueTitle.setText(lastPlayedTitle);
-        if (continueSubtitle != null) continueSubtitle.setText("Toca para seguir donde quedaste");
-        if (continueCover != null) {
-            Glide.with(context)
-                    .load(TextUtils.isEmpty(lastPlayedCoverPath) ? lastPlayedCoverUrl : lastPlayedCoverPath)
-                    .diskCacheStrategy(DiskCacheStrategy.AUTOMATIC)
-                    .centerCrop()
-                    .placeholder(R.drawable.bg_control_cluster)
-                    .error(R.drawable.bg_control_cluster)
-                    .into(continueCover);
-        }
-    }
-
-    private void renderEmpty(boolean scanning) {
+    private void renderEmpty() {
         if (emptyState == null) return;
-        if (!entries.isEmpty()) {
+        boolean filtering = searchRow != null && searchRow.getVisibility() == View.VISIBLE
+                && searchInput != null && !TextUtils.isEmpty(searchInput.getText());
+        boolean noMatches = filtering && adapter != null && adapter.getItemCount() == 0;
+        if (!entries.isEmpty() && !noMatches && !lastScanning) {
             emptyState.setVisibility(View.GONE);
             return;
         }
         emptyState.setVisibility(View.VISIBLE);
-        boolean hasFolders = !GameFolders.list(context).isEmpty();
-        if (scanning) {
+        if (lastScanning && entries.isEmpty()) {
             emptyText.setText("Buscando tus juegos…");
             emptyAction.setVisibility(View.GONE);
-        } else if (!hasFolders) {
-            emptyText.setText("Todavía no elegiste una carpeta. Señala dónde guardas tus copias de PS2 (ISO, CHD o CSO).");
+        } else if (noMatches) {
+            emptyText.setText("Ningún juego coincide con la búsqueda.");
+            emptyAction.setVisibility(View.GONE);
+        } else if (!hasFoldersNow()) {
+            emptyText.setText("Todavía no hay juegos. Añade una carpeta con tus copias de PS2 (ISO, CHD o CSO).");
             emptyAction.setVisibility(View.VISIBLE);
         } else {
             emptyText.setText("No encontramos juegos en tus carpetas. Revisa que tengan formato de PS2 o añade otra carpeta.");
             emptyAction.setVisibility(View.VISIBLE);
         }
+    }
+
+    private boolean hasFoldersNow() {
+        return !GameFolders.list(context).isEmpty();
     }
 
     /** Estado de configuración: qué falta antes de poder jugar. */
@@ -358,12 +447,22 @@ public final class HomeScreenController {
         if (!hasGamesFolder) missing.add("una carpeta de juegos");
 
         if (missing.isEmpty()) {
-            if (statusText != null) statusText.setText("Todo listo para jugar");
-            if (statusAction != null) statusAction.setVisibility(View.GONE);
+            if (statusCard != null) statusCard.setVisibility(View.GONE);
         } else {
+            if (statusCard != null) statusCard.setVisibility(View.VISIBLE);
             if (statusText != null) statusText.setText("Falta " + join(missing));
             if (statusAction != null) statusAction.setVisibility(View.VISIBLE);
         }
+
+        TextView biosSub = root.findViewById(R.id.home_set_bios_sub);
+        if (biosSub != null) biosSub.setText(hasBios
+                ? "BIOS detectada y verificada" : "Necesaria para iniciar cualquier juego");
+        TextView dataSub = root.findViewById(R.id.home_set_data_sub);
+        if (dataSub != null) dataSub.setText(hasDataFolder
+                ? "Carpeta de datos elegida" : "Partidas, estados y configuración");
+        TextView gamesSub = root.findViewById(R.id.home_set_games_sub);
+        if (gamesSub != null) gamesSub.setText(hasGamesFolder
+                ? "Carpetas configuradas" : "Añade o cambia las carpetas de tu biblioteca");
     }
 
     private static String join(List<String> parts) {
