@@ -18,6 +18,7 @@ import androidx.recyclerview.widget.RecyclerView;
 import androidx.viewpager2.widget.ViewPager2;
 
 import com.google.android.material.button.MaterialButton;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -155,19 +156,29 @@ public class SetupWizardDialogFragment extends DialogFragment {
 
     private void handleNextClick() {
         int current = pager.getCurrentItem();
-        boolean allDone = areAllStepsComplete();
         if (current < steps.size() - 1) {
             pager.setCurrentItem(current + 1, true);
             return;
         }
-        if (allDone) {
+        if (areAllStepsComplete()) {
             completeAndDismiss();
         } else {
-            int target = firstIncompleteIndex();
-            if (target >= 0) {
-                pager.setCurrentItem(target, true);
-            }
+            // Antes el botón se deshabilitaba aquí y el asistente no era cancelable,
+            // así que quedabas atrapado en la última página sin poder avanzar.
+            showFinishAnywayPrompt(firstIncompleteIndex());
         }
+    }
+
+    private void showFinishAnywayPrompt(int target) {
+        MaterialAlertDialogBuilder b = new MaterialAlertDialogBuilder(requireContext());
+        b.setTitle("Some steps are still pending");
+        b.setMessage("You can finish now. The BIOS can be imported later from the side menu, and your games folder from the library button.");
+        b.setPositiveButton("Finish anyway", (d, w) -> completeAndDismiss());
+        b.setNeutralButton("Go to pending step", (d, w) -> {
+            if (target >= 0) pager.setCurrentItem(target, true);
+        });
+        b.setNegativeButton("Keep reviewing", null);
+        b.show();
     }
 
     private void triggerAction(StepType type) {
@@ -205,11 +216,18 @@ public class SetupWizardDialogFragment extends DialogFragment {
         boolean allDone = areAllStepsComplete();
         boolean last = position == steps.size() - 1;
         btnNext.setText(allDone ? "Start playing" : (last ? "Done" : "Next"));
-        btnNext.setEnabled(allDone || !last);
+        // Siempre habilitado: en la última página "Done" ofrece terminar aunque falten pasos.
+        btnNext.setEnabled(true);
     }
 
     private void refreshAll() {
-        if (adapter != null) adapter.notifyDataSetChanged();
+        if (adapter != null) {
+            // notifyDataSetChanged() sobre ViewPager2 recrea todas las páginas cada 800 ms
+            // y se sentía como congelamiento; refrescar solo el contenido de cada posición.
+            for (int i = 0; i < adapter.getItemCount(); i++) {
+                adapter.notifyItemChanged(i);
+            }
+        }
         updateNextButtonState(pager != null ? pager.getCurrentItem() : 0);
         if (areAllStepsComplete()) {
             tryCompleteSoon();
@@ -246,14 +264,19 @@ public class SetupWizardDialogFragment extends DialogFragment {
     }
 
     private void completeAndDismiss() {
+        boolean openLibrary = false;
         try {
             Context context = getContext();
             if (context != null) {
+                openLibrary = areAllStepsComplete();
                 context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
                         .edit().putBoolean("first_run_done", true).apply();
             }
             MainActivity a = UiUtils.getMainActivity(this);
-            if (a != null) a.setSetupWizardActive(false);
+            if (a != null) {
+                a.setSetupWizardActive(false);
+                if (openLibrary) a.openGamesDialog();
+            }
         } catch (Throwable ignored) {}
         dismissAllowingStateLoss();
     }
@@ -358,6 +381,10 @@ public class SetupWizardDialogFragment extends DialogFragment {
 
         @Override
         public void onBindViewHolder(@NonNull VH holder, int position) {
+            bind(holder, position);
+        }
+
+        private void bind(@NonNull VH holder, int position) {
             SetupStep step = steps.get(position);
             holder.title.setText(step.title);
             holder.description.setText(step.description);
