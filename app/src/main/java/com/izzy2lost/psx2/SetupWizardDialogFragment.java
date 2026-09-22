@@ -265,6 +265,7 @@ public class SetupWizardDialogFragment extends DialogFragment {
 
     private void completeAndDismiss() {
         boolean openLibrary = false;
+        MainActivity a = null;
         try {
             Context context = getContext();
             if (context != null) {
@@ -272,13 +273,20 @@ public class SetupWizardDialogFragment extends DialogFragment {
                 context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
                         .edit().putBoolean("first_run_done", true).apply();
             }
-            MainActivity a = UiUtils.getMainActivity(this);
-            if (a != null) {
-                a.setSetupWizardActive(false);
-                if (openLibrary) a.openGamesDialog();
-            }
+            a = UiUtils.getMainActivity(this);
+            if (a != null) a.setSetupWizardActive(false);
         } catch (Throwable ignored) {}
         dismissAllowingStateLoss();
+        // Primero cerrar el asistente y luego abrir la biblioteca, para no montar
+        // dos diálogos encima.
+        if (openLibrary && a != null) {
+            final MainActivity act = a;
+            act.getWindow().getDecorView().postDelayed(() -> {
+                try {
+                    if (!act.isFinishing() && !act.isDestroyed()) act.openGamesDialog();
+                } catch (Throwable ignored) {}
+            }, 350);
+        }
     }
 
     private void tryCompleteSoon() {
