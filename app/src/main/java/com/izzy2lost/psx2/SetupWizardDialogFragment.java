@@ -252,7 +252,7 @@ public class SetupWizardDialogFragment extends DialogFragment {
     private void showFinishAnywayPrompt(int target) {
         MaterialAlertDialogBuilder b = new MaterialAlertDialogBuilder(requireContext());
         b.setTitle("Aún hay pasos pendientes");
-        b.setMessage("Puedes terminar ahora. La BIOS se puede importar después desde el menú lateral, y la carpeta de juegos desde la biblioteca.");
+        b.setMessage("Puedes terminar ahora. La BIOS se puede importar después desde Ajustes, y la carpeta de juegos desde la biblioteca.");
         b.setPositiveButton("Terminar de todos modos", (d, w) -> completeAndDismiss());
         b.setNeutralButton("Ir al paso pendiente", (d, w) -> {
             if (target >= 0) pager.setCurrentItem(target, true);
