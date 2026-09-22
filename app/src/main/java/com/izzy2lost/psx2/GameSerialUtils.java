@@ -34,4 +34,27 @@ final class GameSerialUtils {
     static boolean isPs2Serial(String candidate) {
         return !normalizePs2Serial(candidate).isEmpty();
     }
+
+    /**
+     * Serial de respaldo derivada del nombre del archivo, para juegos cuyo disco
+     * todavía no se pudo inspeccionar de forma nativa.
+     */
+    static String serialFromUri(String uriStr) {
+        if (uriStr == null) return "";
+        try {
+            android.net.Uri u = android.net.Uri.parse(uriStr);
+            String last = u.getLastPathSegment();
+            if (last != null) last = android.net.Uri.decode(last);
+            if (last == null) last = uriStr;
+            int slash = Math.max(last.lastIndexOf('/'), last.lastIndexOf('\\'));
+            if (slash >= 0 && slash + 1 < last.length()) last = last.substring(slash + 1);
+            int colon = last.lastIndexOf(':');
+            if (colon >= 0 && colon + 1 < last.length()) last = last.substring(colon + 1);
+            int dot = last.lastIndexOf('.');
+            if (dot > 0) last = last.substring(0, dot);
+            return normalizeLibrarySerial(last);
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
 }

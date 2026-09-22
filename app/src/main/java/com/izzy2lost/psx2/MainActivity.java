@@ -123,6 +123,32 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
     private boolean mActivityPauseRequested = false;
     private boolean mUserPauseRequested = false;
 
+    // Pantalla de inicio. Antes de existir, la raíz de la app era el surface del
+    // juego, así que al abrir se veían mandos táctiles sobre un lienzo negro.
+    private HomeScreenController mHomeScreen;
+    private boolean mHomeScreenVisible = true;
+    // Un reinicio de juego apaga la VM antes de volver a encenderla. Sin esta marca,
+    // el vigilante interpretaría ese hueco como "el usuario salió del juego".
+    private volatile boolean mEmulationRestarting = false;
+    private final android.os.Handler mHomeHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable mVmEndWatcher = new Runnable() {
+        @Override
+        public void run() {
+            if (isFinishing() || isDestroyed()) return;
+            if (mEmulationRestarting || mSetupWizardActive) {
+                mHomeHandler.postDelayed(this, 600);
+                return;
+            }
+            if (!isThread()) {
+                // El juego terminó (salida, cierre o fallo): se vuelve al inicio.
+                m_szGamefile = "";
+                applyHomeScreenState("emulation stopped");
+            } else {
+                mHomeHandler.postDelayed(this, 600);
+            }
+        }
+    };
+
     public boolean isThread() {
         Thread emulationThread = mEmulationThread;
         return (emulationThread != null && emulationThread.isAlive()) || isNativeVMActive();
@@ -322,6 +348,9 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
     }
 
     private void hideStatusBar() {
+        // La pantalla de inicio necesita ver las barras del sistema; solo el juego
+        // debe quedarse en modo inmersivo.
+        if (mHomeScreenVisible) return;
         // Make immersive (hide status + navigation) and allow swipe to reveal temporarily
         Window w = getWindow();
         if (w == null) return;
@@ -551,7 +580,6 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
             restartEmuThread();
         }
     }
-
     private static final String[] GAME_EXTS = new String[]{
             ".iso", ".bin", ".img", ".mdf", ".nrg", ".chd", ".cso", ".zso", ".gz", ".acgame"
     };
@@ -651,7 +679,10 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         }
         prefs.edit().putString("games_list_json", arr.toString()).apply();
 
-        return new GameList(nameList.toArray(new String[0]), uriList.toArray(new String[0]));
+        GameList result = new GameList(nameList.toArray(new String[0]), uriList.toArray(new String[0]));
+        // La pantalla de inicio se alimenta del mismo escaneo, en su propio hilo UI.
+        onGameLibraryScanned(result.names, result.uris);
+        return result;
     }
 
     private java.util.ArrayList<String> getGameFolderUris(SharedPreferences prefs) {
@@ -776,32 +807,16 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         // Show first-run setup wizard if needed
         SharedPreferences prefs = getSharedPreferences("app_prefs", MODE_PRIVATE);
         boolean firstRunDone = prefs.getBoolean("first_run_done", false);
-        
+
+        // La pantalla de inicio es ahora la interfaz real: biblioteca con carátulas,
+        // "continuar jugando" y estado de la configuración. Antes, al no existir, la app
+        // abría un diálogo flotante sobre un lienzo negro con mandos táctiles.
+        setupHomeScreen();
+
         if (!firstRunDone) {
             SetupWizardDialogFragment f = SetupWizardDialogFragment.newInstance();
             f.setCancelable(false);
             f.show(getSupportFragmentManager(), "setup_wizard");
-        } else {
-            // Only auto-open games dialog if this is NOT the first boot after setup
-            // (Setup wizard handles opening the games dialog on first completion)
-            boolean hasOpenedGamesAfterSetup = prefs.getBoolean("has_opened_games_after_setup", false);
-            if (hasOpenedGamesAfterSetup) {
-                try {
-                    final View decor = (getWindow() != null) ? getWindow().getDecorView() : null;
-                    if (decor != null) {
-                        // Nothing boots on its own anymore, so the picker can come up as
-                        // soon as the window is laid out. Only the optional BIOS boot
-                        // needs the old head start.
-                        final long delayMs = isBootBiosOnStartEnabled() ? 1600 : 250;
-                        decor.postDelayed(() -> {
-                            if (!isFinishing() && !isDestroyed() && !mSetupWizardActive
-                                    && !getSupportFragmentManager().isStateSaved()) {
-                                openGamesDialog();
-                            }
-                        }, delayMs);
-                    }
-                } catch (Throwable ignored) {}
-            }
         }
 
         // Setup right drawer quick actions
@@ -830,6 +845,171 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
 
     public void setSetupWizardActive(boolean active) {
         mSetupWizardActive = active;
+        if (!active) applyHomeScreenState("setup wizard closed");
+    }
+
+    // ------------------------------------------------------------------
+    // Pantalla de inicio
+    // ------------------------------------------------------------------
+
+    /**
+     * Crea la pantalla de inicio y la coloca por encima del surface del juego y de
+     * los mandos táctiles, que hasta ahora eran lo único visible al abrir la app.
+     */
+    private void setupHomeScreen() {
+        if (mHomeScreen != null) return;
+        View root = findViewById(R.id.main_root);
+        if (!(root instanceof ConstraintLayout parent)) return;
+
+        mHomeScreen = new HomeScreenController(this, parent, new HomeScreenController.Host() {
+            @Override
+            public void onPlayGame(String gameUri) {
+                onGameSelected(gameUri);
+            }
+
+            @Override
+            public void onGameLongPress(String gameTitle, String gameUri) {
+                try {
+                    String serial = null;
+                    try { serial = NativeApp.getGameSerialSafe(gameUri); } catch (Throwable ignored) {}
+                    if (serial == null || serial.isEmpty()) serial = GameSerialUtils.serialFromUri(gameUri);
+                    String crc;
+                    try { crc = NativeApp.getGameCrc(gameUri); } catch (Throwable ignored) { crc = null; }
+                    if (crc == null || crc.isEmpty()) {
+                        crc = String.format(java.util.Locale.ROOT, "%08X",
+                                Math.abs(gameUri != null ? gameUri.hashCode() : 0));
+                    }
+                    GameSettingsDialogFragment dialog = GameSettingsDialogFragment.newInstance(
+                            gameTitle, gameUri, GameSerialUtils.normalizeLibrarySerial(serial), crc);
+                    dialog.show(getSupportFragmentManager(), "game_settings");
+                } catch (Throwable ignored) {}
+            }
+
+            @Override
+            public void onAddGamesFolder() {
+                addGamesFolder();
+            }
+
+            @Override
+            public void onOpenSetup() {
+                showSetupWizard();
+            }
+
+            @Override
+            public void onOpenSettings() {
+                DrawerLayout drawer = findViewById(R.id.drawer_layout);
+                if (drawer != null) drawer.openDrawer(androidx.core.view.GravityCompat.START);
+            }
+        });
+        applyHomeScreenState("created");
+        refreshHomeScreenData();
+    }
+
+    private void showSetupWizard() {
+        if (getSupportFragmentManager().findFragmentByTag("setup_wizard") != null) return;
+        SetupWizardDialogFragment f = SetupWizardDialogFragment.newInstance();
+        f.show(getSupportFragmentManager(), "setup_wizard");
+    }
+
+    /** Muestra el inicio u oculta la interfaz de juego según el estado real. */
+    private void applyHomeScreenState(String reason) {
+        if (mHomeScreen == null) return;
+        boolean playing = isThread();
+        boolean showHome = !playing;
+        mHomeScreenVisible = showHome;
+        mHomeScreen.setVisible(showHome);
+
+        // Los mandos táctiles, el botón de menú flotante y el de pausa solo tienen
+        // sentido con una emulación activa.
+        updateUiForControllerPresence();
+        View btnSettings = findViewById(R.id.btn_settings);
+        if (btnSettings != null) btnSettings.setVisibility(showHome ? View.GONE : View.VISIBLE);
+        View quick = findViewById(R.id.ll_quick_actions);
+        if (quick != null) quick.setVisibility(showHome ? View.GONE : quick.getVisibility());
+        updatePausePlayButton();
+
+        // El inicio necesita ver las barras del sistema; el juego no.
+        if (showHome) showSystemBarsForHome(); else hideStatusBar();
+
+        // Vigilante del fin de emulación.
+        mHomeHandler.removeCallbacks(mVmEndWatcher);
+        if (playing) mHomeHandler.postDelayed(mVmEndWatcher, 600);
+
+        if (showHome) refreshHomeScreenData();
+        android.util.Log.d("HomeScreen", reason + ": home=" + showHome + " playing=" + playing);
+    }
+
+    private void showSystemBarsForHome() {
+        try {
+            Window w = getWindow();
+            if (w == null) return;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                WindowInsetsController c = w.getInsetsController();
+                if (c != null) c.show(WindowInsets.Type.systemBars());
+            } else {
+                w.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    /** Recarga biblioteca y estado de configuración sin bloquear el hilo de UI. */
+    private void refreshHomeScreenData() {
+        if (mHomeScreen == null) return;
+        SharedPreferences prefs = getSharedPreferences("app_prefs", MODE_PRIVATE);
+        final boolean hasGamesFolder = !getGameFolderUris(prefs).isEmpty();
+        mHomeScreen.submitStatus(
+                BiosVerifier.hasAnyVerifiedBios(this),
+                SafManager.getDataRootUri(this) != null,
+                hasGamesFolder);
+
+        GameList cached = loadCachedGameList();
+        mHomeScreen.submitLibrary(cached.names, cached.uris, !hasGamesFolder || cached.names.length == 0);
+        if (!hasGamesFolder) return;
+        refreshGameLibraryCacheAsync();
+    }
+
+    /** Llamado por el escáner de biblioteca al terminar. */
+    void onGameLibraryScanned(String[] names, String[] uris) {
+        runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed() || mHomeScreen == null) return;
+            mHomeScreen.submitLibrary(names, uris, false);
+        });
+    }
+
+    /** El asistente terminó: se vuelve al inicio con los datos recién elegidos. */
+    public void onSetupWizardFinished() {
+        applyHomeScreenState("setup finished");
+    }
+
+    /** Los accesos a "Juegos" ahora llevan a la biblioteca de la pantalla de inicio. */
+    public void showLibrary() {
+        if (hasSelectedGame() || isThread()) returnToHome();
+        else applyHomeScreenState("library requested");
+    }
+
+    /**
+     * Detiene la emulación y regresa a la pantalla de inicio. Reemplaza al antiguo
+     * "Exit Game", que abría el diálogo de carátulas encima del lienzo negro.
+     */
+    public void returnToHome() {
+        setFastForwardEnabled(false);
+        mUserPauseRequested = false;
+        mEmulationRestarting = true;
+        mHomeHandler.removeCallbacks(mVmEndWatcher);
+        mEmulationControlExecutor.execute(() -> {
+            try {
+                if (isThread()) NativeApp.shutdown();
+            } catch (Throwable ignored) {}
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                synchronized (mEmulationThreadLock) {
+                    mEmulationThread = null;
+                }
+                m_szGamefile = "";
+                mEmulationRestarting = false;
+                applyHomeScreenState("returned home");
+            });
+        });
     }
 
     // Public method to open the games covers dialog via controller quick actions
@@ -852,6 +1032,14 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         OnBackPressedCallback callback = new OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
+                // Con la pantalla de inicio por delante, atrás significa salir de la app;
+                // durante el juego, pedir confirmación como antes.
+                if (mHomeScreenVisible) {
+                    setEnabled(false);
+                    getOnBackPressedDispatcher().onBackPressed();
+                    setEnabled(true);
+                    return;
+                }
                 showExitDialog();
             }
         };
@@ -950,8 +1138,8 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                                 // Close drawer first
                                 DrawerLayout drawer = findViewById(R.id.drawer_layout);
                                 if (drawer != null) drawer.closeDrawer(androidx.core.view.GravityCompat.START);
-                                // Open games dialog
-                                openGamesDialog();
+                                // Ir a la biblioteca de la pantalla de inicio
+                                showLibrary();
                             } catch (Throwable ignored) {}
                         });
                     }
@@ -1255,6 +1443,9 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
     }
 
     private void setControlsVisible(boolean visible) {
+        // Con la pantalla de inicio por delante nunca hay mandos en pantalla,
+        // tenga o no un mando físico conectado.
+        if (mHomeScreenVisible) visible = false;
         if (!visible) {
             setFastForwardEnabled(false);
             releaseVirtualStickInputs();
@@ -1355,15 +1546,16 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
 
     private void updateUiForControllerPresence() {
         boolean hasController = isAnyControllerConnected();
-        // Show all UI when no controller; hide UI when a controller is connected.
+        // Show all UI when no controller; hide UI when a physical controller is connected.
         int vis = hasController ? View.GONE : View.VISIBLE;
 
         View btnSettings = findViewById(R.id.btn_settings);
         View llQuickActions = findViewById(R.id.ll_quick_actions);
 
-        // Keep menu (settings) button visible even when a controller is connected
-        if (btnSettings != null) btnSettings.setVisibility(View.VISIBLE);
-        if (llQuickActions != null) llQuickActions.setVisibility(vis);
+        // El botón de menú y las acciones rápidas pertenecen a la interfaz de juego;
+        // en la pantalla de inicio su homólogo es el botón de ajustes del encabezado.
+        if (btnSettings != null) btnSettings.setVisibility(mHomeScreenVisible ? View.GONE : View.VISIBLE);
+        if (llQuickActions != null) llQuickActions.setVisibility(mHomeScreenVisible ? View.GONE : vis);
 
         // Hide on-screen touch controls when a physical controller is connected
         setControlsVisible(!hasController);
@@ -2007,8 +2199,10 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         if (mHIDDeviceManager != null) {
             mHIDDeviceManager.setFrozen(false);
         }
-        // Re-assert full screen when returning to the activity
-        enableImmersiveMode();
+        // Re-assert full screen when returning to the activity, except on the home
+        // screen, which needs the status and navigation bars.
+        applyHomeScreenState("activity resumed");
+        if (!mHomeScreenVisible) enableImmersiveMode();
         updateUiForControllerPresence();
     }
 
@@ -2135,6 +2329,17 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                             mEmulationThread = null;
                         }
                     }
+                    // El juego terminó por sí solo (salida, cierre o fallo). Se vuelve
+                    // al inicio, salvo que sea el hueco de un reinicio programado.
+                    if (!mEmulationRestarting) {
+                        runOnUiThread(() -> {
+                            if (isFinishing() || isDestroyed() || mEmulationRestarting) return;
+                            if (!isThread()) {
+                                m_szGamefile = "";
+                                applyHomeScreenState("emulation ended");
+                            }
+                        });
+                    }
                 }
             }, "EmulationThread");
             mEmulationThread = emulationThread;
@@ -2149,8 +2354,7 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                 if (btn_pause_play != null) {
                     btn_pause_play.setVisibility(View.VISIBLE);
                     btn_pause_play.setIcon(ContextCompat.getDrawable(this, R.drawable.play_pause_24px));
-                }
-            });
+                }            });
         }
     }
 
@@ -2165,6 +2369,11 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         mUserPauseRequested = false;
         final int generation = mEmulationRestartGeneration.incrementAndGet();
         final String requestedGame = m_szGamefile;
+
+        // El apagado y el encendido dejan un hueco sin VM activa; sin esta marca el
+        // vigilante lo leería como "el usuario salió del juego" y volvería al inicio.
+        mEmulationRestarting = true;
+        mHomeHandler.removeCallbacks(mVmEndWatcher);
 
         // Shutdown and Thread.join() can take several seconds for some arcade games.
         // Never wait for the emulation thread from Android's UI thread.
@@ -2188,13 +2397,21 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                         }
                     }
                 }
-                if (generation != mEmulationRestartGeneration.get()) return;
+                if (generation != mEmulationRestartGeneration.get()) {
+                    mEmulationRestarting = false;
+                    return;
+                }
                 runOnUiThread(() -> {
                     if (generation != mEmulationRestartGeneration.get()
                             || isFinishing() || isDestroyed()
-                            || !requestedGame.equals(m_szGamefile)) return;
+                            || !requestedGame.equals(m_szGamefile)) {
+                        mEmulationRestarting = false;
+                        return;
+                    }
                     startEmuThread();
                     applyRequestedPauseState("game started");
+                    mEmulationRestarting = false;
+                    applyHomeScreenState("game started");
                 });
             } catch (InterruptedException ignored) {
                 Thread.currentThread().interrupt();
@@ -3413,8 +3630,8 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                             // Close right drawer first
                             DrawerLayout drawer = findViewById(R.id.drawer_layout);
                             if (drawer != null) drawer.closeDrawer(androidx.core.view.GravityCompat.END);
-                            // Open games dialog
-                            openGamesDialog();
+                            // Ir a la biblioteca de la pantalla de inicio
+                            showLibrary();
                         } catch (Throwable ignored) {}
                     });
                 }
@@ -3456,10 +3673,8 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                             // Close right drawer first
                             DrawerLayout drawer = findViewById(R.id.drawer_layout);
                             if (drawer != null) drawer.closeDrawer(androidx.core.view.GravityCompat.END);
-                            // Open games dialog after a short delay
-                            findViewById(android.R.id.content).postDelayed(() -> {
-                                openGamesDialog();
-                            }, 300);
+                            // Detiene la consola y regresa a la pantalla de inicio.
+                            findViewById(android.R.id.content).postDelayed(this::returnToHome, 300);
                         } catch (Throwable ignored) {}
                     });
                 }
