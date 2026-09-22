@@ -2,553 +2,526 @@
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
+    android:layout_height="match_parent"
+    android:background="@color/cenit_settings_bg"
     android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:paddingStart="16dp"
-        android:paddingEnd="16dp"
-        android:paddingBottom="16dp"
-        android:paddingTop="32dp">
+        android:orientation="vertical">
 
-        <ImageView
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:layout_gravity="center_horizontal"
-            android:layout_marginBottom="6dp"
-            android:contentDescription="Cenit"
-            android:src="@drawable/cenit_logo" />
-
-        <TextView
-            android:id="@+id/drawer_title"
+        <!-- Hero: banner degradado azul con identidad y acciones de energía -->
+        <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Cenit · Ajustes"
-            android:textStyle="bold"
-            android:textSize="20sp"
-            android:textColor="@color/brand_primary"
-            android:gravity="center"
-            android:paddingBottom="12dp" />
+            android:background="@drawable/bg_cenit_settings_hero"
+            android:paddingStart="22dp"
+            android:paddingTop="52dp"
+            android:paddingEnd="22dp"
+            android:paddingBottom="20dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <ImageView
+                        android:layout_width="42dp"
+                        android:layout_height="42dp"
+                        android:layout_marginEnd="14dp"
+                        android:contentDescription="Cenit"
+                        android:src="@drawable/cenit_logo" />
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/drawer_title"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:letterSpacing="0.18"
+                            android:text="AJUSTES"
+                            android:textColor="@android:color/white"
+                            android:textSize="22sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:alpha="0.72"
+                            android:letterSpacing="0.04"
+                            android:text="Cenit · configuración del emulador"
+                            android:textColor="@android:color/white"
+                            android:textSize="12sp" />
+                    </LinearLayout>
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/drawer_btn_reboot"
+                        style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
+                        android:layout_width="46dp"
+                        android:layout_height="46dp"
+                        android:layout_marginEnd="8dp"
+                        android:contentDescription="Reiniciar juego"
+                        android:insetBottom="0dp"
+                        android:insetTop="0dp"
+                        app:backgroundTint="#33FFFFFF"
+                        app:icon="@drawable/ic_reboot"
+                        app:iconGravity="textStart"
+                        app:iconPadding="0dp"
+                        app:iconSize="22dp"
+                        app:iconTint="@color/cenit_neon_cyan" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/drawer_btn_power"
+                        style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
+                        android:layout_width="46dp"
+                        android:layout_height="46dp"
+                        android:contentDescription="Apagar"
+                        android:insetBottom="0dp"
+                        android:insetTop="0dp"
+                        app:backgroundTint="#33FF5C7A"
+                        app:icon="@drawable/ic_power"
+                        app:iconGravity="textStart"
+                        app:iconPadding="0dp"
+                        app:iconSize="22dp"
+                        app:iconTint="#FF8FA3BC" />
+                </LinearLayout>
+            </LinearLayout>
+        </FrameLayout>
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center"
-            android:paddingBottom="8dp">
+            android:orientation="vertical"
+            android:paddingStart="14dp"
+            android:paddingTop="14dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="28dp">
 
-            <com.google.android.material.floatingactionbutton.FloatingActionButton
-                android:id="@+id/drawer_btn_reboot"
-                style="?attr/floatingActionButtonStyle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:contentDescription="Reboot"
-                app:srcCompat="@drawable/ic_reboot"
-                app:materialThemeOverlay="@style/ThemeOverlay.Material3Expressive.FloatingActionButton.Secondary"
-                android:foreground="@drawable/fab_focus_indicator"
-                android:layout_marginEnd="12dp" />
+            <!-- Gráficos -->
+            <com.google.android.material.card.MaterialCardView
+                style="@style/Cenit.Settings.Card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
 
-            <com.google.android.material.floatingactionbutton.FloatingActionButton
-                android:id="@+id/drawer_btn_power"
-                style="?attr/floatingActionButtonStyle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:contentDescription="Power"
-                app:srcCompat="@drawable/ic_power"
-                app:materialThemeOverlay="@style/ThemeOverlay.Material3Expressive.FloatingActionButton.Tertiary"
-                android:foreground="@drawable/fab_focus_indicator" />
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView style="@style/Cenit.Settings.Section" android:text="Motor gráfico" />
+
+                    <com.google.android.material.button.MaterialButtonToggleGroup
+                        android:id="@+id/drawer_tg_renderer"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        app:selectionRequired="true"
+                        app:singleSelection="true">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/drawer_tb_at"
+                            style="@style/Cenit.Settings.Toggle"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:text="AT" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/drawer_tb_vk"
+                            style="@style/Cenit.Settings.Toggle"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:text="VK" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/drawer_tb_gl"
+                            style="@style/Cenit.Settings.Toggle"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:text="GL" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/drawer_tb_sw"
+                            style="@style/Cenit.Settings.Toggle"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:text="SW" />
+                    </com.google.android.material.button.MaterialButtonToggleGroup>
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/drawer_btn_custom_driver"
+                        style="@style/Cenit.Settings.ActionRow"
+                        android:layout_marginTop="12dp"
+                        android:text="Controlador GPU personalizado"
+                        app:icon="@drawable/settings_24px" />
+
+                    <TextView
+                        style="@style/Cenit.Settings.FieldLabel"
+                        android:text="Escala de resolución" />
+
+                    <Spinner
+                        android:id="@+id/drawer_sp_scale"
+                        style="@style/Cenit.Settings.Spinner" />
+
+                    <TextView
+                        style="@style/Cenit.Settings.FieldLabel"
+                        android:text="Precisión de mezcla" />
+
+                    <Spinner
+                        android:id="@+id/drawer_sp_blending_accuracy"
+                        style="@style/Cenit.Settings.Spinner" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Imagen -->
+            <com.google.android.material.card.MaterialCardView
+                style="@style/Cenit.Settings.Card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView style="@style/Cenit.Settings.Section" android:text="Imagen" />
+
+                    <TextView
+                        style="@style/Cenit.Settings.FieldLabel"
+                        android:layout_marginTop="10dp"
+                        android:text="Relación de aspecto" />
+
+                    <Spinner
+                        android:id="@+id/drawer_sp_aspect_ratio"
+                        style="@style/Cenit.Settings.Spinner" />
+
+                    <TextView
+                        style="@style/Cenit.Settings.FieldLabel"
+                        android:text="Recorte de bordes" />
+
+                    <TextView style="@style/Cenit.Settings.Caption" android:text="Oculta los píxeles basura de los bordes que el overscan de un CRT tapaba." />
+
+                    <Spinner
+                        android:id="@+id/drawer_sp_edge_crop"
+                        style="@style/Cenit.Settings.Spinner" />
+
+                    <View style="@style/Cenit.Settings.Divider" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/drawer_sw_vsync"
+                        style="@style/Cenit.Settings.Switch"
+                        android:text="Sincronización vertical (VSync)" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Audio -->
+            <com.google.android.material.card.MaterialCardView
+                style="@style/Cenit.Settings.Card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView style="@style/Cenit.Settings.Section" android:text="Audio" />
+
+                    <TextView
+                        style="@style/Cenit.Settings.FieldLabel"
+                        android:layout_marginTop="10dp"
+                        android:text="Salida de audio" />
+
+                    <TextView style="@style/Cenit.Settings.Caption" android:text="Algunos mandos USB se hacen pasar por tarjeta de sonido y se quedan el audio. Elige Teléfono para mantener el sonido en el móvil." />
+
+                    <Spinner
+                        android:id="@+id/drawer_sp_audio_output"
+                        style="@style/Cenit.Settings.Spinner" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Juegos y BIOS -->
+            <com.google.android.material.card.MaterialCardView
+                style="@style/Cenit.Settings.Card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView style="@style/Cenit.Settings.Section" android:text="Juegos y BIOS" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/drawer_btn_games"
+                        style="@style/Cenit.Settings.ActionRow"
+                        android:layout_marginTop="10dp"
+                        android:text="Biblioteca de juegos"
+                        app:icon="@drawable/stadia_controller_24px" />
+
+                    <!-- Visible solo en el cajón de biblioteca activo. -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/drawer_btn_texture_packs"
+                        style="@style/Cenit.Settings.ActionRow"
+                        android:layout_marginTop="4dp"
+                        android:text="Packs de texturas"
+                        android:visibility="gone"
+                        app:icon="@drawable/image_24px" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/drawer_btn_game_state"
+                        style="@style/Cenit.Settings.ActionRow"
+                        android:layout_marginTop="4dp"
+                        android:text="Estados de guardado"
+                        app:icon="@drawable/save_24px" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/drawer_btn_memcard_manager"
+                        style="@style/Cenit.Settings.ActionRow"
+                        android:layout_marginTop="4dp"
+                        android:text="Tarjetas de memoria"
+                        app:icon="@drawable/sd_card_24px" />
+
+                    <View style="@style/Cenit.Settings.Divider" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Archivos BIOS"
+                                android:textColor="@color/cenit_settings_text"
+                                android:textSize="14sp" />
+
+                            <TextView
+                                android:id="@+id/drawer_tv_bios_status"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:text="Necesita BIOS verificada"
+                                android:textColor="@color/cenit_neon_cyan"
+                                android:textSize="12sp" />
+                        </LinearLayout>
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/drawer_btn_bios"
+                            style="@style/Widget.Material3.Button.TextButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Importar"
+                            android:textColor="@color/cenit_neon_blue" />
+                    </LinearLayout>
+
+                    <View style="@style/Cenit.Settings.Divider" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/drawer_sw_boot_bios_on_start"
+                        style="@style/Cenit.Settings.Switch"
+                        android:text="Iniciar el menú de PS2 al arrancar" />
+
+                    <TextView style="@style/Cenit.Settings.Caption" android:text="Desactivado: la app abre directo en tus juegos. Ningún juego necesita el menú de PS2 antes de correr." />
+
+                    <TextView
+                        style="@style/Cenit.Settings.Section"
+                        android:layout_marginTop="10dp"
+                        android:text="Orientación" />
+
+                    <com.google.android.material.button.MaterialButtonToggleGroup
+                        android:id="@+id/drawer_tg_orientation"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        app:selectionRequired="true"
+                        app:singleSelection="true">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/drawer_tb_orientation_auto"
+                            style="@style/Cenit.Settings.Toggle"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:text="Auto" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/drawer_tb_orientation_landscape"
+                            style="@style/Cenit.Settings.Toggle"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:text="Paisaje" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/drawer_tb_orientation_portrait"
+                            style="@style/Cenit.Settings.Toggle"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:text="Retrato" />
+                    </com.google.android.material.button.MaterialButtonToggleGroup>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Texturas -->
+            <com.google.android.material.card.MaterialCardView
+                style="@style/Cenit.Settings.Card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView style="@style/Cenit.Settings.Section" android:text="Texturas" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/drawer_sw_load_textures"
+                        style="@style/Cenit.Settings.Switch"
+                        android:layout_marginTop="6dp"
+                        android:text="Cargar texturas" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/drawer_sw_async_textures"
+                        style="@style/Cenit.Settings.Switch"
+                        android:text="Texturas asíncronas" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/drawer_sw_precache_textures"
+                        style="@style/Cenit.Settings.Switch"
+                        android:text="Precargar reemplazos de texturas" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Parches -->
+            <com.google.android.material.card.MaterialCardView
+                style="@style/Cenit.Settings.Card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView style="@style/Cenit.Settings.Section" android:text="Parches" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/drawer_sw_widescreen"
+                        style="@style/Cenit.Settings.Switch"
+                        android:layout_marginTop="6dp"
+                        android:text="Parches panorámicos (16:9)" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/drawer_sw_no_interlacing"
+                        style="@style/Cenit.Settings.Switch"
+                        android:text="Sin entrelazado" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Mando -->
+            <com.google.android.material.card.MaterialCardView
+                style="@style/Cenit.Settings.Card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView style="@style/Cenit.Settings.Section" android:text="Mando" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/drawer_sw_touch_right_stick"
+                        style="@style/Cenit.Settings.Switch"
+                        android:layout_marginTop="6dp"
+                        android:text="Palanca derecha táctil" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/drawer_btn_test_controller"
+                        style="@style/Cenit.Settings.ActionRow"
+                        android:text="Probar entradas del mando"
+                        app:icon="@drawable/stadia_controller_24px" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Desarrollador -->
+            <com.google.android.material.card.MaterialCardView
+                style="@style/Cenit.Settings.Card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView style="@style/Cenit.Settings.Section" android:text="Desarrollador" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/drawer_sw_dev_hud"
+                        style="@style/Cenit.Settings.Switch"
+                        android:layout_marginTop="6dp"
+                        android:text="HUD de desarrollo" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Cuenta -->
+            <com.google.android.material.card.MaterialCardView
+                style="@style/Cenit.Settings.Card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView style="@style/Cenit.Settings.Section" android:text="RetroAchievements" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/drawer_btn_achievements"
+                        style="@style/Cenit.Settings.ActionRow"
+                        android:layout_marginTop="10dp"
+                        android:text="Logros y cuenta"
+                        app:icon="@drawable/check_circle_24px" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/drawer_btn_about"
+                        style="@style/Cenit.Settings.ActionRow"
+                        android:layout_marginTop="4dp"
+                        android:text="Acerca de Cenit"
+                        app:icon="@drawable/info_24px" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
         </LinearLayout>
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Renderer"
-            android:textStyle="bold"
-            android:textColor="@color/brand_primary"
-            android:paddingTop="8dp"
-            android:paddingBottom="4dp" />
-
-        <com.google.android.material.button.MaterialButtonToggleGroup
-            android:id="@+id/drawer_tg_renderer"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            app:singleSelection="true"
-            app:selectionRequired="true"
-            android:layout_marginBottom="8dp">
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/drawer_tb_at"
-                style="@style/PSX2.ToggleButton"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:minWidth="0dp"
-                android:text="AT"
-                android:textColor="@color/brand_primary"
-                android:checkable="true" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/drawer_tb_vk"
-                style="@style/PSX2.ToggleButton"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:minWidth="0dp"
-                android:text="VK"
-                android:textColor="@color/brand_primary"
-                android:checkable="true" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/drawer_tb_gl"
-                style="@style/PSX2.ToggleButton"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:minWidth="0dp"
-                android:text="GL"
-                android:textColor="@color/brand_primary"
-                android:checkable="true" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/drawer_tb_sw"
-            style="@style/PSX2.ToggleButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:minWidth="0dp"
-            android:text="SW"
-            android:textColor="@color/brand_primary"
-            android:checkable="true" />
-        </com.google.android.material.button.MaterialButtonToggleGroup>
-
-        <!-- Custom GPU driver (Vulkan ICD swap, e.g. Mesa Turnip) -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/drawer_btn_custom_driver"
-            style="@style/Widget.Material3Expressive.Button.OutlinedButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Custom GPU Driver"
-            android:textColor="@android:color/white"
-            android:textAllCaps="false"
-            android:layout_marginBottom="8dp" />
-
-        <!-- Orientation -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Orientation"
-            android:textStyle="bold"
-            android:textColor="@color/brand_primary"
-            android:paddingTop="8dp"
-            android:paddingBottom="4dp" />
-
-        <com.google.android.material.button.MaterialButtonToggleGroup
-            android:id="@+id/drawer_tg_orientation"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            app:singleSelection="true"
-            app:selectionRequired="true"
-            android:layout_marginBottom="8dp">
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/drawer_tb_orientation_auto"
-                style="@style/PSX2.ToggleButton"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:minWidth="0dp"
-                android:text="Auto"
-                android:textColor="@color/brand_primary"
-                android:checkable="true" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/drawer_tb_orientation_landscape"
-                style="@style/PSX2.ToggleButton"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:minWidth="0dp"
-                android:text="Landscape"
-                android:textColor="@color/brand_primary"
-                android:checkable="true" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/drawer_tb_orientation_portrait"
-                style="@style/PSX2.ToggleButton"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:minWidth="0dp"
-                android:text="Portrait"
-                android:textColor="@color/brand_primary"
-                android:checkable="true" />
-        </com.google.android.material.button.MaterialButtonToggleGroup>
-
-        <!-- Games shortcut -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/drawer_btn_games"
-            style="@style/Widget.Material3Expressive.Button.OutlinedButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Games"
-            android:textColor="@android:color/white"
-            android:textAllCaps="false"
-            app:icon="@drawable/stadia_controller_24px"
-            app:iconTint="@color/brand_primary"
-            app:iconGravity="textStart"
-            app:iconPadding="8dp"
-            app:iconSize="20dp"
-            android:layout_marginTop="8dp" />
-
-        <!-- Visible only in the active game-library drawer. -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/drawer_btn_texture_packs"
-            style="@style/Widget.Material3Expressive.Button.OutlinedButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="Texture Packs"
-            android:textAllCaps="false"
-            android:textColor="@android:color/white"
-            android:visibility="gone"
-            app:icon="@drawable/image_24px"
-            app:iconGravity="textStart"
-            app:iconPadding="8dp"
-            app:iconSize="20dp"
-            app:iconTint="@color/brand_primary" />
-
-        <!-- Save/Load game state shortcut -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/drawer_btn_game_state"
-            style="@style/Widget.Material3Expressive.Button.OutlinedButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Game State"
-            android:textColor="@android:color/white"
-            android:textAllCaps="false"
-            app:icon="@drawable/save_24px"
-            app:iconTint="@color/brand_primary"
-            app:iconGravity="textStart"
-            app:iconPadding="8dp"
-            app:iconSize="20dp"
-            android:layout_marginTop="4dp" />
-
-        <!-- Memory Card Manager -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/drawer_btn_memcard_manager"
-            style="@style/Widget.Material3Expressive.Button.OutlinedButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Memory Cards"
-            android:textColor="@android:color/white"
-            android:textAllCaps="false"
-            app:icon="@drawable/sd_card_24px"
-            app:iconTint="@color/brand_primary"
-            app:iconGravity="textStart"
-            app:iconPadding="8dp"
-            app:iconSize="20dp"
-            android:layout_marginTop="4dp" />
-
-        <!-- BIOS shortcut -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="BIOS Files"
-            android:textStyle="bold"
-            android:textColor="@color/brand_primary"
-            android:paddingTop="12dp"
-            android:paddingBottom="4dp" />
-
-        <TextView
-            android:id="@+id/drawer_tv_bios_status"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Need verified BIOS"
-            android:textColor="@color/md_theme_tertiary"
-            android:textSize="13sp"
-            android:paddingBottom="4dp" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/drawer_btn_bios"
-            style="@style/Widget.Material3Expressive.Button.OutlinedButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Import / Manage BIOS"
-            android:textColor="@android:color/white"
-            android:textAllCaps="false"
-            app:icon="@drawable/memory_24px"
-            app:iconTint="@color/brand_primary"
-            app:iconGravity="textStart"
-            app:iconPadding="8dp"
-            app:iconSize="20dp"
-            android:layout_marginTop="4dp"
-            android:layout_marginBottom="8dp" />
-
-        <com.google.android.material.materialswitch.MaterialSwitch
-            android:id="@+id/drawer_sw_boot_bios_on_start"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Boot PS2 menu on startup"
-            android:textColor="@android:color/white" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Off: the app opens straight to your games. Games never need the PS2 menu to run first."
-            android:textColor="@color/md_theme_tertiary"
-            android:textSize="12sp"
-            android:paddingBottom="4dp" />
-
-        <!-- Aspect Ratio -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Aspect Ratio"
-            android:textStyle="bold"
-            android:textColor="@color/brand_primary"
-            android:paddingTop="12dp"
-            android:paddingBottom="4dp" />
-
-        <Spinner
-            android:id="@+id/drawer_sp_aspect_ratio"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"/>
-
-        <!-- Edge Cropping -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Edge Cropping"
-            android:textStyle="bold"
-            android:textColor="@color/brand_primary"
-            android:paddingTop="12dp"
-            android:paddingBottom="2dp" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Hides junk pixels at the left/right edges that a CRT's overscan used to cover."
-            android:textSize="12sp"
-            android:alpha="0.7"
-            android:paddingBottom="4dp" />
-
-        <Spinner
-            android:id="@+id/drawer_sp_edge_crop"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"/>
-
-        <!-- Audio output -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Audio Output"
-            android:textStyle="bold"
-            android:textColor="@color/brand_primary"
-            android:paddingTop="12dp"
-            android:paddingBottom="2dp" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Some USB controllers act as a sound card and steal audio to their own headphone jack. Pick Phone Speaker to keep game sound on the phone."
-            android:textSize="12sp"
-            android:alpha="0.7"
-            android:paddingBottom="4dp" />
-
-        <Spinner
-            android:id="@+id/drawer_sp_audio_output"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"/>
-
-        <com.google.android.material.materialswitch.MaterialSwitch
-            android:id="@+id/drawer_sw_vsync"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Vertical Sync (VSync)"
-            android:textColor="@android:color/white"
-            android:layout_marginBottom="8dp"/>
-
-        <!-- Resolution Scale -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Resolution Scale"
-            android:textStyle="bold"
-            android:textColor="@color/brand_primary"
-            android:paddingBottom="4dp" />
-
-        <Spinner
-            android:id="@+id/drawer_sp_scale"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"/>
-
-        <!-- Blending Accuracy -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Blending Accuracy"
-            android:textStyle="bold"
-            android:textColor="@color/brand_primary"
-            android:paddingBottom="4dp" />
-
-        <Spinner
-            android:id="@+id/drawer_sp_blending_accuracy"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="12dp"/>
-
-        <!-- Patches Section -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Patches"
-            android:textStyle="bold"
-            android:textColor="@color/brand_primary"
-            android:paddingBottom="8dp" />
-
-        <com.google.android.material.materialswitch.MaterialSwitch
-            android:id="@+id/drawer_sw_widescreen"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Widescreen Patches"
-            android:textColor="@android:color/white"
-            android:layout_marginBottom="4dp"/>
-
-        <com.google.android.material.materialswitch.MaterialSwitch
-            android:id="@+id/drawer_sw_no_interlacing"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="No Interlacing"
-            android:textColor="@android:color/white"
-            android:layout_marginBottom="8dp"/>
-
-        <!-- Textures Section -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Textures"
-            android:textStyle="bold"
-            android:textColor="@color/brand_primary"
-            android:paddingBottom="8dp" />
-
-        <com.google.android.material.materialswitch.MaterialSwitch
-            android:id="@+id/drawer_sw_load_textures"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Load Textures"
-            android:textColor="@android:color/white"
-            android:layout_marginBottom="4dp"/>
-
-        <com.google.android.material.materialswitch.MaterialSwitch
-            android:id="@+id/drawer_sw_async_textures"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Async Textures"
-            android:textColor="@android:color/white"
-            android:layout_marginBottom="4dp"/>
-
-        <com.google.android.material.materialswitch.MaterialSwitch
-            android:id="@+id/drawer_sw_precache_textures"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Precache Texture Replacements"
-            android:textColor="@android:color/white"
-            android:layout_marginBottom="16dp"/>
-
-        <!-- Developer Section -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Developer"
-            android:textStyle="bold"
-            android:textColor="@color/brand_primary"
-            android:paddingBottom="8dp" />
-
-        <com.google.android.material.materialswitch.MaterialSwitch
-            android:id="@+id/drawer_sw_dev_hud"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Dev: HUD overlay"
-            android:textColor="@android:color/white"
-            android:layout_marginBottom="16dp"/>
-
-        <!-- Controller Section -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Controller"
-            android:textStyle="bold"
-            android:textColor="@color/brand_primary"
-            android:paddingBottom="8dp" />
-
-        <com.google.android.material.materialswitch.MaterialSwitch
-            android:id="@+id/drawer_sw_touch_right_stick"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Touch: Right Stick Joystick"
-            android:textColor="@android:color/white"
-            android:layout_marginBottom="8dp"/>
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/drawer_btn_test_controller"
-            style="@style/Widget.Material3Expressive.Button.OutlinedButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Test Controller Input"
-            android:textColor="@android:color/white"
-            android:textAllCaps="false"
-            android:layout_marginBottom="8dp"/>
-
-        <!-- About Section -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="About"
-            android:textStyle="bold"
-            android:textColor="@color/brand_primary"
-            android:paddingBottom="8dp" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/drawer_btn_about"
-            style="@style/Widget.Material3Expressive.Button.OutlinedButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Acerca de Cenit"
-            android:textColor="@android:color/white"
-            android:textAllCaps="false"
-            app:icon="@drawable/info_24px"
-            app:iconTint="@color/brand_primary"
-            app:iconGravity="textStart"
-            app:iconPadding="8dp"
-            app:iconSize="20dp"
-            android:layout_marginBottom="8dp"/>
-
-        <!-- RetroAchievements Section -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="RetroAchievements"
-            android:textStyle="bold"
-            android:textColor="@color/brand_primary"
-            android:paddingBottom="8dp" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/drawer_btn_achievements"
-            style="@style/Widget.Material3Expressive.Button.OutlinedButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="🏆 Achievements"
-            android:textColor="@android:color/white"
-            android:textAllCaps="false"
-            android:layout_marginBottom="16dp"/>
-
     </LinearLayout>
-
 </ScrollView>

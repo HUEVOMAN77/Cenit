@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Paleta "azul cenit" neón para onboarding y acentos de marca. -->
+    <color name="cenit_neon_blue">#22A7FF</color>
+    <color name="cenit_neon_cyan">#39E6FF</color>
+    <color name="cenit_neon_deep">#0A2A55</color>
+    <color name="cenit_neon_ink">#050B18</color>
+    <color name="cenit_neon_violet">#1E1440</color>
+
+    <!-- Superficies oscuras para tarjetas de ajustes -->
+    <color name="cenit_settings_bg">#070A12</color>
+    <color name="cenit_settings_card">#10151F</color>
+    <color name="cenit_settings_card_alt">#141B28</color>
+    <color name="cenit_settings_stroke">#1F2A3A</color>
+    <color name="cenit_settings_divider">#16202E</color>
+    <color name="cenit_settings_text">#E8F1FB</color>
+    <color name="cenit_settings_muted">#8FA3BC</color>
+</resources>

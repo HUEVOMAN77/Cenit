@@ -1081,6 +1081,21 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                     mIntro.hide(MainActivity.this::onIntroFinished);
                     return;
                 }
+                // Con los ajustes o las acciones rápidas abiertos a pantalla completa,
+                // atrás debe cerrar el cajón, no salir de la app.
+                try {
+                    DrawerLayout drawer = findViewById(R.id.drawer_layout);
+                    if (drawer != null) {
+                        if (drawer.isDrawerOpen(androidx.core.view.GravityCompat.START)) {
+                            drawer.closeDrawer(androidx.core.view.GravityCompat.START);
+                            return;
+                        }
+                        if (drawer.isDrawerOpen(androidx.core.view.GravityCompat.END)) {
+                            drawer.closeDrawer(androidx.core.view.GravityCompat.END);
+                            return;
+                        }
+                    }
+                } catch (Throwable ignored) {}
                 // Con la pantalla de inicio por delante, atrás significa salir de la app;
                 // durante el juego, pedir confirmación como antes.
                 if (mHomeScreenVisible) {

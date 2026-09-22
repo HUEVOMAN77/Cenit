@@ -471,8 +471,9 @@
     <!-- Left drawer (NavigationView) -->
     <com.google.android.material.navigation.NavigationView
         android:id="@+id/nav_view"
-        android:layout_width="320dp"
+        android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:background="@color/cenit_settings_bg"
         android:layout_gravity="start"
         app:itemIconTint="@color/md_theme_onSurface"
         app:itemTextColor="@color/md_theme_onSurface"
