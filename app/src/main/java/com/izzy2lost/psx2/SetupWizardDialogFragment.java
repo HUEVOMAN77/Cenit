@@ -1,11 +1,14 @@
 package com.izzy2lost.psx2;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
 import android.app.Dialog;
 import android.content.Context;
 import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -33,7 +36,9 @@ public class SetupWizardDialogFragment extends DialogFragment {
     private LinearLayout indicatorContainer;
     private TextView tvStep;
     private TextView tvSubtitle;
+    private View progressFill;
     private Runnable periodicCheck;
+    private int lastAnimatedPosition = -1;
 
     private final List<SetupStep> steps = Arrays.asList(
             new SetupStep(StepType.BIOS, R.drawable.memory_24px, "Archivos BIOS", "Importa una BIOS verificada de USA, Europa o Japón. Con una basta; con las tres Cenit ajusta la región de cada juego automáticamente.", "Importar BIOS"),
@@ -81,6 +86,7 @@ public class SetupWizardDialogFragment extends DialogFragment {
         renderIndicators(0);
         updateHeader(0);
         updateNextButtonState(0);
+        updateProgress(0);
 
         d.setOnDismissListener(dialog -> {
             if (getActivity() instanceof MainActivity) {
@@ -121,6 +127,7 @@ public class SetupWizardDialogFragment extends DialogFragment {
         indicatorContainer = root.findViewById(R.id.indicator_container);
         tvStep = root.findViewById(R.id.tv_step);
         tvSubtitle = root.findViewById(R.id.tv_subtitle);
+        progressFill = root.findViewById(R.id.progress_fill);
 
         btnNext.setOnClickListener(v -> handleNextClick());
     }
@@ -150,7 +157,66 @@ public class SetupWizardDialogFragment extends DialogFragment {
                 renderIndicators(position);
                 updateHeader(position);
                 updateNextButtonState(position);
+                updateProgress(position);
+                animatePageEntry(position);
             }
+
+            @Override
+            public void onPageScrolled(int position, float positionOffset, int positionOffsetPixels) {
+                super.onPageScrolled(position, positionOffset, positionOffsetPixels);
+                // Fade out the exiting page as the new one slides in
+                if (pager.getAdapter() != null) {
+                    RecyclerView rv = (RecyclerView) pager.getChildAt(0);
+                    if (rv != null) {
+                        View current = rv.findViewHolderForAdapterPosition(position) != null
+                                ? rv.findViewHolderForAdapterPosition(position).itemView : null;
+                        int nextPos = position + 1;
+                        View next = rv.findViewHolderForAdapterPosition(nextPos) != null
+                                ? rv.findViewHolderForAdapterPosition(nextPos).itemView : null;
+                        if (current != null) {
+                            current.setAlpha(1f - 0.5f * positionOffset);
+                            current.setTranslationY(-20f * positionOffset);
+                        }
+                        if (next != null) {
+                            next.setAlpha(0.5f + 0.5f * positionOffset);
+                            next.setTranslationY(40f * (1f - positionOffset));
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    private void animatePageEntry(int position) {
+        if (position == lastAnimatedPosition) return;
+        lastAnimatedPosition = position;
+
+        RecyclerView rv = (RecyclerView) pager.getChildAt(0);
+        if (rv == null) return;
+        RecyclerView.ViewHolder vh = rv.findViewHolderForAdapterPosition(position);
+        if (vh == null) return;
+
+        final View page = vh.itemView;
+        page.setAlpha(0f);
+        page.setTranslationY(40f);
+        page.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setDuration(350)
+                .setInterpolator(new DecelerateInterpolator(2f))
+                .setListener(null)
+                .start();
+    }
+
+    private void updateProgress(int position) {
+        if (progressFill == null) return;
+        progressFill.post(() -> {
+            int totalWidth = progressFill.getParent() != null ? ((View) progressFill.getParent()).getWidth() : 0;
+            if (totalWidth <= 0) return;
+            float fraction = (position + 1) / (float) steps.size();
+            ViewGroup.LayoutParams lp = progressFill.getLayoutParams();
+            lp.width = (int) (totalWidth * fraction);
+            progressFill.setLayoutParams(lp);
         });
     }
 
@@ -161,11 +227,25 @@ public class SetupWizardDialogFragment extends DialogFragment {
             return;
         }
         if (areAllStepsComplete()) {
-            completeAndDismiss();
+            animateExitAndComplete();
         } else {
             // Antes el botón se deshabilitaba aquí y el asistente no era cancelable,
             // así que quedabas atrapado en la última página sin poder avanzar.
             showFinishAnywayPrompt(firstIncompleteIndex());
+        }
+    }
+
+    private void animateExitAndComplete() {
+        View dialogView = getDialog() != null ? getDialog().findViewById(android.R.id.content) : null;
+        if (dialogView != null) {
+            dialogView.animate()
+                    .alpha(0f)
+                    .setDuration(300)
+                    .setInterpolator(new DecelerateInterpolator())
+                    .withEndAction(this::completeAndDismiss)
+                    .start();
+        } else {
+            completeAndDismiss();
         }
     }
 
@@ -193,15 +273,18 @@ public class SetupWizardDialogFragment extends DialogFragment {
 
     private void renderIndicators(int activeIndex) {
         indicatorContainer.removeAllViews();
-        int size = (int) (16 * getResources().getDisplayMetrics().density);
-        int margin = (int) (8 * getResources().getDisplayMetrics().density);
+        int dotW = (int) (28 * getResources().getDisplayMetrics().density);
+        int dotH = (int) (6 * getResources().getDisplayMetrics().density);
+        int margin = (int) (4 * getResources().getDisplayMetrics().density);
         for (int i = 0; i < steps.size(); i++) {
             View indicator = new View(requireContext());
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(size, size);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    i == activeIndex ? dotW : dotH, dotH);
             lp.setMargins(margin, 0, margin, 0);
             indicator.setLayoutParams(lp);
             indicator.setBackground(ContextCompat.getDrawable(requireContext(),
-                    i == activeIndex ? R.drawable.setup_indicator_active : R.drawable.setup_indicator_inactive));
+                    i == activeIndex ? R.drawable.bg_cenit_onboard_indicator_active
+                            : R.drawable.bg_cenit_onboard_indicator_inactive));
             indicatorContainer.addView(indicator);
         }
     }
@@ -394,21 +477,19 @@ public class SetupWizardDialogFragment extends DialogFragment {
             SetupStep step = steps.get(position);
             holder.title.setText(step.title);
             holder.description.setText(step.description);
-            holder.stepChip.setText(step.type.name());
+            holder.stepChip.setText("PASO " + (position + 1));
             holder.action.setText(step.ctaText);
             holder.icon.setImageResource(step.iconRes);
 
             boolean complete = listener.isComplete(step.type);
-            int completeBg = ContextCompat.getColor(ctx, R.color.md_theme_primary);
-            int pendingBg = ContextCompat.getColor(ctx, R.color.md_theme_outlineVariant);
-            int completeFg = ContextCompat.getColor(ctx, R.color.md_theme_onPrimary);
-            int pendingFg = ContextCompat.getColor(ctx, R.color.md_theme_onSurface);
 
             holder.status.setText(listener.getStatusText(step.type));
-            holder.status.setBackgroundTintList(android.content.res.ColorStateList.valueOf(complete ? completeBg : pendingBg));
-            holder.status.setTextColor(complete ? completeFg : pendingFg);
+            holder.status.setBackground(ContextCompat.getDrawable(ctx,
+                    complete ? R.drawable.bg_cenit_onboard_status_done : R.drawable.bg_cenit_onboard_status_pending));
+            holder.status.setTextColor(complete ? 0xFF050B18 : 0xFFFFFFFF);
+
             holder.action.setIcon(ContextCompat.getDrawable(ctx, complete ? R.drawable.check_circle_24px : step.iconRes));
-            holder.action.setIconTint(android.content.res.ColorStateList.valueOf(0xFF000000));
+            holder.action.setIconTint(android.content.res.ColorStateList.valueOf(0xFF050B18));
             holder.action.setEnabled(true);
             holder.action.setOnClickListener(v -> listener.onAction(step.type));
         }
