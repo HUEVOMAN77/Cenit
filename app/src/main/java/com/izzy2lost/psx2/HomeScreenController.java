@@ -174,11 +174,12 @@ public final class HomeScreenController {
     }
 
     /** Consume el latch solo cuando tiene sentido animar: inicio visible y algo que mostrar. */
-    private void paintEntranceIfNeeded() {
-        if (entranceBlocked || !animateNextLibrary || !isVisible() || entries.isEmpty()) return;
+    private boolean paintEntranceIfNeeded() {
+        if (entranceBlocked || !animateNextLibrary || !isVisible() || entries.isEmpty()) return false;
         animateNextLibrary = false;
         animateHeader();
         if (adapter != null) adapter.startEntranceAnimation();
+        return true;
     }
 
     public void setEntranceBlocked(boolean blocked) {
@@ -301,8 +302,10 @@ public final class HomeScreenController {
         if (libraryTitle != null) {
             libraryTitle.setText(entries.isEmpty() ? "Biblioteca" : "Biblioteca · " + entries.size());
         }
-        if (adapter != null) adapter.notifyDataSetChanged();
-        paintEntranceIfNeeded();
+        // paintEntranceIfNeeded ya refresca (con animación) si la entrada quedó armada;
+        // si no, hay que repintar la cuadrícula de todos modos.
+        boolean animated = paintEntranceIfNeeded();
+        if (adapter != null && !animated) adapter.notifyDataSetChanged();
         renderContinue();
         renderEmpty(false);
     }
