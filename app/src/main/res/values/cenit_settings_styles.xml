@@ -11,7 +11,7 @@
     </style>
 
     <!-- Título de sección -->
-    <style name="Cenit.Settings.Section">
+    <style name="Cenit.Settings.Section" parent="">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
         <item name="android:textColor">@color/cenit_neon_blue</item>
@@ -22,7 +22,7 @@
     </style>
 
     <!-- Etiqueta de campo -->
-    <style name="Cenit.Settings.FieldLabel">
+    <style name="Cenit.Settings.FieldLabel" parent="">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
         <item name="android:layout_marginTop">14dp</item>
@@ -31,7 +31,7 @@
     </style>
 
     <!-- Texto de ayuda -->
-    <style name="Cenit.Settings.Caption">
+    <style name="Cenit.Settings.Caption" parent="">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
         <item name="android:layout_marginTop">2dp</item>
@@ -42,7 +42,7 @@
     </style>
 
     <!-- Separador fino -->
-    <style name="Cenit.Settings.Divider">
+    <style name="Cenit.Settings.Divider" parent="">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">1dp</item>
         <item name="android:layout_marginTop">14dp</item>
@@ -97,7 +97,7 @@
     </style>
 
     <!-- Campo desplegable (Spinner) -->
-    <style name="Cenit.Settings.Spinner">
+    <style name="Cenit.Settings.Spinner" parent="">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
         <item name="android:layout_marginTop">4dp</item>
