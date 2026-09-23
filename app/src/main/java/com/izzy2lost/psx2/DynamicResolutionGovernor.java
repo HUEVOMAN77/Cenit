@@ -101,7 +101,7 @@ final class DynamicResolutionGovernor {
     }
 
     /** API 29+: el sistema avisa cuando recorta frecuencias por calor. */
-    @androidx.annotation.TargetApi(29)
+    @android.annotation.TargetApi(29)
     private void attachThermalListener(android.os.PowerManager pm) {
         if (thermalListener != null) return;
         final android.os.PowerManager.OnThermalStatusChangedListener listener = status -> {
