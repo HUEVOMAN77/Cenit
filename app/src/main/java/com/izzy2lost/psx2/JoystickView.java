@@ -63,7 +63,8 @@ public class JoystickView extends View {
 
         gripPaint = new Paint();
         gripPaint.setShader(new android.graphics.BitmapShader(
-                makeGripBitmap(), android.graphics.Shader.TileMode.REPEAT));
+                makeGripBitmap(), android.graphics.Shader.TileMode.REPEAT,
+                android.graphics.Shader.TileMode.REPEAT));
 
         // El shader del degradado de la perla se crea en onSizeChanged (necesita radios).
         this.knobHi = knobHi;
