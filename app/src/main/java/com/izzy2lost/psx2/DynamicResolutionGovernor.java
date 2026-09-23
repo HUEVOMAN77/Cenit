@@ -85,6 +85,10 @@ final class DynamicResolutionGovernor {
 
     /** El usuario tocó algo que invalida la medición: olvidar y volver al techo. */
     void reset() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            main.post(this::reset);
+            return;
+        }
         slowTicks = 0;
         fastTicks = 0;
         cooldownTicks = 0;
