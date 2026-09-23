@@ -1019,6 +1019,12 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                     @Override public boolean isGameRunning() {
                         return isThread();
                     }
+
+                    @Override public String runningGamePath() {
+                        // Con el apagado en curso, m_szGamefile ya se limpió pero
+                        // el hilo puede seguir vivo: devolver "" es lo honesto.
+                        return isThread() && !TextUtils.isEmpty(m_szGamefile) ? m_szGamefile : "";
+                    }
                 });
         mSettingsScreen.hide();
     }
@@ -1932,7 +1938,10 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         NativeApp.setHWMipmap(prefs.getBoolean("hw_mipmap", true));
         NativeApp.setMaxAnisotropy(prefs.getInt("max_anisotropy", 0));
         NativeApp.setCASMode(prefs.getInt("cas_mode", 0), prefs.getInt("cas_sharpness", 50));
-        NativeApp.setHalfPixelOffset(prefs.getInt("half_pixel_offset", 1));
+        // Cenit 0.6.4: el desplazado de medio píxel ya no se aplica aquí. Era una
+        // escritura fantasma (MaskUserHacks la borraba en cada ApplySettings); el
+        // control real es por juego y vive en el INI de gamesettings, que el
+        // núcleo carga solo al arrancar ese juego.
         // Turbo de CPU (EECycleRate). Con el VM parado solo queda guardado en el INI;
         // al arrancar el juego ya se carga desde ahí.
         NativeApp.speedhackEecyclerate(prefs.getInt("ee_cycle_rate", 0));

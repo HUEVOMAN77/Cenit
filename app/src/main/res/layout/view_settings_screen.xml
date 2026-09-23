@@ -344,6 +344,11 @@
                                 style="@style/Cenit.Settings.Caption"
                                 android:text="Corrige líneas y texturas movidas en juegos 3D. Normal arregla la mayoría." />
 
+                            <TextView
+                                android:id="@+id/set_tv_halfpixel_note"
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Se guarda solo para el juego que está delante." />
+
                             <Spinner
                                 android:id="@+id/set_sp_halfpixel"
                                 style="@style/Cenit.Settings.Spinner" />

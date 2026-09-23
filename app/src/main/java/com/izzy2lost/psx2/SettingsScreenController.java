@@ -58,6 +58,8 @@ public final class SettingsScreenController {
         void onOrientationRequested(int mode);
         void onBootBiosToggled(boolean enabled);
         boolean isGameRunning();
+        /** URI del juego en curso ("" = ninguno). Para los ajustes por juego. */
+        String runningGamePath();
     }
 
     private final Context context;
@@ -67,6 +69,9 @@ public final class SettingsScreenController {
     @Nullable private androidx.core.widget.NestedScrollView scroll;
     @Nullable private ChipGroup chips;
     private boolean bound;
+    // Última posición del spinner de medio píxel que se mostró (o -1 si no hay
+    // juego delante). Evita que setSelection dispare la escritura por reflejo.
+    private int halfPixelShown = -1;
 
     public SettingsScreenController(@NonNull Context context, @NonNull ViewGroup parent,
                                     @NonNull Host host) {
@@ -269,10 +274,19 @@ public final class SettingsScreenController {
             NativeApp.setMaxAnisotropyAsync(level);
         });
 
+        // Desde 0.6.4 esto es POR JUEGO: el INI global perdía el valor por
+        // MaskUserHacks (ver NativeApp.setGameUserHackInt). Solo editable con un
+        // juego delante; el cambio impacta en caliente vía ReloadGameSettings.
         spinner(R.id.set_sp_halfpixel, R.array.half_pixel_entries, position -> {
-            if (position == prefs.getInt("half_pixel_offset", 1)) return;
-            prefs.edit().putInt("half_pixel_offset", position).apply();
-            NativeApp.setHalfPixelOffsetAsync(position);
+            // El spinner dispara solo con poner el adaptador (posición 0) antes de
+            // leer el estado real. Sin valor mostrado todavía, se ADOPTA sin
+            // escribir: lo contrario pondría Apagado en el juego de nadie.
+            if (halfPixelShown < 0) { halfPixelShown = position; return; }
+            if (position == halfPixelShown) return;
+            final String uri = host.runningGamePath();
+            if (uri == null || uri.isEmpty()) return;
+            if (NativeApp.safeSetGameUserHackInt(uri, NativeApp.HACK_HALF_PIXEL_OFFSET, position))
+                halfPixelShown = position;
         });
 
         spinner(R.id.set_sp_cas, R.array.cas_entries, position -> {
@@ -470,7 +484,22 @@ public final class SettingsScreenController {
         setSpinner(R.id.set_sp_filtering, prefs.getInt("texture_filtering", 2));
         setSpinner(R.id.set_sp_mipmap, prefs.getBoolean("hw_mipmap", true) ? 1 : 0);
         setSpinner(R.id.set_sp_anisotropy, anisotropyPositionFor(prefs.getInt("max_anisotropy", 0)));
-        setSpinner(R.id.set_sp_halfpixel, prefs.getInt("half_pixel_offset", 1));
+        // Medio píxel: por juego. Con juego delante se lee su INI (el nativo cae
+        // al GameDB y de ahí a Normal si nadie lo tocó); sin juego, bloqueado.
+        final String hpUri = host.runningGamePath();
+        final boolean hpAvailable = hpUri != null && !hpUri.isEmpty();
+        halfPixelShown = hpAvailable
+                ? NativeApp.safeGetGameUserHackInt(hpUri, NativeApp.HACK_HALF_PIXEL_OFFSET, 1)
+                : 1;
+        setSpinner(R.id.set_sp_halfpixel, halfPixelShown);
+        Spinner hpSp = root.findViewById(R.id.set_sp_halfpixel);
+        if (hpSp != null) hpSp.setEnabled(hpAvailable);
+        TextView hpNote = root.findViewById(R.id.set_tv_halfpixel_note);
+        if (hpNote != null) {
+            hpNote.setText(hpAvailable
+                    ? "Guardado solo para el juego que está delante, y se aplica al instante."
+                    : "Ajuste por juego: abre un juego para cambiarlo.");
+        }
         int casMode = prefs.getInt("cas_mode", 0);
         setSpinner(R.id.set_sp_cas, casMode);
         int sharpness = prefs.getInt("cas_sharpness", 50);

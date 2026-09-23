@@ -2,6 +2,7 @@
 #include <android/native_window_jni.h>
 #include <android/log.h>
 #include <unistd.h>
+#include <iterator> // std::size, usado por la tabla de hacks por-juego
 #include "PrecompiledHeader.h"
 #include "AchievementsJNI.h"
 #include "common/StringUtil.h"
@@ -13,6 +14,7 @@
 #include "CDVD/CDVD.h"
 #include "PerformanceMetrics.h"
 #include "GameList.h"
+#include "GameDatabase.h"
 #include "GS/GSPerfMon.h"
 #include "GS/Renderers/HW/GSRendererHW.h"
 #include "GS/Renderers/HW/GSTextureReplacements.h"
@@ -183,6 +185,13 @@ static void ApplyHardwarePerformanceProfile()
     s_settings_interface.SetBoolValue("EmuCore/GS", "HWSpinGPUForReadbacks", false);
     s_settings_interface.SetBoolValue("EmuCore/GS", "SkipDuplicateFrames", true);
 
+    // §4.2: el método por defecto ya es Zstandard (barato y bueno); lo que se
+    // ajusta en gama baja es el NIVEL: Medium (valor por defecto) -> Low (0),
+    // el nivel más rápido de zstd. Guardar una estado no debe costar cuadros;
+    // cambia tamaño, no fiabilidad.
+    if (AndroidDeviceDetection::GetDeviceTier() == 0)
+        s_settings_interface.SetIntValue("EmuCore", "SavestateCompressionRatio", 0);
+
     // Renderer/upscale are NOT set here: MainActivity pushes the user's saved
     // values after initialize() (applyGlobalSettingsBatch), so a native write
     // would just be overwritten. The device tier is exposed via
@@ -204,16 +213,14 @@ static void ApplyHardwarePerformanceProfile()
 }
 
 // Device performance tier for first-run defaults (see PerfProfile on the Java
-// side): 2 = Snapdragon 8-series or 7-series >= ~765 (778G class), 1 = other
-// Snapdragon / mid hardware, 0 = everything else (Mali, unknown).
+// side). GetDeviceTier() has the full curated table: 2 = high-end Snapdragon,
+// 1 = other Snapdragon + capable MediaTek/Exynos, 0 = low-end/unknown.
 extern "C"
 JNIEXPORT jint JNICALL
 Java_com_izzy2lost_psx2_NativeApp_getDevicePerformanceTier(JNIEnv*, jclass)
 {
 #ifdef __ANDROID__
-    if (AndroidDeviceDetection::DetectGPUVendor() == AndroidDeviceDetection::GPUVendor::Qualcomm)
-        return AndroidDeviceDetection::IsHighEndSnapdragon() ? 2 : 1;
-    return 0;
+    return AndroidDeviceDetection::GetDeviceTier();
 #else
     return 2;
 #endif
@@ -534,14 +541,245 @@ Java_com_izzy2lost_psx2_NativeApp_setCASMode(JNIEnv* env, jclass, jint mode, jin
 
 // Desplazamiento de medio píxel: corrige el "pixel shifting" de texturas en HW.
 // 0 apagado, 1 normal, 2 especial, 3 especial agresivo, 4 nativo, 5 nativo+textura.
+//
+// Cenit 0.6.4 (plan del inge §1.1): escribir esto en el INI GLOBAL era una
+// función fantasma — LoadCoreSettings() corre MaskUserHacks() después de cargar
+// (VMManager.cpp:743) y, como este port nunca pone UserHacks=true, el valor
+// vuelto a cero en cada ApplySettings. El control ahora vive por JUEGO en el
+// INI de gamesettings/ (setGameUserHackInt abajo), que sí tiene prioridad.
 extern "C"
 JNIEXPORT void JNICALL
 Java_com_izzy2lost_psx2_NativeApp_setHalfPixelOffset(JNIEnv* env, jclass, jint mode)
 {
-    if (mode < 0) mode = 0; if (mode > 5) mode = 5;
-    s_settings_interface.SetIntValue("EmuCore/GS", "UserHacks_HalfPixelOffset", mode);
-    if (VMManager::HasValidVM()) VMManager::ApplySettings();
-    if (MTGS::IsOpen()) MTGS::ApplySettings();
+    // Intencionalmente vacío desde 0.6.4: conservarlo escribiendo al vacío era
+    // peor (confundía). Java ya no lo llama; se borra en la limpieza de 0.7.0.
+    (void)mode;
+}
+
+// ---------------------------------------------------------------------------
+// Hacks de hardware POR JUEGO (Cenit 0.6.4, plan del inge §1.1)
+//
+// El núcleo borra todos los UserHacks_* globales salvo que UserHacks=true, pero
+// UserHacks=true global desactivaría los gsHWFixes automáticos del GameDB
+// (GameDatabase.cpp:709) — rompería, por ejemplo, los 4 fixes de God of War II.
+// La solución correcta es la capa por-juego: escribir UserHacks=true + los
+// hacks en gamesettings/<SERIAL>_CRC.ini. Esa capa manda sobre el INI base,
+// MaskUserHacks respeta los valores de la capa, y como la capa solo existe para
+// ESTE juego, los demás siguen recibiendo sus fixes automáticos del DB intactos.
+//
+// El riesgo que el inge marcó (perder los fixes del DB al entrar en modo
+// manual para ese juego) se cubre con la SIEMBRA: la primera escritura copia al
+// INI del juego TODOS los gsHWFixes que el DB tiene para ese serial, para que
+// el modo manual parta exactamente de lo que el DB ya aplicaba.
+// ---------------------------------------------------------------------------
+
+// Mapeo GSHWFixId -> clave INI. Los índices son los del enum GameDatabaseSchema::
+// GSHWFixId (Config-side names verificados contra s_gs_hw_fix_names en
+// GameDatabase.cpp:361). nullptr = fix que no requiere sembrarse: o no es un
+// user hack (mipmap, PCRTC*, blending, deinterlace, texturePreloading) y el DB
+// lo aplica igual con UserHacks=true, o su semántica es compuesta y sembrarlo
+// a ciegas cambiaría el resultado (gpuPaletteConversion depende de
+// texturePreloading; los recommended* solo elevan, no fijan).
+//
+// isUserHackHWFix (GameDatabase.cpp:422, estático en ese TU) dice que todo id
+// >= TrilinearFiltering salvo las 3 excepciones de arriba es user hack; se
+// respeta esa regla aquí por posición.
+static const char* const s_game_user_hack_ini_keys[] = {
+    /* AutoFlush                */ "UserHacks_AutoFlushLevel",
+    /* CPUFramebufferConversion */ "UserHacks_CPU_FB_Conversion",
+    /* FlushTCOnClose           */ "UserHacks_ReadTCOnClose",
+    /* DisableDepthSupport      */ "UserHacks_DisableDepthSupport",
+    /* PreloadFrameData         */ "preload_frame_with_gs_data",
+    /* DisablePartialInvalidat. */ "UserHacks_DisablePartialInvalidation",
+    /* TextureInsideRT          */ "UserHacks_TextureInsideRt",
+    /* Limit24BitDepth          */ "UserHacks_Limit24BitDepth",
+    /* AlignSprite              */ "UserHacks_align_sprite_X",
+    /* MergeSprite              */ "UserHacks_merge_pp_sprite",
+    /* Mipmap (no-sembrar)      */ nullptr,
+    /* AccurateAlphaTest        */ "HWAccurateAlphaTest",
+    /* ForceEvenSpritePosition  */ "UserHacks_ForceEvenSpritePosition",
+    /* BilinearUpscale          */ "UserHacks_BilinearHack",
+    /* NativePaletteDraw        */ "UserHacks_NativePaletteDraw",
+    /* EstimateTextureRegion    */ "UserHacks_EstimateTextureRegion",
+    /* DrawBuffering            */ "UserHacks_DrawBuffering",
+    /* RewriteLargeSTCoords     */ "UserHacks_RewriteLargeSTCoords",
+    /* PCRTCOffsets (no user)   */ nullptr,
+    /* PCRTCOverscan (no user)  */ nullptr,
+    /* TrilinearFiltering       */ nullptr, // "TriFilter": el DB lo trata aparte y no lo borra MaskUserHacks
+    /* SkipDrawStart            */ "UserHacks_SkipDraw_Start",
+    /* SkipDrawEnd              */ "UserHacks_SkipDraw_End",
+    /* HalfPixelOffset          */ "UserHacks_HalfPixelOffset",
+    /* RoundSprite              */ "UserHacks_round_sprite_offset",
+    /* NativeScaling            */ "UserHacks_native_scaling",
+    /* TexturePreloading        */ nullptr, // el DB lo trata aparte (no-user-hack)
+    /* Deinterlace              */ nullptr,
+    /* CPUSpriteRenderBW        */ "UserHacks_CPUSpriteRenderBW",
+    /* CPUSpriteRenderLevel     */ "UserHacks_CPUSpriteRenderLevel",
+    /* CPUCLUTRender            */ "UserHacks_CPUCLUTRender",
+    /* GPUTargetCLUT            */ "UserHacks_GPUTargetCLUTMode",
+    /* GPUPaletteConversion     */ "paltex", // MaskUserHacks sí lo borra: sembrar
+    /* MinimumBlendingLevel     */ nullptr,
+    /* MaximumBlendingLevel     */ nullptr,
+    /* RecommendedBlendingLevel */ nullptr,
+    /* RecommendedAccurateAlpha */ nullptr,
+    /* RecommendedHWAA1         */ nullptr,
+    /* GetSkipCount             */ nullptr,
+    /* BeforeDraw               */ nullptr,
+    /* MoveHandler              */ nullptr,
+};
+
+static bool GameUserHackIdsMatch(GameDatabaseSchema::GSHWFixId id, const char* key)
+{
+    const u32 index = static_cast<u32>(id);
+    return index < std::size(s_game_user_hack_ini_keys) &&
+           s_game_user_hack_ini_keys[index] &&
+           StringUtil::Strcasecmp(s_game_user_hack_ini_keys[index], key) == 0;
+}
+
+static std::string ResolveGameSettingsPathForUri(const std::string& game_path)
+{
+    if (game_path.empty())
+        return {};
+
+    const std::string serial = GetGameSerialForPath(game_path);
+    u32 crc = 0;
+    if (!VMManager::isArcadeManifest(game_path))
+    {
+        Error error;
+        auto* prev = CDVD;
+        CDVD = &CDVDapi_Iso;
+        if (CDVD->open(game_path, &error))
+        {
+            (void)DoCDVDdetectDiskType();
+            cdvdGetDiscInfo(nullptr, nullptr, nullptr, nullptr, &crc, nullptr);
+            DoCDVDclose();
+        }
+        CDVD = prev;
+    }
+
+    // Misma cascada que usa el núcleo al cargar (UpdateGameSettingsLayer):
+    // SERIAL_CRC.ini, luego SERIAL.ini. Reusar la ruta ya existente en vez de
+    // crear la variante con CRC evita partir el estado del juego en dos files
+    // (el diálogo por-juego escribe gamesettings/SERIAL.ini desde Java).
+    const std::string with_crc = VMManager::GetGameSettingsPath(serial, crc);
+    if (serial.empty() || FileSystem::FileExists(with_crc.c_str()))
+        return with_crc;
+    const std::string plain = VMManager::GetGameSettingsPath(serial, 0);
+    if (FileSystem::FileExists(plain.c_str()))
+        return plain;
+    return with_crc;
+}
+
+// Escribe (o siembra+escribe) un entero en el INI por-juego. Devuelve false si
+// no se pudo resolver el juego. Si el VM está corriendo ESE juego, recarga la
+// capa por-juego en caliente (VMManager::ReloadGameSettings).
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setGameUserHackInt(JNIEnv* env, jclass,
+                                                     jstring p_gameUri,
+                                                     jstring p_key,
+                                                     jint p_value)
+{
+    const std::string game_path = GetJavaString(env, p_gameUri);
+    const std::string key = GetJavaString(env, p_key);
+    const std::string path = ResolveGameSettingsPathForUri(game_path);
+    if (path.empty() || key.empty())
+        return JNI_FALSE;
+
+    INISettingsInterface game_settings(path);
+    game_settings.Load(); // puede no existir todavía: carga vacío
+
+    // Primera edición de hacks en este juego: sembrar los valores del GameDB
+    // ANTES de tocar nada, y recién después activar el modo manual del juego.
+    // UserHacks se escribió como bool, así que se lee como bool.
+    bool seeded = game_settings.GetBoolValue("EmuCore/GS", "UserHacks", false);
+
+    if (!seeded)
+    {
+        const std::string serial = GetGameSerialForPath(game_path);
+        if (!serial.empty())
+        {
+            GameDatabase::ensureLoaded();
+            if (const auto* game = GameDatabase::findGame(serial))
+            {
+                // Sembrar TODO fix de usuario que el DB tenga para este serial,
+                // para que activar el modo manual del juego no pierda nada.
+                for (const auto& [id, value] : game->gsHWFixes)
+                {
+                    const u32 index = static_cast<u32>(id);
+                    if (index >= std::size(s_game_user_hack_ini_keys))
+                        continue;
+                    const char* ini_key = s_game_user_hack_ini_keys[index];
+                    if (ini_key)
+                        game_settings.SetIntValue("EmuCore/GS", ini_key, value);
+                }
+            }
+        }
+        game_settings.SetBoolValue("EmuCore/GS", "UserHacks", true);
+    }
+
+    game_settings.SetIntValue("EmuCore/GS", key.c_str(), (int)p_value);
+    if (!game_settings.Save())
+        return JNI_FALSE;
+
+    // Si este juego es el que está corriendo, recargar la capa por-juego ya.
+    // Igual que FullscreenUI (FullscreenUI.cpp:717), el recargo tiene que ir al
+    // hilo de emulación: ReloadGameSettings -> ApplySettings espera a MTGS/VU.
+    if (VMManager::HasValidVM())
+    {
+        const std::string edited_serial = GetGameSerialForPath(game_path);
+        if (!edited_serial.empty())
+        {
+            Host::RunOnCPUThread([edited_serial]() {
+                if (VMManager::GetState() != VMState::Running && VMManager::GetState() != VMState::Paused)
+                    return;
+                if (StringUtil::Strcasecmp(VMManager::GetDiscSerial().c_str(), edited_serial.c_str()) == 0)
+                    VMManager::ReloadGameSettings();
+            });
+        }
+    }
+    return JNI_TRUE;
+}
+
+// Lectura para la UI: valor efectivo de un hack de este juego (capa por-juego;
+// si no existe, lo que el DB aplicaría: se pasa por la propia tabla DB->clave).
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getGameUserHackInt(JNIEnv* env, jclass,
+                                                     jstring p_gameUri,
+                                                     jstring p_key,
+                                                     jint p_fallback)
+{
+    const std::string game_path = GetJavaString(env, p_gameUri);
+    const std::string key = GetJavaString(env, p_key);
+    const std::string path = ResolveGameSettingsPathForUri(game_path);
+    if (path.empty() || key.empty())
+        return p_fallback;
+
+    INISettingsInterface game_settings(path);
+    if (game_settings.Load())
+    {
+        int value = 0;
+        if (game_settings.GetIntValue("EmuCore/GS", key.c_str(), &value))
+            return value;
+    }
+
+    // Sin entrada propia: devolver lo que el GameDB fija para ese juego, si
+    // lo fija (la UI debe mostrar el valor que REALMENTE está en uso).
+    const std::string serial = GetGameSerialForPath(game_path);
+    if (!serial.empty())
+    {
+        GameDatabase::ensureLoaded();
+        if (const auto* game = GameDatabase::findGame(serial))
+        {
+            for (const auto& [id, value] : game->gsHWFixes)
+            {
+                if (GameUserHackIdsMatch(id, key.c_str()))
+                    return value;
+            }
+        }
+    }
+    return p_fallback;
 }
 
 extern "C"
@@ -587,8 +825,10 @@ Java_com_izzy2lost_psx2_NativeApp_initialize(JNIEnv *env, jclass clazz,
 
         VMManager::SetDefaultSettings(si, true, true, true, true, true);
 
-        // complete as quickly as possible
-        si.SetBoolValue("EmuCore/GS", "FrameLimitEnable", false);
+        // Cenit 0.6.4: "FrameLimitEnable" ya NO existe como key en este núcleo
+        // (el limitador vive en VMManager::UpdateTargetSpeed/Throttle). Se estaba
+        // escribiendo al vacío en cada arranque; eliminado. Vsync off sigue siendo
+        // el camino real para "arrancar lo más rápido posible".
         si.SetBoolValue("EmuCore/GS", "VsyncEnable", false);
 
         // ensure all input sources are disabled, we're not using them
@@ -672,6 +912,11 @@ Java_com_izzy2lost_psx2_NativeApp_getGameTitle(JNIEnv *env, jclass clazz,
 
     const GameList::Entry *entry;
     entry = GameList::GetEntryForPath(_szPath.c_str());
+    // Cenit 0.6.4: GetEntryForPath devuelve null si el juego no está en la lista
+    // (URI suelta, lista aún no escaneada). El código anterior desreferenciaba a
+    // ciegas: crash nativo. Salida vacía y Java usa su propio resolver.
+    if (!entry)
+        return env->NewStringUTF("");
 
     std::string ret;
     ret.append(entry->title);
@@ -681,6 +926,16 @@ Java_com_izzy2lost_psx2_NativeApp_getGameTitle(JNIEnv *env, jclass clazz,
     ret.append(StringUtil::StdStringFromFormat("%s (%08X)", entry->serial.c_str(), entry->crc));
 
     return env->NewStringUTF(ret.c_str());
+}
+
+// Cenit 0.6.4 (plan del inge §1.2): el port declaraba este nativo en Java pero
+// nunca existió el export: cada llamada lanzaba UnsatisfiedLinkError y caía al
+// resolver Java. Implementado con la misma lógica que getGameTitle.
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getGameTitleFromUri(JNIEnv *env, jclass clazz,
+                                                  jstring p_szuri) {
+    return Java_com_izzy2lost_psx2_NativeApp_getGameTitle(env, clazz, p_szuri);
 }
 
 extern "C"
@@ -850,12 +1105,24 @@ Java_com_izzy2lost_psx2_NativeApp_setAspectRatio(JNIEnv *env, jclass clazz,
 // igual que los demás setters. El recompilador ARM64 lee EECycleRate bloque a
 // bloque, así que el cambio se nota sin reiniciar el juego.
 
+// Cenit 0.6.4 (plan del inge §1.3): antes era un stub vacío. Ahora cablea el
+// modo de limitador REAL del núcleo (VMManager::SetLimiterMode, mismo que usa
+// el fast-forward de arriba). 0=Normal 1=Turbo 2=Cámara lenta 3=Sin límite.
+// No hay key INI: es estado de runtime, y así se documenta. Se aplica en el
+// hilo de emulación para no pelearse con el limiter mientras corre.
 extern "C"
 JNIEXPORT void JNICALL
 Java_com_izzy2lost_psx2_NativeApp_speedhackLimitermode(JNIEnv *env, jclass clazz,
                                                           jint p_value) {
-    // Sin clave INI equivalente en este núcleo; se deja explícitamente vacío.
-    (void)p_value;
+    if (p_value < 0 || p_value > 3)
+        p_value = 0;
+    const LimiterModeType mode = static_cast<LimiterModeType>(p_value);
+    if (!VMManager::HasValidVM())
+        return;
+    Host::RunOnCPUThread([mode]() {
+        if (VMManager::GetState() == VMState::Running || VMManager::GetState() == VMState::Paused)
+            VMManager::SetLimiterMode(mode);
+    });
 }
 
 extern "C"
@@ -894,6 +1161,23 @@ extern "C"
 JNIEXPORT jfloat JNICALL
 Java_com_izzy2lost_psx2_NativeApp_getEffectiveUpscale(JNIEnv *env, jclass clazz) {
     return (jfloat)EmuConfig.GS.UpscaleMultiplier;
+}
+
+// Cenit 0.6.4 (plan del inge §5): porcentaje de uso de GPU (misma métrica que
+// muestra el HUD). El regidor v2 la compara con la velocidad de emulación para
+// saber si el bache es de GPU (bajar resolución ayuda) o de CPU emulada (bajar
+// resolución NO ayuda: solo empeora la imagen gratis).
+extern "C"
+JNIEXPORT jfloat JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getGPUUsage(JNIEnv *env, jclass clazz) {
+    return (jfloat)PerformanceMetrics::GetGPUUsage();
+}
+
+// Tiempo medio de GPU por frame en ms. 0 = sin device GS abierto todavía.
+extern "C"
+JNIEXPORT jfloat JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getGPUAverageTime(JNIEnv *env, jclass clazz) {
+    return (jfloat)PerformanceMetrics::GetGPUAverageTime();
 }
 
 extern "C"

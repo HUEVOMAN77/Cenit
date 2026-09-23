@@ -58,6 +58,10 @@
 Pcsx2Config::GSOptions GSConfig;
 
 static GSRendererType GSCurrentRenderer;
+// Cenit 0.6.4 (§2.3): cuando "Auto" terminó cayendo a otra API (VK->OGL o
+// al revés) en este dispositivo, se recuerda: reaperturas posteriores (cambio
+// de ajustes, device-lost) no vuelven a intentar la API que ya falló.
+static GSRendererType s_resolved_auto_renderer = GSRendererType::Auto;
 
 GSRendererType GSGetCurrentRenderer()
 {
@@ -108,6 +112,11 @@ static RenderAPI GetAPIForRenderer(GSRendererType renderer)
 static bool OpenGSDevice(GSRendererType renderer, bool clear_state_on_fail, bool recreate_window,
 	GSVSyncMode vsync_mode, bool allow_present_throttle)
 {
+	// §2.3: GSreopen puede llegar aquí con Renderer=Auto tras un ApplySettings;
+	// si Auto ya tuvo que caer a otra API en este dispositivo, respetar eso.
+	if (renderer == GSRendererType::Auto && s_resolved_auto_renderer != GSRendererType::Auto)
+		renderer = s_resolved_auto_renderer;
+
 	const RenderAPI new_api = GetAPIForRenderer(renderer);
 	switch (new_api)
 	{
@@ -136,6 +145,9 @@ static bool OpenGSDevice(GSRendererType renderer, bool clear_state_on_fail, bool
 			break;
 #endif
 
+		// Cenit 0.6.4 (plan del inge §2.3): si Vulkan no está compilado, preguntar
+		// por VK no debe abrir silenciosamente otra API — cae aquí y devuelve
+		// false, que es justo la condición que activa el fallback real abajo.
 		default:
 			Console.Error("Unsupported render API %s", GSDevice::RenderAPIToString(new_api));
 			return false;
@@ -348,10 +360,17 @@ bool GSopen(const Pcsx2Config::GSOptions& config, GSRendererType renderer, u8* b
 
 	if (renderer == GSRendererType::Auto)
 	{
-		const int base_renderer_val = Host::GetBaseIntSettingValue("EmuCore/GS", "Renderer",
-			static_cast<int>(GSRendererType::Auto));
-		const GSRendererType base_renderer = static_cast<GSRendererType>(base_renderer_val);
-		renderer = (base_renderer != GSRendererType::Auto) ? base_renderer : GSUtil::GetPreferredRenderer();
+		// §2.3: si en este dispositivo "Auto" ya tuvo que caer a otra API, no
+		// volver a intentar la que falló en cada reapertura.
+		if (s_resolved_auto_renderer != GSRendererType::Auto)
+			renderer = s_resolved_auto_renderer;
+		else
+		{
+			const int base_renderer_val = Host::GetBaseIntSettingValue("EmuCore/GS", "Renderer",
+				static_cast<int>(GSRendererType::Auto));
+			const GSRendererType base_renderer = static_cast<GSRendererType>(base_renderer_val);
+			renderer = (base_renderer != GSRendererType::Auto) ? base_renderer : GSUtil::GetPreferredRenderer();
+		}
 	}
 
 	bool res = OpenGSDevice(renderer, true, false, vsync_mode, allow_present_throttle);
@@ -360,6 +379,53 @@ bool GSopen(const Pcsx2Config::GSOptions& config, GSRendererType renderer, u8* b
 		res = OpenGSRenderer(renderer, basemem);
 		if (!res)
 			CloseGSDevice(true);
+	}
+
+	// Cenit 0.6.4 (plan del inge §2.3): un fallo creando el dispositivo no debe
+	// matar el arranque si el renderer se eligió en "Auto". En gama baja —sobre
+	// todo Mali vieja con drivers Vulkan inmaduros (Android 10-12)— la estabilidad
+	// pesa más que el 10% de FPS: probar la otra API antes de rendirse. Con
+	// renderer FIJADO por el usuario no se toca: pidió esa API explícitamente.
+	if (!res && GSConfig.Renderer == GSRendererType::Auto)
+	{
+#ifdef __ANDROID__
+		const GSRendererType fallback = (renderer == GSRendererType::VK) ? GSRendererType::OGL
+		                                 : (renderer == GSRendererType::OGL) ? GSRendererType::VK
+		                                     : GSRendererType::Auto;
+		if (fallback != GSRendererType::Auto)
+		{
+			Console.Warning(fmt::format("GSopen: {} failed on Auto renderer, falling back to {}",
+			                            Pcsx2Config::GSOptions::GetRendererName(renderer),
+			                            Pcsx2Config::GSOptions::GetRendererName(fallback)));
+			Host::AddKeyedOSDMessage("GSAutoFallback",
+				fmt::format(TRANSLATE_FS("GS", "Renderer fallback: {} failed, using {}."),
+					Pcsx2Config::GSOptions::GetRendererName(renderer),
+					Pcsx2Config::GSOptions::GetRendererName(fallback)),
+				Host::OSD_WARNING_DURATION);
+
+			// GSConfig.Renderer venía en Auto: fijar el tipo concreto que sí
+			// funciona para que el resto del núcleo (HUD, hot-switch) lo vea.
+			GSConfig.Renderer = fallback;
+			res = OpenGSDevice(fallback, true, false, vsync_mode, allow_present_throttle);
+			if (res)
+			{
+				res = OpenGSRenderer(fallback, basemem);
+				if (!res)
+					CloseGSDevice(true);
+			}
+			if (res)
+			{
+				// Recordado para toda la sesión: Auto ya sabe qué API da.
+				s_resolved_auto_renderer = fallback;
+			}
+			else
+			{
+				// El fallback tampoco abrió: devolver Auto para no dejar un
+				// config mentiroso si el llamador reintenta más tarde.
+				GSConfig.Renderer = GSRendererType::Auto;
+			}
+		}
+#endif
 	}
 
 	if (!res)

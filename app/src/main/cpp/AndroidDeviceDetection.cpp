@@ -263,6 +263,64 @@ namespace AndroidDeviceDetection
 			return true;
 		return false;
 	}
+
+	// Cenit 0.6.4 (plan del inge §3.1): el tier anterior era casi binario para
+	// Snapdragon y mandaba TODO lo demás a gama baja, incluyendo Dimensity que
+	// corren hardware GS a 1.5x sin despeinarse. Ahora MediaTek/Exynos se
+	// clasifican por el codename de plataforma (ro.board.platform), que es lo
+	// que Android expone de forma fiable en esos SoCs.
+	//   2 = gama alta: sostiene 2x de entrada
+	//   1 = gama media: 1.5x de entrada
+	//   0 = gama baja: 1x de entrada, governor y CAS cargan con el resto
+	int GetDeviceTier()
+	{
+		const GPUVendor vendor = DetectGPUVendor();
+
+		if (vendor == GPUVendor::Qualcomm)
+			return IsHighEndSnapdragon() ? 2 : 1;
+
+		auto toLower = [](std::string str) {
+			for (char& c : str) c = std::tolower(c);
+			return str;
+		};
+		std::string hay = toLower(GetSystemProperty("ro.board.platform"));
+		if (hay.empty())
+			hay = toLower(GetSystemProperty("ro.hardware"));
+		if (hay.empty())
+			hay = toLower(GetSystemProperty("ro.product.board"));
+
+		// Big cores Cortex-A78/A7x modernos y GPU de su liga: medio-alto.
+		static const char* const kCapable[] = {
+			"mt6873", "mt6875", "mt6877", "mt6883", "mt6885", "mt6889",
+			"mt6890", "mt6891", "mt6892", "mt6893", "mt6895", "mt6897",
+			"mt6980", "mt6983", "mt6985", "mt6989", "mt6990", "mt6991", "mt6993",
+			"mt8183", "mt8192", "mt8195", // tablets, pero la detección es la misma
+			"exynos9810", "exynos9820", "exynos9825", "exynos980", "exynos9815",
+			"exynos1380", "exynos2100", "exynos2200", "exynos2400",
+		};
+		for (const char* p : kCapable)
+		{
+			if (hay.find(p) != std::string::npos)
+				return 1;
+		}
+
+		// Gama baja conocida (A53/A55 puros o big cores débiles): 0 explícito.
+		static const char* const kWeak[] = {
+			"mt6739", "mt6761", "mt6762", "mt6763", "mt6765", "mt6768", "mt6771",
+			"mt6779", "mt6785", "mt6832", "mt6833", "mt6853", "mt6855",
+			"exynos7870", "exynos7880", "exynos7884", "exynos7885", "exynos850",
+			"exynos9609", "exynos9610", "exynos9611",
+			"kirin710", "kirin620", "kirin650", "helio",
+		};
+		for (const char* p : kWeak)
+		{
+			if (hay.find(p) != std::string::npos)
+				return 0;
+		}
+
+		// Desconocido: conservador, que el governor suba si da.
+		return 0;
+	}
 }
 
 #endif // __ANDROID__

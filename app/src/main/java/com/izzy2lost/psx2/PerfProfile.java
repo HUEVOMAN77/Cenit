@@ -13,9 +13,9 @@ public final class PerfProfile {
 
     private PerfProfile() {}
 
-    /** Mali/otro desconocido: nativo. Los juegos exigentes se benefician igual del perfil nativo. */
+    /** Gama baja y desconocidos (Helio G serie, Kirin 7xx, Exynos 7/8/9810...): 1x. */
     public static final int TIER_LOW = 0;
-    /** Snapdragon fuera de la gama alta (Adreno 610-620): casi todos van a 1.5x. */
+    /** Snapdragon medio o MediaTek/Exynos capaz (Dimensity 7000/8000, 9820/2100...): 1.5x. */
     public static final int TIER_MID = 1;
     /** Snapdragon 778G/8xx y superiores: 2x estable en la mayoría del catálogo. */
     public static final int TIER_HIGH = 2;

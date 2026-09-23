@@ -104,6 +104,20 @@ public class NativeApp {
 		if (hasNoNativeBinary) return 0f;
 		try { return getEffectiveUpscale(); } catch (Throwable t) { return 0f; }
 	}
+	// Cenit 0.6.4 (regidor v2): uso de GPU como fracción (1.0 = GPU justo a
+	// tiempo) y milisegundos medios de GPU por cuadro. Con esto el regidor
+	// distingue un bache de GPU (bajar resolución ayuda) de uno de CPU
+	// emulada (bajar resolución solo empeora la imagen gratis).
+	public static native float getGPUUsage();
+	public static float safeGetGPUUsage() {
+		if (hasNoNativeBinary) return 0f;
+		try { return getGPUUsage(); } catch (Throwable t) { return 0f; }
+	}
+	public static native float getGPUAverageTime();
+	public static float safeGetGPUAverageTime() {
+		if (hasNoNativeBinary) return 0f;
+		try { return getGPUAverageTime(); } catch (Throwable t) { return 0f; }
+	}
 
 	public static native void renderUpscalemultiplier(float value);
     public static void renderUpscalemultiplierAsync(float value) {
@@ -173,10 +187,9 @@ public class NativeApp {
     public static void setCASModeAsync(int mode, int sharpness) {
         runNativeSettingAsync("setCASMode", () -> setCASMode(mode, sharpness));
     }
-    public static native void setHalfPixelOffset(int mode);
-    public static void setHalfPixelOffsetAsync(int mode) {
-        runNativeSettingAsync("setHalfPixelOffset", () -> setHalfPixelOffset(mode));
-    }
+    // Cenit 0.6.4: el desplazado de medio píxel global era una función fantasma
+    // (MaskUserHacks lo borraba en cada ApplySettings). El control real vive en
+    // setGameUserHackInt/getGameUserHackInt, por juego.
     public static native void setVsyncEnabled(boolean enabled);
     public static void setVsyncEnabledAsync(boolean enabled) {
         runNativeSettingAsync("setVsyncEnabled", () -> setVsyncEnabled(enabled));
@@ -275,6 +288,33 @@ public class NativeApp {
     public static native String getGameSerial(String gameUri);
     public static native String getGameCrc(String gameUri);
     public static native String getCurrentGameSerial();
+
+    // Cenit 0.6.4 (plan del inge §1.1): hacks de hardware POR JUEGO. El INI
+    // global no sirve: LoadCoreSettings() aplica MaskUserHacks() y borra todos
+    // los UserHacks_* salvo UserHacks=true, y eso global apagaría los fixes
+    // automáticos del GameDB. La capa gamesettings/<SERIAL>.ini sí manda, y el
+    // nativo siembra allí los gsHWFixes de la base de datos antes de la primera
+    // edición manual para que no se pierda nada (God of War II, por ejemplo).
+    // Devuelve false si no se pudo resolver el juego; no lanza.
+    public static native boolean setGameUserHackInt(String gameUri, String key, int value);
+    // Valor sin definir en ese juego = p_fallback (la capa por juego puede no
+    // existir todavía; el nativo cae al GameDB y de ahí al fallback).
+    public static native int getGameUserHackInt(String gameUri, String key, int fallback);
+    public static boolean safeSetGameUserHackInt(String gameUri, String key, int value) {
+        if (hasNoNativeBinary || gameUri == null || gameUri.isEmpty()) return false;
+        // Mismo candado que getGameCrcSafe: el nativo abre el ISO para el CRC.
+        synchronized (CDVD_LOCK) {
+            try { return setGameUserHackInt(gameUri, key, value); } catch (Throwable t) { return false; }
+        }
+    }
+    public static int safeGetGameUserHackInt(String gameUri, String key, int fallback) {
+        if (hasNoNativeBinary || gameUri == null || gameUri.isEmpty()) return fallback;
+        synchronized (CDVD_LOCK) {
+            try { return getGameUserHackInt(gameUri, key, fallback); } catch (Throwable t) { return fallback; }
+        }
+    }
+    // Claves INI soportadas por el nativo (coincidentes con los nombres del núcleo).
+    public static final String HACK_HALF_PIXEL_OFFSET = "UserHacks_HalfPixelOffset";
     
     // Synchronization object for CDVD operations to prevent crashes
     private static final Object CDVD_LOCK = new Object();
@@ -412,8 +452,10 @@ public class NativeApp {
                                                    String japanBios, String arcadeBios);
     public static native boolean isVMActive();
 
-    // 0 = Mali/other, 1 = mid Snapdragon, 2 = high-end Snapdragon (778G+).
-    // Drives the first-run upscale default and the native speedhacks profile.
+    // 0 = gama baja (incluidos Mali y desconocidos), 1 = Snapdragon medio o
+    // MediaTek/Exynos capaz, 2 = Snapdragon gama alta (778G+). Tabla curada en
+    // AndroidDeviceDetection.cpp:GetDeviceTier(). Define el upscale de primera
+    // ejecución (PerfProfile) y el perfil nativo de speedhacks.
     public static native int getDevicePerformanceTier();
 
 	public static native void pause();

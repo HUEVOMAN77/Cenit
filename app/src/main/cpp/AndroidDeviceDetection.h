@@ -43,6 +43,12 @@ namespace AndroidDeviceDetection
 	// True when the SoC is Adreno-class strong enough to run hardware GS at 2x
 	// comfortably (SD 8-series or SD 778+).
 	bool IsHighEndSnapdragon();
+
+	// Cenit 0.6.4: 0 = gama baja (A53/A55 o desconocido), 1 = gama media
+	// (Snapdragon no-top o MediaTek A76+), 2 = gama alta Snapdragon. Reemplaza
+	// al tier binario de antes y ahora clasifica también MediaTek por codename
+	// de plataforma (plan del inge §3.1: "no heurística genérica").
+	int GetDeviceTier();
 }
 
 #endif // __ANDROID__
