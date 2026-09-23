@@ -1541,7 +1541,11 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         View llSelectStart = findViewById(R.id.ll_pad_select_start);
         View llJoy = findViewById(R.id.ll_pad_joy);
         View llRJoy = findViewById(R.id.ll_pad_rjoy);
+        View llLShoulders = findViewById(R.id.ll_pad_lshoulders);
+        View llRShoulders = findViewById(R.id.ll_pad_rshoulders);
 
+        if (llLShoulders != null) llLShoulders.setVisibility(vis);
+        if (llRShoulders != null) llRShoulders.setVisibility(vis);
         if (llDpad != null) llDpad.setVisibility(vis);
         if (llRight != null) llRight.setVisibility(vis);
         if (llSelectStart != null) llSelectStart.setVisibility(vis);
@@ -1703,33 +1707,26 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
             }
             if (child instanceof MaterialButton) {
                 MaterialButton mb = (MaterialButton) child;
+                // Los mandos en pantalla definen su propio ripple y tintes en el
+                // estilo (PSX2.OverlayPill / PSX2.OverlayCircle): pisarlos aquí
+                // mataría el estado "fantasma" en reposo.
+                if (isOverlayPadButton(mb.getId())) continue;
                 // Ensure ripple matches brand globally
                 mb.setRippleColor(ColorStateList.valueOf(ContextCompat.getColor(this, R.color.brand_ripple)));
-                int id = mb.getId();
-                if (id == R.id.btn_pad_y) { // Triangle = green
-                    final int base = ContextCompat.getColor(this, R.color.ps2_triangle_green);
-                    ColorStateList stateful = pressedColorStateList(base);
-                    mb.setTextColor(stateful);
-                } else if (id == R.id.btn_pad_b) { // Circle = red
-                    final int base = ContextCompat.getColor(this, R.color.ps2_circle_red);
-                    ColorStateList stateful = pressedColorStateList(base);
-                    mb.setTextColor(stateful);
-                } else if (id == R.id.btn_pad_a) { // Cross = blue
-                    final int base = ContextCompat.getColor(this, R.color.ps2_cross_blue);
-                    ColorStateList stateful = pressedColorStateList(base);
-                    mb.setTextColor(stateful);
-                } else if (id == R.id.btn_pad_x) { // Square = pink
-                    final int base = ContextCompat.getColor(this, R.color.ps2_square_pink);
-                    ColorStateList stateful = pressedColorStateList(base);
-                    mb.setTextColor(stateful);
-                } else if (id == R.id.btn_pad_dir_top || id == R.id.btn_pad_dir_left || id == R.id.btn_pad_dir_right || id == R.id.btn_pad_dir_bottom) {
-                    // D-pad arrow icon tint to brand accent
-                    ColorStateList iconTint = ColorStateList.valueOf(ContextCompat.getColor(this, R.color.brand_accent));
-                    mb.setIconTint(iconTint);
-                }
                 // No stroke; background is transparent per style
             }
         }
+    }
+
+    private static boolean isOverlayPadButton(int id) {
+        return id == R.id.btn_pad_select || id == R.id.btn_pad_start
+                || id == R.id.btn_pad_a || id == R.id.btn_pad_b
+                || id == R.id.btn_pad_x || id == R.id.btn_pad_y
+                || id == R.id.btn_pad_l1 || id == R.id.btn_pad_l2 || id == R.id.btn_pad_l3
+                || id == R.id.btn_pad_r1 || id == R.id.btn_pad_r2 || id == R.id.btn_pad_r3
+                || id == R.id.btn_pad_dir_top || id == R.id.btn_pad_dir_bottom
+                || id == R.id.btn_pad_dir_left || id == R.id.btn_pad_dir_right
+                || id == R.id.btn_pause_play || id == R.id.btn_fast_forward;
     }
 
     // --- BIOS presence check and prompt ---
@@ -1830,30 +1827,6 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
             android.util.Log.w("MainActivity", "Unable to pass verified BIOS list to native core", t);
         }
         return true;
-    }
-
-    private ColorStateList pressedColorStateList(int base) {
-        int pressed = darkenColor(base, 0.85f); // 15% darker when pressed
-        int[][] states = new int[][]{
-                new int[]{android.R.attr.state_pressed},
-                new int[]{}
-        };
-        int[] colors = new int[]{
-                pressed,
-                base
-        };
-        return new ColorStateList(states, colors);
-    }
-
-    private int darkenColor(int color, float factor) {
-        int a = (color >> 24) & 0xFF;
-        int r = (color >> 16) & 0xFF;
-        int g = (color >> 8) & 0xFF;
-        int b = color & 0xFF;
-        r = Math.max(0, Math.min(255, (int)(r * factor)));
-        g = Math.max(0, Math.min(255, (int)(g * factor)));
-        b = Math.max(0, Math.min(255, (int)(b * factor)));
-        return (a << 24) | (r << 16) | (g << 8) | b;
     }
 
     private void applySavedSettings() {
@@ -3926,6 +3899,12 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         
         View rightButtons = findViewById(R.id.ll_pad_right_buttons);
         if (rightButtons != null) rightButtons.setVisibility(View.GONE);
+
+        View lShoulders = findViewById(R.id.ll_pad_lshoulders);
+        if (lShoulders != null) lShoulders.setVisibility(View.GONE);
+
+        View rShoulders = findViewById(R.id.ll_pad_rshoulders);
+        if (rShoulders != null) rShoulders.setVisibility(View.GONE);
         
         View selectStart = findViewById(R.id.ll_pad_select_start);
         if (selectStart != null) selectStart.setVisibility(View.GONE);

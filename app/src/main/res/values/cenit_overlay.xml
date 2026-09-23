@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Mandos en pantalla: estilo "fantasma" (casi invisible en reposo,
+         cobra vida al presionar). Negro puro + anillos azul-violeta tenues. -->
+    <color name="overlay_ring">#596B7FAD</color>
+    <color name="overlay_ring_pressed">#CC94A8FF</color>
+    <color name="overlay_fill">#0A121A28</color>
+    <color name="overlay_fill_pressed">#2A243458</color>
+    <color name="overlay_text">#C2CBD8</color>
+    <color name="overlay_text_pressed">#FFFFFFFF</color>
+    <color name="overlay_ripple">#3380A0FF</color>
+
+    <!-- Paleta del stick analógico -->
+    <color name="overlay_stick_ring">#99A9B8E8</color>
+    <color name="overlay_stick_ring_active">#E0A9BCFF</color>
+    <color name="overlay_stick_base">#B30B1018</color>
+    <color name="overlay_stick_knob_hi">#FF39445A</color>
+    <color name="overlay_stick_knob_lo">#FF0C1017</color>
+</resources>

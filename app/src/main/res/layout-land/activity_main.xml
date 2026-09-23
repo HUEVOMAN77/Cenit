@@ -41,30 +41,103 @@
         app:layout_constraintStart_toStartOf="parent"
         android:layout_margin="12dp"/>
 
-    <!-- Pause/Play button in top right corner -->
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/btn_pause_play"
-        style="@style/PSX2.ElevatedTransparentButton"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
-        android:insetLeft="0dp"
-        android:insetRight="0dp"
-        android:insetTop="0dp"
-        android:insetBottom="0dp"
-        android:gravity="center"
-        android:text=""
-        app:icon="@drawable/play_pause_24px"
-        app:iconTint="@color/brand_primary"
-        app:iconGravity="textStart"
-        app:iconSize="24dp"
-        app:iconPadding="0dp"
-        app:rippleColor="#80cdcdcd"
+    <!-- Top row: left shoulders (L3 L2 L1) -->
+    <LinearLayout
+        android:id="@+id/ll_pad_lshoulders"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:visibility="visible"
+        app:layout_constraintTop_toBottomOf="@id/btn_settings"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginStart="14dp"
+        android:layout_marginTop="2dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_pad_l3"
+            style="@style/PSX2.OverlayCircle"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
+            android:layout_marginEnd="10dp"
+            android:text="L3"
+            android:textSize="11sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_pad_l2"
+            style="@style/PSX2.OverlayPill"
+            android:layout_width="64dp"
+            android:layout_height="34dp"
+            android:layout_marginEnd="8dp"
+            android:text="L2"
+            android:textSize="13sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_pad_l1"
+            style="@style/PSX2.OverlayPill"
+            android:layout_width="64dp"
+            android:layout_height="34dp"
+            android:text="L1"
+            android:textSize="13sp" />
+    </LinearLayout>
+
+    <!-- Top row: right shoulders (R2 R1 R3) -->
+    <LinearLayout
+        android:id="@+id/ll_pad_rshoulders"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:visibility="visible"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        android:layout_margin="12dp"
-        android:visibility="gone"/>
+        android:layout_marginEnd="14dp"
+        android:layout_marginTop="14dp">
 
-    <!-- Visibility toggle removed -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_pad_r2"
+            style="@style/PSX2.OverlayPill"
+            android:layout_width="64dp"
+            android:layout_height="34dp"
+            android:layout_marginEnd="8dp"
+            android:text="R2"
+            android:textSize="13sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_pad_r1"
+            style="@style/PSX2.OverlayPill"
+            android:layout_width="64dp"
+            android:layout_height="34dp"
+            android:layout_marginEnd="10dp"
+            android:text="R1"
+            android:textSize="13sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_pad_r3"
+            style="@style/PSX2.OverlayCircle"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
+            android:text="R3"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+    <!-- Pause button: circle under the right shoulders -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_pause_play"
+        style="@style/PSX2.OverlayCircle"
+        android:layout_width="38dp"
+        android:layout_height="38dp"
+        android:text=""
+        app:icon="@drawable/play_pause_24px"
+        app:iconTint="@color/overlay_text_sel"
+        app:iconGravity="textStart"
+        app:iconSize="20dp"
+        app:iconPadding="0dp"
+        app:layout_constraintTop_toBottomOf="@id/ll_pad_rshoulders"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginEnd="26dp"
+        android:layout_marginTop="10dp"
+        android:visibility="gone"/>
 
     <!-- Top center menu row -->
     <LinearLayout
@@ -86,7 +159,7 @@
 
     </LinearLayout>
 
-    <!-- Bottom center Select/Start -->
+    <!-- Bottom center: Select / Start (fast-forward is chained to its left) -->
     <LinearLayout
         android:id="@+id/ll_pad_select_start"
         android:layout_width="wrap_content"
@@ -97,48 +170,160 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        android:layout_marginBottom="8dp">
+        android:layout_marginBottom="10dp">
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_pad_select"
-            style="@style/PSX2.ElevatedTransparentButton"
+            style="@style/PSX2.OverlayPill"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginEnd="8dp"
+            android:layout_height="36dp"
+            android:layout_marginEnd="10dp"
             android:text="select"
-            android:textColor="#FFFFFFFF"
-            app:rippleColor="#80cdcdcd" />
+            android:textSize="13sp" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_pad_start"
-            style="@style/PSX2.ElevatedTransparentButton"
+            style="@style/PSX2.OverlayPill"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
+            android:layout_height="36dp"
+            android:layout_marginStart="10dp"
             android:text="start"
-            android:textColor="#FFFFFFFF"
-            app:rippleColor="#80cdcdcd" />
+            android:textSize="13sp" />
 
     </LinearLayout>
 
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btn_fast_forward"
-        style="@style/PSX2.ElevatedTransparentButton"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
+        style="@style/PSX2.OverlayPill"
+        android:layout_width="46dp"
+        android:layout_height="36dp"
         android:minWidth="0dp"
         android:padding="0dp"
         android:text=""
         android:contentDescription="@string/fast_forward_enable"
         android:checkable="true"
         app:icon="@drawable/fast_forward_24px"
-        app:iconSize="24dp"
+        app:iconSize="20dp"
         app:iconPadding="0dp"
         app:iconGravity="textStart"
         app:iconTint="@color/fast_forward_tint"
         app:layout_constraintStart_toEndOf="@id/ll_pad_joy"
         app:layout_constraintEnd_toStartOf="@id/ll_pad_select_start"
         app:layout_constraintBottom_toBottomOf="@id/ll_pad_select_start" />
+
+    <!-- Face buttons diamond (triangle up, square left, circle right, cross down) -->
+    <LinearLayout
+        android:id="@+id/ll_pad_right_buttons"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:visibility="visible"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_margin="12dp">
+
+        <GridLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:rowCount="3"
+            android:columnCount="3">
+
+            <Space
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_row="0"
+                android:layout_column="0" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_pad_y"
+                style="@style/PSX2.OverlayCircle"
+                android:layout_width="46dp"
+                android:layout_height="46dp"
+                android:layout_row="0"
+                android:layout_column="1"
+                android:layout_margin="2dp"
+                android:text=""
+                android:gravity="center"
+                app:icon="@drawable/ic_ps2_triangle"
+                app:iconTint="@color/overlay_face_triangle"
+                app:iconPadding="0dp"
+                app:iconSize="22dp"
+                app:iconGravity="textStart" />
+
+            <Space
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_row="0"
+                android:layout_column="2" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_pad_x"
+                style="@style/PSX2.OverlayCircle"
+                android:layout_width="46dp"
+                android:layout_height="46dp"
+                android:layout_row="1"
+                android:layout_column="0"
+                android:layout_margin="2dp"
+                android:text=""
+                android:gravity="center"
+                app:icon="@drawable/ic_ps2_square"
+                app:iconTint="@color/overlay_face_square"
+                app:iconPadding="0dp"
+                app:iconSize="22dp"
+                app:iconGravity="textStart" />
+
+            <Space
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_row="1"
+                android:layout_column="1" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_pad_b"
+                style="@style/PSX2.OverlayCircle"
+                android:layout_width="46dp"
+                android:layout_height="46dp"
+                android:layout_row="1"
+                android:layout_column="2"
+                android:layout_margin="2dp"
+                android:text=""
+                android:gravity="center"
+                app:icon="@drawable/ic_ps2_circle"
+                app:iconTint="@color/overlay_face_circle"
+                app:iconPadding="0dp"
+                app:iconSize="22dp"
+                app:iconGravity="textStart" />
+
+            <Space
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_row="2"
+                android:layout_column="0" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_pad_a"
+                style="@style/PSX2.OverlayCircle"
+                android:layout_width="46dp"
+                android:layout_height="46dp"
+                android:layout_row="2"
+                android:layout_column="1"
+                android:layout_margin="2dp"
+                android:text=""
+                android:gravity="center"
+                app:icon="@drawable/ic_ps2_x"
+                app:iconTint="@color/overlay_face_cross"
+                app:iconPadding="0dp"
+                app:iconSize="22dp"
+                app:iconGravity="textStart" />
+
+            <Space
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_row="2"
+                android:layout_column="2" />
+        </GridLayout>
+    </LinearLayout>
 
     <!-- Left-bottom Joystick -->
       <LinearLayout
@@ -154,8 +339,8 @@
   
           <com.izzy2lost.psx2.JoystickView
               android:id="@+id/joystick_view"
-              android:layout_width="180dp"
-              android:layout_height="180dp"
+              android:layout_width="132dp"
+              android:layout_height="132dp"
               android:layout_margin="2dp" />
       </LinearLayout>
 
@@ -173,173 +358,12 @@
 
           <com.izzy2lost.psx2.JoystickView
               android:id="@+id/joystick_view_right"
-              android:layout_width="160dp"
-              android:layout_height="160dp"
+              android:layout_width="116dp"
+              android:layout_height="116dp"
               android:layout_margin="2dp" />
       </LinearLayout>
-  
-      <!-- Right-bottom face and shoulder buttons -->
-      <LinearLayout
-          android:id="@+id/ll_pad_right_buttons"
-          android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:gravity="center"
-        android:orientation="vertical"
-        android:visibility="visible"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        android:layout_margin="12dp">
 
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_pad_l3"
-                style="@style/PSX2.ElevatedTransparentButton"
-                android:layout_width="70dp"
-                android:layout_height="38dp"
-                android:layout_marginEnd="8dp"
-                android:text="L3"
-                app:rippleColor="#80cdcdcd" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_pad_r3"
-                style="@style/PSX2.ElevatedTransparentButton"
-                android:layout_width="70dp"
-                android:layout_height="38dp"
-                android:layout_marginStart="8dp"
-                android:text="R3"
-                app:rippleColor="#80cdcdcd" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_pad_l2"
-                style="@style/PSX2.ElevatedTransparentButton"
-                android:layout_width="70dp"
-                android:layout_height="38dp"
-                android:layout_marginEnd="8dp"
-                android:text="L2"
-                
-                app:rippleColor="#80cdcdcd" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_pad_r2"
-                style="@style/PSX2.ElevatedTransparentButton"
-                android:layout_width="70dp"
-                android:layout_height="38dp"
-                android:layout_marginStart="8dp"
-                android:text="R2"
-                
-                app:rippleColor="#80cdcdcd" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_pad_l1"
-                style="@style/PSX2.ElevatedTransparentButton"
-                android:layout_width="70dp"
-                android:layout_height="38dp"
-                android:layout_marginEnd="8dp"
-                android:text="L1"
-                
-                app:rippleColor="#80cdcdcd" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_pad_r1"
-                style="@style/PSX2.ElevatedTransparentButton"
-                android:layout_width="70dp"
-                android:layout_height="38dp"
-                android:layout_marginStart="8dp"
-                android:text="R1"
-                
-                app:rippleColor="#80cdcdcd" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_pad_x"
-                style="@style/PSX2.ElevatedTransparentButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="4dp"
-                android:text=""
-                android:gravity="center"
-                app:icon="@drawable/ic_ps2_square"
-                app:iconTint="#FF80C0"
-                app:iconPadding="0dp"
-                app:iconSize="20dp"
-                app:iconGravity="textStart"
-                app:rippleColor="#80cdcdcd" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_pad_y"
-                style="@style/PSX2.ElevatedTransparentButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="4dp"
-                android:text=""
-                android:gravity="center"
-                app:icon="@drawable/ic_ps2_triangle"
-                app:iconTint="#00D000"
-                app:iconPadding="0dp"
-                app:iconSize="20dp"
-                app:iconGravity="textStart"
-                app:rippleColor="#80cdcdcd" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_pad_a"
-                style="@style/PSX2.ElevatedTransparentButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="4dp"
-                android:text=""
-                android:gravity="center"
-                app:icon="@drawable/ic_ps2_x"
-                app:iconTint="#4080FF"
-                app:iconPadding="0dp"
-                app:iconSize="20dp"
-                app:iconGravity="textStart"
-                app:rippleColor="#80cdcdcd" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_pad_b"
-                style="@style/PSX2.ElevatedTransparentButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="4dp"
-                android:text=""
-                android:gravity="center"
-                app:icon="@drawable/ic_ps2_circle"
-                app:iconTint="#FF3030"
-                app:iconPadding="0dp"
-                app:iconSize="20dp"
-                app:iconGravity="textStart"
-                app:rippleColor="#80cdcdcd" />
-        </LinearLayout>
-    </LinearLayout>
-
-    <!-- D-Pad to the right of joystick -->
+    <!-- D-Pad: four circles in a diamond, above the joystick -->
     <LinearLayout
         android:id="@+id/ll_pad_dpad"
         android:layout_width="wrap_content"
@@ -367,22 +391,23 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_pad_dir_top"
-                style="@style/PSX2.ElevatedTransparentButton"
+                style="@style/PSX2.OverlayCircle"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
+                android:layout_row="0"
+                android:layout_column="1"
+                android:layout_margin="2dp"
                 android:insetLeft="0dp"
                 android:insetRight="0dp"
                 android:insetTop="0dp"
                 android:insetBottom="0dp"
                 android:gravity="center"
-                android:layout_row="0"
-                android:layout_column="1"
                 android:text=""
                 app:icon="@drawable/ic_arrow_up"
+                app:iconTint="@color/overlay_dpad_tint"
                 app:iconGravity="textStart"
                 app:iconPadding="0dp"
-                app:iconSize="18dp"
-                app:rippleColor="#80cdcdcd" />
+                app:iconSize="20dp" />
 
             <Space
                 android:layout_width="0dp"
@@ -392,22 +417,23 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_pad_dir_left"
-                style="@style/PSX2.ElevatedTransparentButton"
+                style="@style/PSX2.OverlayCircle"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
+                android:layout_row="1"
+                android:layout_column="0"
+                android:layout_margin="2dp"
                 android:insetLeft="0dp"
                 android:insetRight="0dp"
                 android:insetTop="0dp"
                 android:insetBottom="0dp"
                 android:gravity="center"
-                android:layout_row="1"
-                android:layout_column="0"
                 android:text=""
                 app:icon="@drawable/ic_arrow_left"
+                app:iconTint="@color/overlay_dpad_tint"
                 app:iconGravity="textStart"
                 app:iconPadding="0dp"
-                app:iconSize="18dp"
-                app:rippleColor="#80cdcdcd" />
+                app:iconSize="20dp" />
 
             <Space
                 android:layout_width="0dp"
@@ -417,22 +443,23 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_pad_dir_right"
-                style="@style/PSX2.ElevatedTransparentButton"
+                style="@style/PSX2.OverlayCircle"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
+                android:layout_row="1"
+                android:layout_column="2"
+                android:layout_margin="2dp"
                 android:insetLeft="0dp"
                 android:insetRight="0dp"
                 android:insetTop="0dp"
                 android:insetBottom="0dp"
                 android:gravity="center"
-                android:layout_row="1"
-                android:layout_column="2"
                 android:text=""
                 app:icon="@drawable/ic_arrow_right"
+                app:iconTint="@color/overlay_dpad_tint"
                 app:iconGravity="textStart"
                 app:iconPadding="0dp"
-                app:iconSize="18dp"
-                app:rippleColor="#80cdcdcd" />
+                app:iconSize="20dp" />
 
             <Space
                 android:layout_width="0dp"
@@ -442,22 +469,23 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_pad_dir_bottom"
-                style="@style/PSX2.ElevatedTransparentButton"
+                style="@style/PSX2.OverlayCircle"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
+                android:layout_row="2"
+                android:layout_column="1"
+                android:layout_margin="2dp"
                 android:insetLeft="0dp"
                 android:insetRight="0dp"
                 android:insetTop="0dp"
                 android:insetBottom="0dp"
                 android:gravity="center"
-                android:layout_row="2"
-                android:layout_column="1"
                 android:text=""
                 app:icon="@drawable/ic_arrow_down"
+                app:iconTint="@color/overlay_dpad_tint"
                 app:iconGravity="textStart"
                 app:iconPadding="0dp"
-                app:iconSize="18dp"
-                app:rippleColor="#80cdcdcd" />
+                app:iconSize="20dp" />
 
             <Space
                 android:layout_width="0dp"

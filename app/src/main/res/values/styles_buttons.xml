@@ -23,4 +23,42 @@
         <item name="backgroundTint">@drawable/toggle_button_background</item>
         <item name="rippleColor">@color/brand_ripple</item>
     </style>
+
+    <!-- Mandos en pantalla: pastilla fantasma (L1/L2/R1/R2/L3/R3/SELECT/START).
+         Borde tenue en reposo, se ilumina al presionar. Sin elevación. -->
+    <style name="PSX2.OverlayPill" parent="Widget.Material3.Button.UnelevatedButton">
+        <item name="backgroundTint">@color/overlay_fill_sel</item>
+        <item name="strokeColor">@color/overlay_ring_sel</item>
+        <item name="strokeWidth">1dp</item>
+        <item name="cornerRadius">26dp</item>
+        <item name="rippleColor">@color/overlay_ripple</item>
+        <item name="android:textColor">@color/overlay_text_sel</item>
+        <item name="android:textAllCaps">true</item>
+        <item name="android:letterSpacing">0.08</item>
+        <item name="android:stateListAnimator">@null</item>
+        <item name="elevation">0dp</item>
+        <item name="android:minWidth">0dp</item>
+        <item name="android:paddingLeft">14dp</item>
+        <item name="android:paddingRight">14dp</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+    </style>
+
+    <!-- Mandos en pantalla: botón circular (cruceta, faciales, pausa, L3/R3). -->
+    <style name="PSX2.OverlayCircle" parent="Widget.Material3.Button.UnelevatedButton">
+        <item name="backgroundTint">@color/overlay_fill_sel</item>
+        <item name="strokeColor">@color/overlay_ring_sel</item>
+        <item name="strokeWidth">1dp</item>
+        <item name="cornerRadius">50dp</item>
+        <item name="rippleColor">@color/overlay_ripple</item>
+        <item name="android:textColor">@color/overlay_text_sel</item>
+        <item name="android:textAllCaps">true</item>
+        <item name="android:stateListAnimator">@null</item>
+        <item name="elevation">0dp</item>
+        <item name="android:minWidth">0dp</item>
+        <item name="android:paddingLeft">0dp</item>
+        <item name="android:paddingRight">0dp</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+    </style>
 </resources>
