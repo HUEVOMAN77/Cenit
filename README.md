@@ -125,14 +125,41 @@ Cenit es un proyecto personal, sin cuenta de desarrollador ni intención de tien
 
 ## Lo que viene
 
-En orden de impacto medido:
+Cenit es un **proyecto a largo plazo**. No se terminó con la 0.6.6: recién empieza. Optimizar un emulador de PS2 para celulares exige mucho conocimiento y mucho tiempo, y todo esto se construye poco a poco, versión a versión, midiendo sobre hardware real. Lo que sigue es el plan honesto — parte es ingeniería difícil, parte es directamente ambiciosa, y nada de esto se anuncia como "ya funciona":
+
+### Plan inmediato
 
 - **Más ajustes por juego con criterio propio:** lectura de texturas dentro de la gráfica (el de mayor salto en juegos con agua y reflejos), escalado nativo de sprites y salto de dibujos, todos con la evidencia que ya juntan los perfiles de memoria como guía.
 - **Ajuste fino por marca de procesador:** perfiles específicos para MediaTek/Mali y Samsung/Exynos (hoy reciben el perfil general según su gama), con la misma lógica de medición que ya usa Snapdragon.
 - **Tabla de rendimiento de la comunidad:** que lo que Cenit aprende en cada teléfono (escala sostenida, tipo de cuello de botella) se convierta en una configuración sugerida por juego, compartida entre usuarios.
 - **Celular más frío, menos recortes:** colaboración con el sistema de energía de Android para que el procesador suba frecuencia *antes* del pico en lugar de recortarla después.
 - **Menos recortes en video y escenas:** que la resolución dinámica no baje durante cinemáticas ni cortes de escena.
-- **Mejoras de estabilidad continua:** cada versión pasa por compilación y pruebas automatizadas antes de publicarse.
+
+### La gran apuesta: renderizar abajo, ver arriba (escalamiento con guía de cuadros)
+
+La idea central de las próximas versiones grandes es esta: **que el juego renderice a una resolución por debajo de la nativa de PS2 —incluso 0.5x, la más baja— y que Cenit reconstruya esa imagen en tiempo real para mostrarla nítida a 720p u 1080p en la pantalla del celular.**
+
+Suena descabellado, y por eso mismo nadie en un port de PS2 se había atrevido a intentarlo. Pero no es magia ni fantasía: es la misma familia de técnicas que ya usan los escaladores modernos (reconstruir una imagen completa apoyándose en *guías* reales del cuadro: profundidad, vectores de movimiento, historial de fotogramas) y que los emuladores de otras consolas aplican desde hace años para estirar resoluciones internas bajísimas. El truco no es "estirar píxeles borrosos": es usar la información geométrica que el propio motor gráfico ya genera para reconstruir una imagen limpia donde el hardware no alcanza para dibujarla nativa.
+
+¿Por qué esto importa en gama baja y media? Porque el costo de dibujar un cuadro a 0.5x es una fracción del de dibujarlo a 1x o 2x: menos cuadros por segundo perdidos, menos calor, menos batería. Si la reconstrucción funciona, un teléfono que hoy no pasa de 25 cuadros a 1x podría mover el mismo juego **más fluido y viéndose mejor que a resolución nativa**. Es exactamente el tipo de salto que un gama baja necesita y que ningún ajuste tradicional le puede dar.
+
+Cómo se va a construir, sin apuro y sin humo:
+
+1. **Desde cero, en versiones de prueba.** Primero como experimento en ramas de desarrollo y builds alternativos, no en la versión estable. Cada paso se mide contra el renderizado actual, y si un paso no mejora, no avanza.
+2. **Con la guía que ya existe dentro del motor.** El renderizador gráfico del emulador ya produce los datos que una reconstrucción necesita; el trabajo es capturarlos, moverlos a un pase de posprocesamiento barato en la GPU del celular y evaluar calidad real, cuadro a cuadro, contra el resultado nativo.
+3. **Juego por juego, no global.** Habrá títulos donde la reconstrucción se vea excelente y títulos donde no; la memoria por juego que Cenit ya tiene es la base para decidir dónde se activa.
+4. **Con honestidad en cada release.** Mientras sea experimental, la opción estará marcada como tal en Ajustes y tendrá un interruptor para volver al renderizado clásico. Nadie va a descubrir una regresión por sorpresa.
+
+Es la meta más ambiciosa del proyecto y la que más tiempo va a llevar. También es la que, de lograrse, más va a cambiar lo que un gama baja puede hacer con una PS2 en el bolsillo.
+
+### Otras líneas de mejora en estudio
+
+- **Caché de sombreadores compartida entre usuarios:** que el segundo jugador de un mismo juego no reconpile desde cero (la técnica ya existe en otros emuladores; el reto es el tamaño y la red).
+- **Precisión de mezcla adaptativa:** bajar la emulación de mezcla de color solo en las zonas de la pantalla que no se notan, en vez de un ajuste global que castiga todo.
+- **Audio con menos carga:** búferes dinámicos según si el juego va sobrado o ahogado, para recuperar cuadros sin cortes audibles.
+- **Perfiles listos por tipo de juego:** un menú simple —"prioridad fluidez", "prioridad imagen", "equilibrado"— que aplique el conjunto correcto de todos los mandos de arriba.
+
+**Mejoras de estabilidad continua:** cada versión pasa por compilación y pruebas automatizadas antes de publicarse.
 
 ## Créditos y ascendencia
 
