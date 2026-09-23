@@ -108,6 +108,16 @@
         <item name="android:minHeight">48dp</item>
     </style>
 
+    <!-- Chip de categoría de la pantalla de ajustes -->
+    <style name="Cenit.Settings.Chip" parent="Widget.Material3.Chip.Filter">
+        <item name="chipBackgroundColor">@color/cenit_chip_bg</item>
+        <item name="android:textColor">@color/cenit_chip_text</item>
+        <item name="chipStrokeColor">@color/cenit_chip_stroke</item>
+        <item name="chipStrokeWidth">1dp</item>
+        <item name="chipCornerRadius">18dp</item>
+        <item name="ensureMinTouchTargetSize">false</item>
+    </style>
+
     <!-- ============ Filas del panel de ajustes del inicio ============ -->
     <style name="Cenit.SettingsRow" parent="">
         <item name="android:orientation">horizontal</item>

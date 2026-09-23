@@ -137,6 +137,28 @@ public class NativeApp {
     public static void setBlendingAccuracyAsync(int level) {
         runNativeSettingAsync("setBlendingAccuracy", () -> setBlendingAccuracy(level));
     }
+
+    // --- Cenit: opciones GS adicionales (aplicación en caliente) ---
+    public static native void setTextureFiltering(int mode);
+    public static void setTextureFilteringAsync(int mode) {
+        runNativeSettingAsync("setTextureFiltering", () -> setTextureFiltering(mode));
+    }
+    public static native void setHWMipmap(boolean enabled);
+    public static void setHWMipmapAsync(boolean enabled) {
+        runNativeSettingAsync("setHWMipmap", () -> setHWMipmap(enabled));
+    }
+    public static native void setMaxAnisotropy(int level);
+    public static void setMaxAnisotropyAsync(int level) {
+        runNativeSettingAsync("setMaxAnisotropy", () -> setMaxAnisotropy(level));
+    }
+    public static native void setCASMode(int mode, int sharpness);
+    public static void setCASModeAsync(int mode, int sharpness) {
+        runNativeSettingAsync("setCASMode", () -> setCASMode(mode, sharpness));
+    }
+    public static native void setHalfPixelOffset(int mode);
+    public static void setHalfPixelOffsetAsync(int mode) {
+        runNativeSettingAsync("setHalfPixelOffset", () -> setHalfPixelOffset(mode));
+    }
     public static native void setVsyncEnabled(boolean enabled);
     public static void setVsyncEnabledAsync(boolean enabled) {
         runNativeSettingAsync("setVsyncEnabled", () -> setVsyncEnabled(enabled));

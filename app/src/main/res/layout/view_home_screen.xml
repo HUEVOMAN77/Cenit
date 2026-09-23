@@ -40,7 +40,7 @@
             android:layout_weight="1"
             android:orientation="vertical">
 
-            <TextView
+            <com.izzy2lost.psx2.NeonGradientTextView
                 android:id="@+id/home_wordmark"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -225,144 +225,7 @@
             </LinearLayout>
         </androidx.core.widget.NestedScrollView>
 
-        <!-- ============ PESTAÑA AJUSTES (panel propio) ============ -->
-        <ScrollView
-            android:id="@+id/home_settings_panel"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:background="@color/home_black"
-            android:visibility="gone">
 
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="16dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:layout_marginBottom="10dp"
-                    android:text="Configuración"
-                    android:textColor="@android:color/white"
-                    android:textSize="20sp"
-                    android:textStyle="bold" />
-
-                <LinearLayout
-                    android:id="@+id/home_set_bios"
-                    style="@style/Cenit.SettingsRow"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content">
-
-                    <ImageView
-                        style="@style/Cenit.SettingsRowIcon"
-                        android:src="@drawable/memory_24px" />
-
-                    <LinearLayout style="@style/Cenit.SettingsRowText">
-
-                        <TextView
-                            style="@style/Cenit.SettingsRowTitle"
-                            android:text="Importar BIOS" />
-
-                        <TextView
-                            android:id="@+id/home_set_bios_sub"
-                            style="@style/Cenit.SettingsRowSub"
-                            android:text="Necesaria para iniciar cualquier juego" />
-                    </LinearLayout>
-                </LinearLayout>
-
-                <LinearLayout
-                    android:id="@+id/home_set_data"
-                    style="@style/Cenit.SettingsRow"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content">
-
-                    <ImageView
-                        style="@style/Cenit.SettingsRowIcon"
-                        android:src="@drawable/data_table_24px" />
-
-                    <LinearLayout style="@style/Cenit.SettingsRowText">
-
-                        <TextView
-                            style="@style/Cenit.SettingsRowTitle"
-                            android:text="Carpeta de datos" />
-
-                        <TextView
-                            android:id="@+id/home_set_data_sub"
-                            style="@style/Cenit.SettingsRowSub"
-                            android:text="Partidas, estados y configuración" />
-                    </LinearLayout>
-                </LinearLayout>
-
-                <LinearLayout
-                    android:id="@+id/home_set_games"
-                    style="@style/Cenit.SettingsRow"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content">
-
-                    <ImageView
-                        style="@style/Cenit.SettingsRowIcon"
-                        android:src="@drawable/folder_24px" />
-
-                    <LinearLayout style="@style/Cenit.SettingsRowText">
-
-                        <TextView
-                            style="@style/Cenit.SettingsRowTitle"
-                            android:text="Carpetas de juegos" />
-
-                        <TextView
-                            android:id="@+id/home_set_games_sub"
-                            style="@style/Cenit.SettingsRowSub"
-                            android:text="Añade o cambia las carpetas de tu biblioteca" />
-                    </LinearLayout>
-                </LinearLayout>
-
-                <LinearLayout
-                    android:id="@+id/home_set_setup"
-                    style="@style/Cenit.SettingsRow"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content">
-
-                    <ImageView
-                        style="@style/Cenit.SettingsRowIcon"
-                        android:src="@drawable/settings_24px" />
-
-                    <LinearLayout style="@style/Cenit.SettingsRowText">
-
-                        <TextView
-                            style="@style/Cenit.SettingsRowTitle"
-                            android:text="Asistente de configuración" />
-
-                        <TextView
-                            style="@style/Cenit.SettingsRowSub"
-                            android:text="Revisar los pasos iniciales" />
-                    </LinearLayout>
-                </LinearLayout>
-
-                <LinearLayout
-                    android:id="@+id/home_set_advanced"
-                    style="@style/Cenit.SettingsRow"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content">
-
-                    <ImageView
-                        style="@style/Cenit.SettingsRowIcon"
-                        android:src="@drawable/tune_24px" />
-
-                    <LinearLayout style="@style/Cenit.SettingsRowText">
-
-                        <TextView
-                            style="@style/Cenit.SettingsRowTitle"
-                            android:text="Ajustes avanzados" />
-
-                        <TextView
-                            style="@style/Cenit.SettingsRowSub"
-                            android:text="Motor gráfico, imagen, audio, parches y más" />
-                    </LinearLayout>
-                </LinearLayout>
-            </LinearLayout>
-        </ScrollView>
     </FrameLayout>
 
     <!-- ============ BARRA INFERIOR ============ -->

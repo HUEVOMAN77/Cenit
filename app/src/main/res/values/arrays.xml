@@ -47,4 +47,53 @@
         <item>Hardware (OpenGL)</item>
         <item>Software (Slow, accurate)</item>
     </string-array>
+
+    <!-- Opciones GS nuevas de Cenit (valores verificados contra Config.h) -->
+    <string-array name="scale_entries_cenit">
+        <item>1x (Nativo ~480p)</item>
+        <item>1.25x (~600p)</item>
+        <item>1.5x (~720p HD)</item>
+        <item>2x (~960p)</item>
+        <item>2.5x (~1200p)</item>
+        <item>3x (~1440p QHD)</item>
+        <item>4x (~1920p FHD+)</item>
+        <item>5x (~2400p 2K)</item>
+        <item>6x (~2880p 4K)</item>
+        <item>8x (~3840p 4K)</item>
+    </string-array>
+
+    <string-array name="texture_filtering_entries">
+        <item>Nearest (Nítido, con escalones)</item>
+        <item>Bilinear (Suave)</item>
+        <item>PS2 (Igual que la consola)</item>
+        <item>Bilinear con sprites Nearest</item>
+    </string-array>
+
+    <string-array name="anisotropy_entries">
+        <item>Automático</item>
+        <item>2x</item>
+        <item>4x</item>
+        <item>8x</item>
+        <item>16x</item>
+    </string-array>
+
+    <string-array name="cas_entries">
+        <item>Desactivado</item>
+        <item>Solo nitidez</item>
+        <item>Nitidez + reescalado</item>
+    </string-array>
+
+    <string-array name="half_pixel_entries">
+        <item>Desactivado</item>
+        <item>Normal (Recomendado)</item>
+        <item>Especial</item>
+        <item>Especial agresivo</item>
+        <item>Nativo</item>
+        <item>Nativo con desplazado de textura</item>
+    </string-array>
+
+    <string-array name="mipmap_entries">
+        <item>Desactivado</item>
+        <item>Activado (Recomendado)</item>
+    </string-array>
 </resources>

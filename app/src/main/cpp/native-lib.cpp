@@ -479,6 +479,71 @@ Java_com_izzy2lost_psx2_NativeApp_setBlendingAccuracy(JNIEnv* env, jclass, jint 
         MTGS::ApplySettings();
 }
 
+// --- Cenit: setters de opciones GS que se aplican en caliente -----------------
+// Todos escriben en la sección EmuCore/GS del INI y luego piden ApplySettings,
+// igual que setBlendingAccuracy. VMManager::ApplySettings recarga EmuConfig desde
+// el INI, así que el valor se nota sin reiniciar el juego.
+
+// Filtro de texturas: 0 Nearest, 1 Bilinear (forzado), 2 PS2 (predeterminado),
+// 3 Bilinear pero sprites Nearest. Clave "filter".
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setTextureFiltering(JNIEnv* env, jclass, jint mode)
+{
+    if (mode < 0) mode = 0; if (mode > 3) mode = 3;
+    s_settings_interface.SetIntValue("EmuCore/GS", "filter", mode);
+    if (VMManager::HasValidVM()) VMManager::ApplySettings();
+    if (MTGS::IsOpen()) MTGS::ApplySettings();
+}
+
+// Mipmapado en hardware (hw_mipmap). Suaviza texturas lejanas; puede romper
+// algunos juegos, por eso va aparte del filtro base.
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setHWMipmap(JNIEnv* env, jclass, jboolean enabled)
+{
+    s_settings_interface.SetBoolValue("EmuCore/GS", "hw_mipmap", enabled == JNI_TRUE);
+    if (VMManager::HasValidVM()) VMManager::ApplySettings();
+    if (MTGS::IsOpen()) MTGS::ApplySettings();
+}
+
+// Filtro anisotrópico: guarda el multiplicador real (0=auto/apagado, 2, 4, 8, 16).
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setMaxAnisotropy(JNIEnv* env, jclass, jint level)
+{
+    if (level != 2 && level != 4 && level != 8 && level != 16) level = 0;
+    s_settings_interface.SetIntValue("EmuCore/GS", "MaxAnisotropy", level);
+    if (VMManager::HasValidVM()) VMManager::ApplySettings();
+    if (MTGS::IsOpen()) MTGS::ApplySettings();
+}
+
+// Nitidez CAS (Contrast Adaptive Sharpening): modo 0 apagado, 1 solo enfocar,
+// 2 enfocar + reescalar; nitidez 0..100.
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setCASMode(JNIEnv* env, jclass, jint mode, jint sharpness)
+{
+    if (mode < 0) mode = 0; if (mode > 2) mode = 2;
+    if (sharpness < 0) sharpness = 0; if (sharpness > 100) sharpness = 100;
+    s_settings_interface.SetIntValue("EmuCore/GS", "CASMode", mode);
+    s_settings_interface.SetIntValue("EmuCore/GS", "CASSharpness", sharpness);
+    if (VMManager::HasValidVM()) VMManager::ApplySettings();
+    if (MTGS::IsOpen()) MTGS::ApplySettings();
+}
+
+// Desplazamiento de medio píxel: corrige el "pixel shifting" de texturas en HW.
+// 0 apagado, 1 normal, 2 especial, 3 especial agresivo, 4 nativo, 5 nativo+textura.
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setHalfPixelOffset(JNIEnv* env, jclass, jint mode)
+{
+    if (mode < 0) mode = 0; if (mode > 5) mode = 5;
+    s_settings_interface.SetIntValue("EmuCore/GS", "UserHacks_HalfPixelOffset", mode);
+    if (VMManager::HasValidVM()) VMManager::ApplySettings();
+    if (MTGS::IsOpen()) MTGS::ApplySettings();
+}
+
 extern "C"
 JNIEXPORT void JNICALL
 Java_com_izzy2lost_psx2_NativeApp_setVsyncEnabled(JNIEnv* env, jclass, jboolean enabled)

@@ -77,7 +77,6 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
     public static final int ORIENTATION_LANDSCAPE = 1;
     public static final int ORIENTATION_PORTRAIT = 2;
 
-    private static final String PREF_TOUCH_RIGHT_STICK = "touch_right_stick";
     private static final String PREF_GAMES_FOLDER_URI = "games_folder_uri";
     private static final String PREF_GAMES_FOLDER_URIS = "games_folder_uris_json";
     private static final java.util.concurrent.ExecutorService GAME_LIBRARY_EXECUTOR =
@@ -107,10 +106,6 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
     private boolean joyDownPressed = false;
     private boolean joyLeftPressed = false;
     private boolean joyRightPressed = false;
-    private boolean joyRUpPressed = false;
-    private boolean joyRDownPressed = false;
-    private boolean joyRLeftPressed = false;
-    private boolean joyRRightPressed = false;
     private boolean controllerUiApplied = false;
     private AlertDialog mBiosPromptDialog = null;
     private boolean mControllerHintShowing = false;
@@ -126,6 +121,7 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
     // Pantalla de inicio. Antes de existir, la raíz de la app era el surface del
     // juego, así que al abrir se veían mandos táctiles sobre un lienzo negro.
     private HomeScreenController mHomeScreen;
+    private SettingsScreenController mSettingsScreen;
     private CenitIntroController mIntro;
     private boolean mPendingSetupWizard;
     private boolean mHomeScreenVisible = true;
@@ -201,7 +197,6 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         View btnSettings = findViewById(R.id.btn_settings);
         // Visibility toggle removed; no dependency on it for constraints
         View llJoy = findViewById(R.id.ll_pad_joy);
-        View llRJoy = findViewById(R.id.ll_pad_rjoy);
         View llDpad = findViewById(R.id.ll_pad_dpad);
         View llRight = findViewById(R.id.ll_pad_right_buttons);
         View llSelectStart = findViewById(R.id.ll_pad_select_start);
@@ -250,31 +245,6 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
             llJoy.setLayoutParams(lp);
             // Nudge joystick further left in both orientations to avoid Select overlap
             llJoy.setTranslationX(-dp(28));
-        }
-
-        if (llRJoy != null) {
-            ConstraintLayout.LayoutParams lp = safeCLP(llRJoy);
-            lp.startToStart = ConstraintLayout.LayoutParams.UNSET;
-            lp.endToEnd = ConstraintLayout.LayoutParams.UNSET;
-            lp.endToStart = ConstraintLayout.LayoutParams.UNSET;
-            lp.topToTop = ConstraintLayout.LayoutParams.UNSET;
-            lp.topToBottom = ConstraintLayout.LayoutParams.UNSET;
-            lp.bottomToBottom = ConstraintLayout.LayoutParams.UNSET;
-            lp.bottomToTop = ConstraintLayout.LayoutParams.UNSET;
-
-            if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
-                lp.bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID;
-                if (llRight != null) lp.endToStart = llRight.getId();
-                else lp.endToEnd = ConstraintLayout.LayoutParams.PARENT_ID;
-                lp.setMargins(dp(6), dp(6), dp(6), dp(6));
-            } else {
-                lp.endToEnd = ConstraintLayout.LayoutParams.PARENT_ID;
-                if (llRight != null) lp.bottomToTop = llRight.getId();
-                else if (llSelectStart != null) lp.bottomToTop = llSelectStart.getId();
-                else lp.bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID;
-                lp.setMargins(dp(0), dp(0), dp(12), dp(6));
-            }
-            llRJoy.setLayoutParams(lp);
         }
 
         if (llDpad != null && llJoy != null) {
@@ -905,8 +875,7 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
 
             @Override
             public void onOpenSettings() {
-                DrawerLayout drawer = findViewById(R.id.drawer_layout);
-                if (drawer != null) drawer.openDrawer(androidx.core.view.GravityCompat.START);
+                showSettingsScreen();
             }
 
             @Override
@@ -931,6 +900,152 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         });
         applyHomeScreenState("created");
         refreshHomeScreenData();
+        setupSettingsScreen(parent);
+    }
+
+    // ------------------------------------------------------------------
+    // Pantalla de ajustes a pantalla completa
+    // ------------------------------------------------------------------
+
+    /**
+     * Crea la pantalla de ajustes encima del inicio. Se construye una sola vez y
+     * se esconde: así al volver de un juego el estado ya está en su sitio y solo
+     * hay que refrescar lo que el núcleo cambió.
+     */
+    private void setupSettingsScreen(ViewGroup parent) {
+        if (mSettingsScreen != null) return;
+        mSettingsScreen = new SettingsScreenController(this, parent,
+                new SettingsScreenController.Host() {
+                    @Override public void onBack() { hideSettingsScreen(); }
+
+                    @Override public void onOpenCustomDriver() {
+                        try {
+                            new CustomDriverDialogFragment()
+                                    .show(getSupportFragmentManager(), "custom_driver");
+                        } catch (Throwable ignored) {}
+                    }
+
+                    @Override public void onOpenSaves() {
+                        try {
+                            new SavesDialogFragment().show(getSupportFragmentManager(), "saves_dialog");
+                        } catch (Throwable ignored) {}
+                    }
+
+                    @Override public void onOpenMemoryCards() {
+                        try {
+                            new MemoryCardManagerDialogFragment()
+                                    .show(getSupportFragmentManager(), "memcard_manager_dialog");
+                        } catch (Throwable ignored) {}
+                    }
+
+                    @Override public void onOpenAchievements() {
+                        try {
+                            AchievementsDialogFragment.newInstance()
+                                    .show(getSupportFragmentManager(), "achievements_dialog");
+                        } catch (Throwable ignored) {}
+                    }
+
+                    @Override public void onOpenAbout() {
+                        try { showAboutDialog(); } catch (Throwable ignored) {}
+                    }
+
+                    @Override public void onOpenControllerTest() {
+                        try {
+                            ControllerTestDialogFragment.newInstance()
+                                    .show(getSupportFragmentManager(), "controller_test");
+                        } catch (Throwable ignored) {}
+                    }
+
+                    @Override public void onOpenSetupWizard() {
+                        showSetupWizard();
+                    }
+
+                    @Override public void onOpenGamesFolders() {
+                        openGamesDialog();
+                    }
+
+                    @Override public void onPickDataFolder() {
+                        pickDataRootFolder();
+                    }
+
+                    @Override public void onImportBios() {
+                        showBiosPrompt();
+                    }
+
+                    @Override public void onDownloadCovers() {
+                        GameList list = loadCachedGameList();
+                        if (list.uris == null || list.uris.length == 0) {
+                            android.widget.Toast.makeText(MainActivity.this,
+                                    "Primero agrega juegos a la biblioteca",
+                                    android.widget.Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        CoverAutoSync.forceSyncAsync(MainActivity.this, list.uris);
+                        android.widget.Toast.makeText(MainActivity.this,
+                                "Buscando carátulas que falten",
+                                android.widget.Toast.LENGTH_SHORT).show();
+                    }
+
+                    @Override public void onRebootGame() {
+                        new MaterialAlertDialogBuilder(MainActivity.this)
+                                .setTitle("Reiniciar")
+                                .setMessage("¿Volver a arrancar el juego actual?")
+                                .setNegativeButton("Cancelar", null)
+                                .setPositiveButton("Reiniciar", (d, w) -> rebootEmu())
+                                .show();
+                    }
+
+                    @Override public void onPowerOff() {
+                        new MaterialAlertDialogBuilder(MainActivity.this)
+                                .setTitle("Apagar")
+                                .setMessage("¿Apagar la consola y volver a la biblioteca?")
+                                .setNegativeButton("Cancelar", null)
+                                .setPositiveButton("Apagar", (d, w) -> returnToHome())
+                                .show();
+                    }
+
+                    @Override public void onOrientationRequested(int mode) {
+                        setOrientationPreference(mode);
+                    }
+
+                    @Override public void onBootBiosToggled(boolean enabled) {
+                        // Encenderlo con la consola parada es la forma de llegar al
+                        // menú de PS2 ya mismo, sin esperar al próximo arranque.
+                        if (enabled && !hasSelectedGame() && !isThread()) startEmuThread();
+                    }
+
+                    @Override public boolean isGameRunning() {
+                        return isThread();
+                    }
+                });
+        mSettingsScreen.hide();
+    }
+
+    /** Abre los ajustes: desde el inicio y también desde el botón del juego. */
+    public void showSettingsScreen() {
+        if (mSettingsScreen == null) {
+            // Sin inicio no hay dónde montar la pantalla: se cae al cajón de siempre.
+            DrawerLayout drawer = findViewById(R.id.drawer_layout);
+            if (drawer != null) drawer.openDrawer(androidx.core.view.GravityCompat.START);
+            return;
+        }
+        mSettingsScreen.show();
+        // Misma pausa que un cajón abierto: el juego no corre detrás de los ajustes.
+        // Lo retrasado porque la conciliación vuelve a contar la pantalla visible.
+        applyRequestedPauseStateDelayed("settings screen opened");
+    }
+
+    public void hideSettingsScreen() {
+        if (mSettingsScreen == null) return;
+        mSettingsScreen.hide();
+        applyRequestedPauseStateDelayed("settings screen closed");
+        // Al cerrar, el inicio se repinta: refleja cambios y dispara la sincronización
+        // de carátulas si el interruptador automático acaba de activarse.
+        if (mHomeScreenVisible) refreshHomeScreenData();
+    }
+
+    public boolean isSettingsScreenVisible() {
+        return mSettingsScreen != null && mSettingsScreen.isShowing();
     }
 
     /** Reproduce la intro la primera vez que se abre Cenit en el dispositivo. */
@@ -982,6 +1097,8 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         boolean showHome = !playing;
         mHomeScreenVisible = showHome;
         mHomeScreen.setVisible(showHome);
+        // Si arranca el juego con los ajustes abiertos, se cierran solos.
+        if (playing) hideSettingsScreen();
 
         // Los mandos táctiles, el botón de menú flotante y el de pausa solo tienen
         // sentido con una emulación activa.
@@ -1101,6 +1218,12 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                     mIntro.hide(MainActivity.this::onIntroFinished);
                     return;
                 }
+                // La pantalla de ajustes a pantalla completa tiene prioridad:
+                // atrás la cierra antes que cualquier otra cosa.
+                if (isSettingsScreenVisible()) {
+                    hideSettingsScreen();
+                    return;
+                }
                 // Con los ajustes o las acciones rápidas abiertos a pantalla completa,
                 // atrás debe cerrar el cajón, no salir de la app.
                 try {
@@ -1134,18 +1257,14 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         // SAVES button removed from main UI; access Save States via drawer or Quick Actions
 
 
-        // Menu button opens left drawer
+        // Menu button opens the full-screen settings (drawer kept as fallback).
         MaterialButton btn_settings = findViewById(R.id.btn_settings);
         if (btn_settings != null) {
             btn_settings.setOnClickListener(v -> {
                 try {
-                    // Just open the drawer - let the drawer listener handle pausing
-                    DrawerLayout drawer = findViewById(R.id.drawer_layout);
-                    if (drawer != null) {
-                        drawer.openDrawer(androidx.core.view.GravityCompat.START);
-                    }
+                    showSettingsScreen();
                 } catch (Throwable t) {
-                    android.util.Log.e("MainActivity", "Error opening settings drawer: " + t.getMessage());
+                    android.util.Log.e("MainActivity", "Error opening settings: " + t.getMessage());
                 }
             });
         }
@@ -1396,11 +1515,6 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         final int PAD_L_DOWN = 112;
         final int PAD_L_LEFT = 113;
 
-        final int PAD_R_UP = 120;
-        final int PAD_R_RIGHT = 121;
-        final int PAD_R_DOWN = 122;
-        final int PAD_R_LEFT = 123;
-
         // Draggable JoystickView (portrait/landscape layouts)
         View joystick = findViewById(R.id.joystick_view);
         if (joystick instanceof JoystickView) {
@@ -1438,44 +1552,6 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                     if (joyLeftPressed) sendKeyAction(jv, MotionEvent.ACTION_UP, PAD_L_LEFT);
                     if (joyRightPressed) sendKeyAction(jv, MotionEvent.ACTION_UP, PAD_L_RIGHT);
                     joyUpPressed = joyDownPressed = joyLeftPressed = joyRightPressed = false;
-                }
-            });
-        }
-
-        // Optional Right JoystickView (right analog stick)
-        View joystickRight = findViewById(R.id.joystick_view_right);
-        if (joystickRight instanceof JoystickView) {
-            JoystickView jv = (JoystickView) joystickRight;
-            jv.setOnMoveListener((nx, ny, action) -> {
-                final float T = 0.3f;
-                boolean up = ny < -T;
-                boolean down = ny > T;
-                boolean left = nx < -T;
-                boolean right = nx > T;
-
-                if (up != joyRUpPressed) {
-                    sendKeyAction(jv, up ? MotionEvent.ACTION_DOWN : MotionEvent.ACTION_UP, PAD_R_UP);
-                    joyRUpPressed = up;
-                }
-                if (down != joyRDownPressed) {
-                    sendKeyAction(jv, down ? MotionEvent.ACTION_DOWN : MotionEvent.ACTION_UP, PAD_R_DOWN);
-                    joyRDownPressed = down;
-                }
-                if (left != joyRLeftPressed) {
-                    sendKeyAction(jv, left ? MotionEvent.ACTION_DOWN : MotionEvent.ACTION_UP, PAD_R_LEFT);
-                    joyRLeftPressed = left;
-                }
-                if (right != joyRRightPressed) {
-                    sendKeyAction(jv, right ? MotionEvent.ACTION_DOWN : MotionEvent.ACTION_UP, PAD_R_RIGHT);
-                    joyRRightPressed = right;
-                }
-
-                if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                    if (joyRUpPressed)  sendKeyAction(jv, MotionEvent.ACTION_UP, PAD_R_UP);
-                    if (joyRDownPressed) sendKeyAction(jv, MotionEvent.ACTION_UP, PAD_R_DOWN);
-                    if (joyRLeftPressed) sendKeyAction(jv, MotionEvent.ACTION_UP, PAD_R_LEFT);
-                    if (joyRRightPressed) sendKeyAction(jv, MotionEvent.ACTION_UP, PAD_R_RIGHT);
-                    joyRUpPressed = joyRDownPressed = joyRLeftPressed = joyRRightPressed = false;
                 }
             });
         }
@@ -1540,7 +1616,6 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         View llRight = findViewById(R.id.ll_pad_right_buttons);
         View llSelectStart = findViewById(R.id.ll_pad_select_start);
         View llJoy = findViewById(R.id.ll_pad_joy);
-        View llRJoy = findViewById(R.id.ll_pad_rjoy);
         View llLShoulders = findViewById(R.id.ll_pad_lshoulders);
         View llRShoulders = findViewById(R.id.ll_pad_rshoulders);
 
@@ -1550,10 +1625,6 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         if (llRight != null) llRight.setVisibility(vis);
         if (llSelectStart != null) llSelectStart.setVisibility(vis);
         if (llJoy != null) llJoy.setVisibility(vis);
-        if (llRJoy != null) {
-            boolean show = visible && getSharedPreferences("app_prefs", MODE_PRIVATE).getBoolean(PREF_TOUCH_RIGHT_STICK, false);
-            llRJoy.setVisibility(show ? View.VISIBLE : View.GONE);
-        }
     }
 
     private void releaseVirtualStickInputs() {
@@ -1564,19 +1635,6 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
             try { NativeApp.setPadButton(ControllerInputHandler.PAD_L_LEFT, 0, false); } catch (Throwable ignored) {}
             try { NativeApp.setPadButton(ControllerInputHandler.PAD_L_RIGHT, 0, false); } catch (Throwable ignored) {}
             joyUpPressed = joyDownPressed = joyLeftPressed = joyRightPressed = false;
-        }
-
-        // Right stick
-        releaseVirtualRightStickInputs();
-    }
-
-    private void releaseVirtualRightStickInputs() {
-        if (joyRUpPressed || joyRDownPressed || joyRLeftPressed || joyRRightPressed) {
-            try { NativeApp.setPadButton(ControllerInputHandler.PAD_R_UP, 0, false); } catch (Throwable ignored) {}
-            try { NativeApp.setPadButton(ControllerInputHandler.PAD_R_DOWN, 0, false); } catch (Throwable ignored) {}
-            try { NativeApp.setPadButton(ControllerInputHandler.PAD_R_LEFT, 0, false); } catch (Throwable ignored) {}
-            try { NativeApp.setPadButton(ControllerInputHandler.PAD_R_RIGHT, 0, false); } catch (Throwable ignored) {}
-            joyRUpPressed = joyRDownPressed = joyRLeftPressed = joyRRightPressed = false;
         }
     }
 
@@ -1852,6 +1910,14 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                 prefs.getBoolean("hud_visible", false));
         NativeApp.setPrecacheTextureReplacements(prefs.getBoolean("precache_textures", false));
         NativeApp.setEdgeCrop(prefs.getInt("edge_crop", DEFAULT_EDGE_CROP));
+        // Opciones GS propias de Cenit: se escriben en el INI antes de arrancar el
+        // juego, igual que las de arriba, para que la primera apertura del GS ya
+        // las vea. Si el VM no corre, solo quedan guardadas.
+        NativeApp.setTextureFiltering(prefs.getInt("texture_filtering", 2));
+        NativeApp.setHWMipmap(prefs.getBoolean("hw_mipmap", true));
+        NativeApp.setMaxAnisotropy(prefs.getInt("max_anisotropy", 0));
+        NativeApp.setCASMode(prefs.getInt("cas_mode", 0), prefs.getInt("cas_sharpness", 50));
+        NativeApp.setHalfPixelOffset(prefs.getInt("half_pixel_offset", 1));
         AudioOutputPreference.apply(this);
     }
 
@@ -3106,17 +3172,6 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                 if (isChecked && !hasSelectedGame() && !isThread()) startEmuThread();
             });
         }
-
-        // Touch right stick joystick (optional on-screen control)
-        com.google.android.material.materialswitch.MaterialSwitch swTouchRightStick = header.findViewById(R.id.drawer_sw_touch_right_stick);
-        if (swTouchRightStick != null) {
-            swTouchRightStick.setTag("setup");
-            swTouchRightStick.setOnCheckedChangeListener((buttonView, isChecked) -> {
-                prefs.edit().putBoolean(PREF_TOUCH_RIGHT_STICK, isChecked).apply();
-                if (!isChecked) releaseVirtualRightStickInputs();
-                try { updateUiForControllerPresence(); } catch (Throwable ignored) {}
-            });
-        }
     }
 
     private void clearDrawerSwitchListeners(View header) {
@@ -3128,7 +3183,6 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                 R.id.drawer_sw_async_textures,
                 R.id.drawer_sw_precache_textures,
                 R.id.drawer_sw_dev_hud,
-                R.id.drawer_sw_touch_right_stick,
                 R.id.drawer_sw_boot_bios_on_start
         };
 
@@ -3294,15 +3348,6 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                 }
             } catch (Exception e) {
                 android.util.Log.e("MainActivity", "Error refreshing dev HUD switch: " + e.getMessage());
-            }
-
-            try {
-                com.google.android.material.materialswitch.MaterialSwitch swTouchRightStick = header.findViewById(R.id.drawer_sw_touch_right_stick);
-                if (swTouchRightStick != null) {
-                    swTouchRightStick.setChecked(prefs.getBoolean(PREF_TOUCH_RIGHT_STICK, false));
-                }
-            } catch (Exception e) {
-                android.util.Log.e("MainActivity", "Error refreshing touch right stick switch: " + e.getMessage());
             }
 
             try {
@@ -3607,6 +3652,10 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         } catch (Throwable error) {
             android.util.Log.w("PauseState", "Unable to reconcile drawers", error);
         }
+        // La pantalla de ajustes a pantalla completa pausa igual que un cajón.
+        try {
+            if (mSettingsScreen != null && mSettingsScreen.isShowing()) openDrawers++;
+        } catch (Throwable ignored) {}
 
         if (visibleDialogs != mOpenDialogCount || openDrawers != mOpenDrawerCount) {
             android.util.Log.d("PauseState", "Reconciled pause owners: dialogs="
@@ -3891,9 +3940,6 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         View joy = findViewById(R.id.ll_pad_joy);
         if (joy != null) joy.setVisibility(View.GONE);
 
-        View rjoy = findViewById(R.id.ll_pad_rjoy);
-        if (rjoy != null) rjoy.setVisibility(View.GONE);
-        
         View dpad = findViewById(R.id.ll_pad_dpad);
         if (dpad != null) dpad.setVisibility(View.GONE);
         

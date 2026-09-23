@@ -1,0 +1,828 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Pantalla completa de Ajustes de Cenit. Se abre desde el inicio y desde el botón
+  de menú del juego, y entra deslizándose hacia arriba, con chips de categoría que
+  saltan a cada sección. El cajón lateral queda como respaldo.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/settings_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/cenit_settings_bg"
+    android:clickable="true"
+    android:focusable="true"
+    android:visibility="gone">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <!-- ============ CABECERA ============ -->
+        <LinearLayout
+            android:id="@+id/settings_header"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_cenit_settings_hero"
+            android:orientation="vertical"
+            android:paddingStart="18dp"
+            android:paddingTop="48dp"
+            android:paddingEnd="18dp"
+            android:paddingBottom="8dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageButton
+                    android:id="@+id/btn_settings_back"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="8dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="Volver"
+                    android:src="@drawable/ic_arrow_left"
+                    app:tint="@android:color/white" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:letterSpacing="0.18"
+                        android:text="AJUSTES"
+                        android:textColor="@android:color/white"
+                        android:textSize="22sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:alpha="0.72"
+                        android:text="Cenit · configuración del emulador"
+                        android:textColor="@android:color/white"
+                        android:textSize="12sp" />
+                </LinearLayout>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/settings_btn_reboot"
+                    style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="8dp"
+                    android:contentDescription="Reiniciar juego"
+                    android:insetBottom="0dp"
+                    android:insetTop="0dp"
+                    android:visibility="gone"
+                    app:backgroundTint="#33FFFFFF"
+                    app:icon="@drawable/ic_reboot"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
+                    app:iconSize="22dp"
+                    app:iconTint="@color/cenit_neon_cyan" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/settings_btn_power"
+                    style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:contentDescription="Apagar"
+                    android:insetBottom="0dp"
+                    android:insetTop="0dp"
+                    android:visibility="gone"
+                    app:backgroundTint="#33FF5C7A"
+                    app:icon="@drawable/ic_power"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
+                    app:iconSize="22dp"
+                    app:iconTint="#FF8FA3BC" />
+            </LinearLayout>
+
+            <!-- Chips de categoría: saltan a la sección correspondiente -->
+            <HorizontalScrollView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:clipToPadding="false"
+                android:paddingBottom="10dp"
+                android:scrollbars="none">
+
+                <com.google.android.material.chip.ChipGroup
+                    android:id="@+id/settings_chips"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    app:singleLine="true"
+                    app:singleSelection="true">
+
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/chip_graphics"
+                        style="@style/Cenit.Settings.Chip"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Gráficos" />
+
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/chip_image"
+                        style="@style/Cenit.Settings.Chip"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Imagen" />
+
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/chip_textures"
+                        style="@style/Cenit.Settings.Chip"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Texturas" />
+
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/chip_audio"
+                        style="@style/Cenit.Settings.Chip"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Audio" />
+
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/chip_patches"
+                        style="@style/Cenit.Settings.Chip"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Parches" />
+
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/chip_controller"
+                        style="@style/Cenit.Settings.Chip"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Mando" />
+
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/chip_system"
+                        style="@style/Cenit.Settings.Chip"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Sistema" />
+                </com.google.android.material.chip.ChipGroup>
+            </HorizontalScrollView>
+        </LinearLayout>
+
+        <!-- ============ CONTENIDO ============ -->
+        <androidx.core.widget.NestedScrollView
+            android:id="@+id/settings_scroll"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:clipToPadding="false"
+            android:paddingStart="14dp"
+            android:paddingTop="14dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="40dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <!-- ==================== GRÁFICOS ==================== -->
+                <LinearLayout
+                    android:id="@+id/sec_graphics"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <com.google.android.material.card.MaterialCardView
+                        style="@style/Cenit.Settings.Card"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:padding="16dp">
+
+                            <TextView
+                                style="@style/Cenit.Settings.Section"
+                                android:text="Motor gráfico" />
+
+                            <com.google.android.material.button.MaterialButtonToggleGroup
+                                android:id="@+id/set_tg_renderer"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="10dp"
+                                app:selectionRequired="true"
+                                app:singleSelection="true">
+
+                                <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/set_tb_at"
+                                    style="@style/Cenit.Settings.Toggle"
+                                    android:layout_width="0dp"
+                                    android:layout_weight="1"
+                                    android:text="Auto" />
+
+                                <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/set_tb_vk"
+                                    style="@style/Cenit.Settings.Toggle"
+                                    android:layout_width="0dp"
+                                    android:layout_weight="1"
+                                    android:text="Vulkan" />
+
+                                <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/set_tb_gl"
+                                    style="@style/Cenit.Settings.Toggle"
+                                    android:layout_width="0dp"
+                                    android:layout_weight="1"
+                                    android:text="OpenGL" />
+
+                                <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/set_tb_sw"
+                                    style="@style/Cenit.Settings.Toggle"
+                                    android:layout_width="0dp"
+                                    android:layout_weight="1"
+                                    android:text="Software" />
+                            </com.google.android.material.button.MaterialButtonToggleGroup>
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Vulkan es la opción rápida en Snapdragon. Si un juego se ve mal, prueba OpenGL." />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/set_btn_custom_driver"
+                                style="@style/Cenit.Settings.ActionRow"
+                                android:layout_marginTop="6dp"
+                                android:text="Controlador GPU personalizado"
+                                app:icon="@drawable/settings_24px" />
+
+                            <View style="@style/Cenit.Settings.Divider" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.FieldLabel"
+                                android:layout_marginTop="0dp"
+                                android:text="Escala de resolución" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Cuánto más nítido se ve todo. Subirla de 2x pide mucho más al teléfono." />
+
+                            <Spinner
+                                android:id="@+id/set_sp_scale"
+                                style="@style/Cenit.Settings.Spinner" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.FieldLabel"
+                                android:text="Precisión de mezcla" />
+
+                            <Spinner
+                                android:id="@+id/set_sp_blending"
+                                style="@style/Cenit.Settings.Spinner" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.FieldLabel"
+                                android:text="Filtro de texturas" />
+
+                            <Spinner
+                                android:id="@+id/set_sp_filtering"
+                                style="@style/Cenit.Settings.Spinner" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.FieldLabel"
+                                android:text="Mipmap en hardware" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Suaviza las texturas del fondo. Si ves bandas o parpadeos, apágalo." />
+
+                            <Spinner
+                                android:id="@+id/set_sp_mipmap"
+                                style="@style/Cenit.Settings.Spinner" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.FieldLabel"
+                                android:text="Filtro anisotrópico" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Nítido en superficies inclinadas, como el suelo de un circuito. Casi gratis en gama alta." />
+
+                            <Spinner
+                                android:id="@+id/set_sp_anisotropy"
+                                style="@style/Cenit.Settings.Spinner" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.FieldLabel"
+                                android:text="Desplazado de medio píxel" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Corrige líneas y texturas movidas en juegos 3D. Normal arregla la mayoría." />
+
+                            <Spinner
+                                android:id="@+id/set_sp_halfpixel"
+                                style="@style/Cenit.Settings.Spinner" />
+
+                            <View style="@style/Cenit.Settings.Divider" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.FieldLabel"
+                                android:layout_marginTop="0dp"
+                                android:text="Nitidez (CAS)" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Devuelve el detalle que se pierde al escalar. «Nitidez + reescalado» es la que más se nota." />
+
+                            <Spinner
+                                android:id="@+id/set_sp_cas"
+                                style="@style/Cenit.Settings.Spinner" />
+
+                            <LinearLayout
+                                android:id="@+id/set_row_cas_sharpness"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal"
+                                android:visibility="gone">
+
+                                <TextView
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:text="Cantidad"
+                                    android:textColor="@color/cenit_settings_muted"
+                                    android:textSize="12sp" />
+
+                                <TextView
+                                    android:id="@+id/set_tv_cas_value"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="50%"
+                                    android:textColor="@color/cenit_neon_cyan"
+                                    android:textSize="12sp" />
+                            </LinearLayout>
+
+                            <com.google.android.material.slider.Slider
+                                android:id="@+id/set_sl_cas_sharpness"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:stepSize="5"
+                                android:value="50"
+                                android:valueFrom="0"
+                                android:valueTo="100"
+                                android:visibility="gone"
+                                app:thumbColor="@color/cenit_neon_blue"
+                                app:tickVisible="false"
+                                app:trackColorActive="@color/cenit_neon_blue"
+                                app:trackColorInactive="@color/cenit_settings_stroke" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+                </LinearLayout>
+
+                <!-- ==================== IMAGEN ==================== -->
+                <LinearLayout
+                    android:id="@+id/sec_image"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <com.google.android.material.card.MaterialCardView
+                        style="@style/Cenit.Settings.Card"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:padding="16dp">
+
+                            <TextView
+                                style="@style/Cenit.Settings.Section"
+                                android:text="Imagen" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.FieldLabel"
+                                android:layout_marginTop="10dp"
+                                android:text="Relación de aspecto" />
+
+                            <Spinner
+                                android:id="@+id/set_sp_aspect"
+                                style="@style/Cenit.Settings.Spinner" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.FieldLabel"
+                                android:text="Recorte de bordes" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Oculta los píxeles basura de los bordes que el overscan de un CRT tapaba." />
+
+                            <Spinner
+                                android:id="@+id/set_sp_edge_crop"
+                                style="@style/Cenit.Settings.Spinner" />
+
+                            <View style="@style/Cenit.Settings.Divider" />
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/set_sw_vsync"
+                                style="@style/Cenit.Settings.Switch"
+                                android:text="Sincronización vertical (VSync)" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Corta el tearing de la imagen. Si notas el juego más lento, déjalo apagado." />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+                </LinearLayout>
+
+                <!-- ==================== TEXTURAS ==================== -->
+                <LinearLayout
+                    android:id="@+id/sec_textures"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <com.google.android.material.card.MaterialCardView
+                        style="@style/Cenit.Settings.Card"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:padding="16dp">
+
+                            <TextView
+                                style="@style/Cenit.Settings.Section"
+                                android:text="Texturas" />
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/set_sw_load_textures"
+                                style="@style/Cenit.Settings.Switch"
+                                android:layout_marginTop="6dp"
+                                android:text="Cargar texturas mejoradas" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Usa los packs de texturas HD que tengas instalados para el juego." />
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/set_sw_async_textures"
+                                style="@style/Cenit.Settings.Switch"
+                                android:text="Carga asíncrona de texturas" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Evita los tirones al aparecer una textura nueva." />
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/set_sw_precache_textures"
+                                style="@style/Cenit.Settings.Switch"
+                                android:text="Precargar texturas al entrar" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Carga todo antes de entrar: tarda más al abrir, pero luego no corta." />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+                </LinearLayout>
+
+                <!-- ==================== AUDIO ==================== -->
+                <LinearLayout
+                    android:id="@+id/sec_audio"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <com.google.android.material.card.MaterialCardView
+                        style="@style/Cenit.Settings.Card"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:padding="16dp">
+
+                            <TextView
+                                style="@style/Cenit.Settings.Section"
+                                android:text="Audio" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.FieldLabel"
+                                android:layout_marginTop="10dp"
+                                android:text="Salida de audio" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Algunos mandos USB se hacen pasar por tarjeta de sonido y se quedan el audio. Elige Teléfono para mantener el sonido en el móvil." />
+
+                            <Spinner
+                                android:id="@+id/set_sp_audio_output"
+                                style="@style/Cenit.Settings.Spinner" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+                </LinearLayout>
+
+                <!-- ==================== PARCHES ==================== -->
+                <LinearLayout
+                    android:id="@+id/sec_patches"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <com.google.android.material.card.MaterialCardView
+                        style="@style/Cenit.Settings.Card"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:padding="16dp">
+
+                            <TextView
+                                style="@style/Cenit.Settings.Section"
+                                android:text="Parches" />
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/set_sw_widescreen"
+                                style="@style/Cenit.Settings.Switch"
+                                android:layout_marginTop="6dp"
+                                android:text="Parches panorámicos (16:9)" />
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/set_sw_no_interlacing"
+                                style="@style/Cenit.Settings.Switch"
+                                android:text="Sin entrelazado" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Se aplican a los juegos que ya los traen soportados; el resto no se toca." />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+                </LinearLayout>
+
+                <!-- ==================== MANDO ==================== -->
+                <LinearLayout
+                    android:id="@+id/sec_controller"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <com.google.android.material.card.MaterialCardView
+                        style="@style/Cenit.Settings.Card"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:padding="16dp">
+
+                            <TextView
+                                style="@style/Cenit.Settings.Section"
+                                android:text="Mando" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/set_btn_test_controller"
+                                style="@style/Cenit.Settings.ActionRow"
+                                android:layout_marginTop="6dp"
+                                android:text="Probar entradas del mando"
+                                app:icon="@drawable/stadia_controller_24px" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+                </LinearLayout>
+
+                <!-- ==================== SISTEMA ==================== -->
+                <LinearLayout
+                    android:id="@+id/sec_system"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <com.google.android.material.card.MaterialCardView
+                        style="@style/Cenit.Settings.Card"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:padding="16dp">
+
+                            <TextView
+                                style="@style/Cenit.Settings.Section"
+                                android:text="Biblioteca" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/set_btn_games"
+                                style="@style/Cenit.Settings.ActionRow"
+                                android:layout_marginTop="10dp"
+                                android:text="Carpetas de juegos"
+                                app:icon="@drawable/folder_24px" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/set_btn_data"
+                                style="@style/Cenit.Settings.ActionRow"
+                                android:text="Carpeta de datos"
+                                app:icon="@drawable/data_table_24px" />
+
+                            <TextView
+                                android:id="@+id/set_tv_data_sub"
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Partidas, estados y configuración" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/set_btn_download_covers"
+                                style="@style/Cenit.Settings.ActionRow"
+                                android:text="Descargar carátulas que falten"
+                                app:icon="@drawable/download_24px" />
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/set_sw_auto_covers"
+                                style="@style/Cenit.Settings.Switch"
+                                android:text="Descargar carátulas automáticamente" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Al abrir el inicio, Cenit busca solas las carátulas que falten, sin tocar nada." />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/set_btn_game_state"
+                                style="@style/Cenit.Settings.ActionRow"
+                                android:text="Estados de guardado"
+                                app:icon="@drawable/save_24px" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/set_btn_memcard"
+                                style="@style/Cenit.Settings.ActionRow"
+                                android:text="Tarjetas de memoria"
+                                app:icon="@drawable/sd_card_24px" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <com.google.android.material.card.MaterialCardView
+                        style="@style/Cenit.Settings.Card"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:padding="16dp">
+
+                            <TextView
+                                style="@style/Cenit.Settings.Section"
+                                android:text="Consola" />
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="10dp"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal">
+
+                                <LinearLayout
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:orientation="vertical">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="Archivos BIOS"
+                                        android:textColor="@color/cenit_settings_text"
+                                        android:textSize="14sp" />
+
+                                    <TextView
+                                        android:id="@+id/set_tv_bios_status"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="2dp"
+                                        android:text="Necesita BIOS verificada"
+                                        android:textColor="@color/cenit_neon_cyan"
+                                        android:textSize="12sp" />
+                                </LinearLayout>
+
+                                <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/set_btn_bios"
+                                    style="@style/Widget.Material3.Button.TextButton"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Importar"
+                                    android:textColor="@color/cenit_neon_blue" />
+                            </LinearLayout>
+
+                            <View style="@style/Cenit.Settings.Divider" />
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/set_sw_boot_bios"
+                                style="@style/Cenit.Settings.Switch"
+                                android:text="Iniciar el menú de PS2 al arrancar" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Desactivado: la app abre directo en tus juegos." />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Section"
+                                android:layout_marginTop="10dp"
+                                android:text="Orientación" />
+
+                            <com.google.android.material.button.MaterialButtonToggleGroup
+                                android:id="@+id/set_tg_orientation"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="8dp"
+                                app:selectionRequired="true"
+                                app:singleSelection="true">
+
+                                <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/set_tb_orient_auto"
+                                    style="@style/Cenit.Settings.Toggle"
+                                    android:layout_width="0dp"
+                                    android:layout_weight="1"
+                                    android:text="Auto" />
+
+                                <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/set_tb_orient_land"
+                                    style="@style/Cenit.Settings.Toggle"
+                                    android:layout_width="0dp"
+                                    android:layout_weight="1"
+                                    android:text="Horizontal" />
+
+                                <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/set_tb_orient_port"
+                                    style="@style/Cenit.Settings.Toggle"
+                                    android:layout_width="0dp"
+                                    android:layout_weight="1"
+                                    android:text="Vertical" />
+                            </com.google.android.material.button.MaterialButtonToggleGroup>
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/set_btn_setup"
+                                style="@style/Cenit.Settings.ActionRow"
+                                android:layout_marginTop="6dp"
+                                android:text="Asistente de configuración"
+                                app:icon="@drawable/tune_24px" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <com.google.android.material.card.MaterialCardView
+                        style="@style/Cenit.Settings.Card"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:padding="16dp">
+
+                            <TextView
+                                style="@style/Cenit.Settings.Section"
+                                android:text="Cuenta y extras" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/set_btn_achievements"
+                                style="@style/Cenit.Settings.ActionRow"
+                                android:layout_marginTop="10dp"
+                                android:text="RetroAchievements"
+                                app:icon="@drawable/check_circle_24px" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/set_btn_about"
+                                style="@style/Cenit.Settings.ActionRow"
+                                android:text="Acerca de Cenit"
+                                app:icon="@drawable/info_24px" />
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/set_sw_dev_hud"
+                                style="@style/Cenit.Settings.Switch"
+                                android:layout_marginTop="6dp"
+                                android:text="HUD de rendimiento" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Muestra FPS y estadísticas sobre el juego." />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+                </LinearLayout>
+            </LinearLayout>
+        </androidx.core.widget.NestedScrollView>
+    </LinearLayout>
+</FrameLayout>

@@ -341,26 +341,6 @@
             android:layout_margin="2dp" />
     </LinearLayout>
 
-    <!-- Optional right stick joystick (disabled by default) -->
-    <LinearLayout
-        android:id="@+id/ll_pad_rjoy"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:gravity="center"
-        android:orientation="vertical"
-        android:visibility="gone"
-        app:layout_constraintBottom_toTopOf="@id/ll_pad_right_buttons"
-        app:layout_constraintEnd_toEndOf="parent"
-        android:layout_marginEnd="12dp"
-        android:layout_marginBottom="6dp">
-
-        <com.izzy2lost.psx2.JoystickView
-            android:id="@+id/joystick_view_right"
-            android:layout_width="120dp"
-            android:layout_height="120dp"
-            android:layout_margin="2dp" />
-    </LinearLayout>
-
     <!-- D-Pad: four circles in a diamond, above the joystick -->
     <LinearLayout
         android:id="@+id/ll_pad_dpad"

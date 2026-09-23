@@ -77,7 +77,6 @@ public final class HomeScreenController {
     private View searchRow;
     private EditText searchInput;
     private View scroll;
-    private View settingsPanel;
     private View emptyState;
     private TextView emptyText;
     private View emptyAction;
@@ -121,7 +120,6 @@ public final class HomeScreenController {
         searchRow = root.findViewById(R.id.home_search_row);
         searchInput = root.findViewById(R.id.home_search_input);
         scroll = root.findViewById(R.id.home_scroll);
-        settingsPanel = root.findViewById(R.id.home_settings_panel);
         emptyState = root.findViewById(R.id.home_empty);
         emptyText = root.findViewById(R.id.home_empty_text);
         emptyAction = root.findViewById(R.id.btn_home_empty_action);
@@ -182,25 +180,14 @@ public final class HomeScreenController {
             host.onAddGamesFolder();
             mainHandler.postDelayed(() -> tabFolders.setSelected(false), 400);
         });
-        if (tabSettings != null) tabSettings.setOnClickListener(v ->
-                selectTab(tabSettings.isSelected() ? TAB_HOME : TAB_SETTINGS));
+        // "Ajustes" ya no es una vista dentro del inicio: abre la pantalla completa.
+        if (tabSettings != null) tabSettings.setOnClickListener(v -> {
+            if (tabSettings.isSelected()) { selectTab(TAB_HOME); return; }
+            selectTab(TAB_SETTINGS);
+            host.onOpenSettings();
+        });
 
-        bindSettingsPanelRows();
         selectTab(TAB_HOME);
-    }
-
-    /** Las filas del panel "Ajustes" reutilizan los flujos que ya existen. */
-    private void bindSettingsPanelRows() {
-        View bios = root.findViewById(R.id.home_set_bios);
-        if (bios != null) bios.setOnClickListener(v -> host.onImportBios());
-        View data = root.findViewById(R.id.home_set_data);
-        if (data != null) data.setOnClickListener(v -> host.onPickDataFolder());
-        View games = root.findViewById(R.id.home_set_games);
-        if (games != null) games.setOnClickListener(v -> host.onOpenGamesManager());
-        View setup = root.findViewById(R.id.home_set_setup);
-        if (setup != null) setup.setOnClickListener(v -> host.onOpenSetup());
-        View advanced = root.findViewById(R.id.home_set_advanced);
-        if (advanced != null) advanced.setOnClickListener(v -> host.onOpenSettings());
     }
 
     // ------------------------------------------------------------------
@@ -212,12 +199,11 @@ public final class HomeScreenController {
     private static final int TAB_SETTINGS = 2;
     private int currentTab = TAB_HOME;
 
-    /** Inicio y Biblioteca muestran la rejilla; Ajustes abre su panel a pantalla completa. */
+    /** Inicio y Biblioteca muestran la rejilla; Ajustes solo marca el estado activo. */
     private void selectTab(int tab) {
         currentTab = tab;
         boolean settings = tab == TAB_SETTINGS;
-        if (scroll != null) scroll.setVisibility(settings ? View.GONE : View.VISIBLE);
-        if (settingsPanel != null) settingsPanel.setVisibility(settings ? View.VISIBLE : View.GONE);
+        if (scroll != null) scroll.setVisibility(View.VISIBLE);
         if (searchRow != null && searchRow.getVisibility() == View.VISIBLE && settings) {
             searchRow.setVisibility(View.GONE);
             if (searchInput != null) {
@@ -375,6 +361,8 @@ public final class HomeScreenController {
                     if (!serial.isEmpty()) serialSet.add(serial);
                 }
                 Map<String, String> cached = CoverCache.findValidCoverPaths(context, serialSet);
+                // Con "auto_covers" activo, lo que falte se descarga en segundo plano.
+                CoverAutoSync.maybeSyncAsync(context, uriSnapshot);
 
                 for (int i = 0; i < n; i++) {
                     HomeGameAdapter.Entry e = new HomeGameAdapter.Entry(nameSnapshot[i], uriSnapshot[i]);
@@ -453,16 +441,6 @@ public final class HomeScreenController {
             if (statusText != null) statusText.setText("Falta " + join(missing));
             if (statusAction != null) statusAction.setVisibility(View.VISIBLE);
         }
-
-        TextView biosSub = root.findViewById(R.id.home_set_bios_sub);
-        if (biosSub != null) biosSub.setText(hasBios
-                ? "BIOS detectada y verificada" : "Necesaria para iniciar cualquier juego");
-        TextView dataSub = root.findViewById(R.id.home_set_data_sub);
-        if (dataSub != null) dataSub.setText(hasDataFolder
-                ? "Carpeta de datos elegida" : "Partidas, estados y configuración");
-        TextView gamesSub = root.findViewById(R.id.home_set_games_sub);
-        if (gamesSub != null) gamesSub.setText(hasGamesFolder
-                ? "Carpetas configuradas" : "Añade o cambia las carpetas de tu biblioteca");
     }
 
     private static String join(List<String> parts) {

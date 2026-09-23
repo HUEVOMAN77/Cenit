@@ -22,7 +22,7 @@
             android:contentDescription="Cenit"
             android:src="@drawable/cenit_logo" />
 
-        <TextView
+        <com.izzy2lost.psx2.NeonGradientTextView
             android:id="@+id/intro_wordmark"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"

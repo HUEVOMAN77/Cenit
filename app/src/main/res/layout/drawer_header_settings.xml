@@ -457,15 +457,10 @@
 
                     <TextView style="@style/Cenit.Settings.Section" android:text="Mando" />
 
-                    <com.google.android.material.materialswitch.MaterialSwitch
-                        android:id="@+id/drawer_sw_touch_right_stick"
-                        style="@style/Cenit.Settings.Switch"
-                        android:layout_marginTop="6dp"
-                        android:text="Palanca derecha táctil" />
-
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/drawer_btn_test_controller"
                         style="@style/Cenit.Settings.ActionRow"
+                        android:layout_marginTop="6dp"
                         android:text="Probar entradas del mando"
                         app:icon="@drawable/stadia_controller_24px" />
                 </LinearLayout>
