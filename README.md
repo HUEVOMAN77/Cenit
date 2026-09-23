@@ -1,116 +1,111 @@
 # CENIT — Emulador de PlayStation 2 para Android
 
 [![Licencia: GPL v3](https://img.shields.io/badge/Licencia-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.en.html)
-[![Android](https://img.shields.io/badge/Android-8.0%2B-green.svg)](https://developer.android.com/)
-[![ARM64](https://img.shields.io/badge/Arquitectura-arm64--v8a-orange.svg)](https://developer.arm.com/)
-[![Última versión](https://img.shields.io/badge/versión-0.6.6-informational)](https://github.com/HUEVOMAN77/Cenit/releases/tag/base-0.6.6)
+[![Android](https://img.shields.io/badge/Android-8.0%20o%20superior-green.svg)](https://developer.android.com/)
+[![ARM64](https://img.shields.io/badge/Procesador-arm64--v8a-orange.svg)](https://developer.arm.com/)
+[![Última versión](https://img.shields.io/badge/versión%20actual-0.6.6-informational)](https://github.com/HUEVOMAN77/Cenit/releases/tag/base-0.6.6)
 
-**Cenit** es un emulador de PlayStation 2 para teléfonos Android (arm64) construido como fork independiente de [PSX2](https://github.com/izzy2lost/PSX2) —el port Android de PCSX2 2.7— mantenido por una sola persona, pieza a pieza, con un objetivo concreto: **que los juegos de PS2 corran fluidos en gama baja y media, donde ningún otro port se preocupa por mirar.**
+**Cenit** es un emulador de PlayStation 2 para celulares Android, hecho como proyecto independiente a partir de [PSX2](https://github.com/izzy2lost/PSX2) (el adaptador Android de PCSX2 2.7). Lo desarrolla una sola persona, pieza por pieza y en público, con una meta muy concreta: **que los juegos de PS2 se muevan fluidos en celulares de gama baja y media, que es donde ningún otro proyecto mira.**
 
-Este proyecto no busca ser una copia con logo distinto. Cada versión añade capas de optimización y de experiencia de uso que no existen en PSX2 ni en PCSX2, medidas sobre hardware real de teléfono.
+No es una copia con otro logo. Cada versión suma mejoras de rendimiento y de uso que no existen ni en PSX2 ni en PCSX2, medidas sobre celulares reales.
 
 ---
 
-## Ficha rápida
+## Lo esencial
 
 | | |
 |---|---|
-| **Versión actual** | 0.6.6 (versionCode 42) |
-| **Descargas** | [Releases](https://github.com/HUEVOMAN77/Cenit/releases) — `Cenit-<versión>.apk` |
-| **Requisitos** | Android 8.0+ (minSdk 26), procesador arm64, tu propia BIOS de PS2 |
-| **Qué NO incluye** | BIOS, juegos, ni ningún contenido con copyright |
-| **Firma** | Clave de debug (uso personal; no es una APK de tienda) |
-| **Licencia** | GPL-3.0, como el PCSX2 del que desciende |
+| **Versión actual** | 0.6.6 |
+| **Descarga** | [Lanzamientos](https://github.com/HUEVOMAN77/Cenit/releases) — busca `Cenit-0.6.6.apk` |
+| **Requiere** | Android 8 o superior, procesador de 64 bits y tu propia BIOS de PS2 |
+| **No incluye** | BIOS, juegos ni ningún archivo con derechos de autor |
+| **Firma** | Clave de prueba (es un proyecto personal, no una tienda) |
+| **Licencia** | GPL-3.0, libre como el PCSX2 del que desciende |
 
 ---
 
 ## Por qué existe Cenit
 
-PCSX2 es un emulator excepcional diseñado para PCs. Su port de Android (PSX2) hereda de golpe supuestos que en un teléfono no valen: hilos que el sistema operativo del teléfono mueve a núcleos economizados a mitad de frame, readbacks síncronos que traban el pipeline, precargas de texturas que se comen la RAM compartida, y ajustes globales que el propio núcleo borra sin avisar.
+PCSX2 es un emulador excelente, pero está pensado para computadoras. Al llevarlo a un celular arrastra supuestos que acá no valen: hilos de procesamiento que el sistema del teléfono manda a los núcleos lentos en mitad de una partida, esperas de la gráfica que traban todo, cargas de texturas que se comen la memoria compartida, y ajustes que el propio motor borra sin avisar.
 
-En un gama alta esas torpezas se perdonan porque sobra potencia. En un gama media o baja son exactamente la diferencia entre 25 fps con tirones y 50 estables. Cenit ataca esa brecha: **detecta el hardware, aprende de cada juego y adapta el motor solo**, sin que el usuario tenga que entender qué es un VsyncQueueSize.
-
-Y lo hace en público: todo el código está aquí, se compila en GitHub Actions ante cualquiera, y cada release explica qué cambió y por qué.
+En un gama alta eso se perdona porque sobra potencia. En un gama media o baja es exactamente la diferencia entre 25 cuadros por segundo con tirones y 50 estables. Cenit ataca ese problema: **reconoce tu hardware, aprende cómo se comporta cada juego en tu teléfono y adapta el motor solo**, sin que tengas que saber qué significa cada ajuste.
 
 ---
 
-## Qué lleva dentro (historial por versión)
+## Todo lo que incluye
 
-### Identidad e interfaz (0.2.0 → 0.6.2)
+### Rendimiento inteligente (lo que hace especial a Cenit)
 
-- **Pantalla de inicio propia** (0.2.0, rediseñada en 0.5.0): cabecera con marca, biblioteca en rejilla de 4 columnas con carátulas automáticas de cajas de PS2, buscador en vivo, barra inferior Inicio · Biblioteca · Carpetas · Ajustes. Los mandos táctiles solo aparecen con un juego en marcha.
-- **Marca Cenit completa** (0.3.0): cortinilla de intro animada, nombre oficial en el launcher, ícono propio.
-- **Onboarding de 3 pasos** (0.4.0): BIOS, carpetas y configuración inicial con tarjetas de progreso; nunca deja al usuario atrapado (arreglado en 0.1.1).
-- **Ajustes a pantalla completa** en clave neón (0.4.0/0.6.2), agrupados por secciones.
-- **Mandos en pantalla rediseñados** (0.6.1): estilo fantasma transparente, hombros L3/L2/L1 y R2/R1/R3 arriba, cruceta en rombo, botones con símbolos PS2.
+- **Perfil automático por hardware.** Al instalarlo reconoce el procesador (incluidos los apodos internos de Qualcomm que muchas marcas no reportan bien) y deja lista la línea base: aceleradores de CPU seguros, recompilación completa, sin esperas inútiles a la gráfica y registros silenciados. No hay que tocar nada: arranca ya configurado para tu gama.
+- **Resolución dinámica.** Si un juego se atrasa, baja un escalón de resolución solo y lo devuelve cuando afloja. Respeta la escala que elegiste como techo, se congela si pausas o usas aceleración, y se rinde en paz si los ajustes del juego mandan más que él.
+- **Memoria por juego.** Cenit recuerda qué resolución sostuvo cada juego *en tu teléfono*. La próxima partida arranca directo ahí, sin pelear desde el máximo. Y si un juego resultó limitado por CPU, deja de recortarle píxeles que no le sirven. Se borra manteniendo pulsado el interruptor de memoria.
+- **Recorte térmico anticipado.** Muchos celulares bajan su potencia por calor sin avisar. Cenit detecta la caída silenciosa y baja un paso *antes* de que sientas el tirón, con un máximo por partida para no pasarse de listo.
+- **Turbo en pantallas de carga.** Reconoce cuando el juego está cargando (pantalla quieta, gráfica sin trabajar) y acelera solo esos segundos; lo devuelve apenas vuelve la partida. Apagado por defecto, se activa en Ajustes.
+- **Cuotas de CPU con evidencia.** Hay juegos que nunca llegan a tiempo aunque todo esté al máximo (Shadow of the Colossus es el clásico). Si Cenit nota que tu juego se quedó clavado, te lo dice con los segundos que midió y te sugiere probar las cuotas; si no, te recomienda dejarlas en Normal. Se guardan solo para el juego que tienes delante y se aplican al instante.
+- **Hilos anclados al núcleo rápido.** Mantiene el motor del juego y la gráfica en los núcleos potentes del celular, sin que el sistema los mueva a los economizados a mitad de frame. Apagable para diagnosticar.
+- **Ritmo de cuadro según tu gama.** En gama media/alta usa el ritmo óptimo (el mando responde antes); en gama baja deja dos cuadros de amortiguación, que es como absorbe los picos sin perder fluidez. Ajustable.
+- **Carga de texturas por gama.** En gama baja solo sube a la gráfica las texturas que se van a ver: cientos de megas de memoria compartida libres y menos microcortes al entrar a zonas nuevas.
+- **Plan B gráfico.** Si el renderizador automático no logra iniciar, prueba Vulkan y OpenGL entre sí y te avisa en pantalla, en vez de quedarse negro.
 
-### Motor de rendimiento (0.6.0 → 0.6.6)
+### Compatibilidad y control fino, juego por juego
 
-- **0.6.0 — Perfil de rendimiento por hardware.** Detección de SoC (incluidos apodos de Qualcomm para ROMs que no reportan `ro.soc.model`) y aplicación de un baseline por gama: speedhacks seguros (IntcStat, WaitLoop, vuFlagHack, vu1Instant, fastCDVD), recompilación completa con fastmem, sin spin en readbacks de GPU, salto de frames duplicados y logs silenciados.
-- **0.6.3 — Resolución dinámica (regidor propio).** Mide la velocidad real de emulación cada segundo; si el juego se atrasa, baja un paso de resolución por la vía oficial (INI + ApplySettings) y lo devuelve cuando afloja. Respeta la escala del usuario como techo, se congela con mando de velocidad o pausa, y se rinde si los ajustes por juego mandan sobre él.
-- **0.6.4 — Hack de hardware POR JUEGO de verdad.** El medio píxel se guardaba en el INI global que MaskUserHacks borraba en cada ApplySettings: una función fantasma. Ahora vive en `gamesettings/<SERIAL>_CRC.ini` y, antes de activar el modo manual de un juego, **siembra sus fixes automáticos del GameDB** para que ninguno se pierda. Se aplica en caliente (ReloadGameSettings en el hilo de emulación). Mismo release añade: modo de descarga GPU *Unsynchronized* en gama baja, compresión de estados zstd-Low en gama baja, y **respaldo automático Vulkan↔OpenGL** si el renderizador Auto no logra abrir el dispositivo (con aviso en pantalla). El regidor sube a v2: deja de recortar resolución cuando el cuello de botella es la CPU emulada (usa el uso real de GPU como testigo) y obedece los límites térmicos del sistema.
-- **0.6.5 — Cuatro funciones inventadas aquí** (no existen en PSX2 ni en PCSX2):
-  1. **Memoria por juego**: Cenit recuerda qué escala sostuvo cada juego en *tu* teléfono; la próxima sesión arranca en ella en vez de pelear desde el máximo, y un juego visto como CPU-bound no vuelve a recibir recortes inútiles. (Se borra manteniendo pulsado el interruptor de memoria.)
-  2. **Pre-corte térmico**: detecta la deriva silenciosa de velocidad propia del throttling que no avisa, y baja un paso *antes* del tirón. Máximo dos por partida.
-  3. **Turbo en pantallas de carga**: reconoce la carga (GPU muerta + velocidad clavada), engancha el limitador Turbo del núcleo esos segundos y lo suelta solo, con corte de seguridad.
-  4. **Cuotas de EE con evidencia**: si el juego se quedó clavado en 1x, la pantalla de Ajustes te lo dice con los segundos que midió y te sugiere probar; si no, te recomienda dejarlo en Normal. Se guarda solo en el juego delante y aplica al instante.
-- **0.6.6 — Tres bloques de rendimiento fino**, todos regulables en Ajustes → Rendimiento:
-  1. **Fijar emulación al núcleo rápido**: el reparto de hilos EE/VU/GS ya existía en el núcleo pero condicionada a que cpuinfo reportara varios clústeres; ahora se garantiza y se puede apagar para diagnosticar.
-  2. **Cola de cuadros**: ritmo óptimo (cero cuadros por delante, menos input lag) en gama media/alta; 2 cuadros de amortiguación en gama baja, donde quitarla costaría fps.
-  3. **Precarga de texturas por gama**: *Parcial* en gama baja (cientos de MB de RAM compartida libres, menos micro-cortes al entrar a zonas nuevas); *Completa* arriba; el GameDB sigue mandando cuando un juego lo exige.
+- **Ajustes que se guardan por juego.** El desplazado de medio píxel y las cuotas de CPU se escriben en la configuración individual de cada juego y se aplican al vuelo, sin reiniciar. Antes el motor borraba esos valores; ahora Cenit los guarda donde el motor los respeta, conservando además los arreglos automáticos que cada juego ya traía.
+- **Importación manual de controladores gráficos (drivers Vulkan).** En celulares Snapdragon/Adreno puedes cargar un controlador Turnip (Mesa) descargado por ti, en el formato de paquete estándar de la comunidad (el mismo de Yuzu, Strato y Vita3K): botón en Ajustes, eliges el `.zip`, se instala y se activa. Es la vía para ganar velocidad y corrección gráfica donde el controlador de fábrica se queda corto. Solo aplica a teléfonos con gráfica Adreno; en el resto, el botón no tiene efecto.
+- **Packs de texturas.** Importa y gestiona paquetes de texturas de alta resolución por juego, con carga asíncrona y precarga opcionales.
+- **Arreglos automáticos de compatibilidad.** El motor aplica las correcciones conocidas para cada juego, y ninguna función de Cenit las rompe al tocar ajustes manuales.
+- **Trampas, tarjetas de memoria y estados de guardado.** Menú de trampas, administrador completo de memory cards (crear, importar, exportar) y guardado/cargado rápido en cualquier momento.
+- **Logros (RetroAchievements).** Inicia sesión y juega por logros, con notificaciones dentro del juego.
 
-### Arquitectura de estas capas
+### La experiencia de usarlo
 
-- **Java (capa propia)**: `DynamicResolutionGovernor` (v3: memoria + pre-corte + turbo + evidencia, un tick por segundo en el hilo principal), `AdaptiveProfile` (aprendizaje persistido por URI en las prefs de la app), la pantalla de Ajustes y todo el onboarding.
-- **JNI (`native-lib.cpp`)**: setters que aplican en caliente respetando el ciclo del núcleo (escribir INI → `ApplySettings` → `MTGS::ApplySettings`), capa de escritura por-juego con siembra de GameDB, y métricas expuestas (`getEmulationSpeed`, `getGPUUsage`, `getGPUAverageTime`).
-- **Núcleo PCSX2 intacto en su lógica**: ninguna función de Cenit parchea el bucle de dibujo del GS ni la recompilería; todo entra por las vías oficiales de configuración del propio emulador, que es lo que hace estas mejoras seguras de actualizar y de deshacer.
+- **Pantalla de inicio propia.** Biblioteca en cuadrícula con carátulas de cajas descargadas automáticamente, buscador en vivo, "Continuar" con lo último jugado y barra inferior: Inicio · Biblioteca · Carpetas · Ajustes. Los mandos táctiles solo aparecen con un juego en marcha.
+- **Asistente de primera vez.** Tres pasos con progreso claro: BIOS, carpetas y listo. Nunca te deja atrapado ni te pide saber de emuladores.
+- **Mandos en pantalla rediseñados.** Estilo fantasma transparente, con hombros y gatillos arriba (L3/L2/L1 · R2/R1/R3), cruceta y botones con los símbolos de PS2, y cruceta direccional en rombo sobre el stick.
+- **Soporte de mandos externos.** Bluetooth y USB, con pantalla de prueba de botones.
+- **Ajustes a pantalla completa** organizados por secciones, con todo lo de arriba al alcance y explicado en español.
+- **Formatos de juego.** ISO, BIN/CUE, CHD y comprimidos.
 
 ---
 
-## Cómo usar
+## Cómo se comporta en gama baja y media
 
-1. Descarga `Cenit-0.6.6.apk` desde [Releases](https://github.com/HUEVOMAN77/Cenit/releases) e instálala (permitir "instalar apps desconocidas" si es tu primera vez).
-2. Al abrir, el asistente te guía: coloca tu **BIOS legal** (extraída de tu propia PS2) en la carpeta que indica, y elige una carpeta de juegos (ISO `.bin/.iso/.chd/.gz`).
-3. Toca un juego de la biblioteca. Con el juego abierto, el panel de Ajustes → Rendimiento deja los mandos de Cenit: resolución dinámica, memoria por juego, turbo de cargas, cuotas de EE, fijado de hilos, cola de cuadros y precarga.
-4. Recomendado para ver qué está haciendo el motor: activa el HUD de velocidad la primera semana.
+- **Gama baja (4 GB de RAM, Mali/Adreno de entrada):** arranca en 1x con la carga de texturas parcial, la resolución dinámica y el perfil de memoria por juego trabajan juntos; en la práctica, juegos 2D y 3D sencillos corren a tiempo y los pesados quedan jugables con baches menos frecuentes.
+- **Gama media (Snapdragon 7-series, Helio G99 y similares):** el escenario donde Cenit más brilla — la segunda partida de un juego ya aprendido arranca en su escala sostenida, los tirones por calor se adelantan, y las cargas se aceleran solas si activas el turbo.
+- **Gama alta:** también gana (ritmo óptimo, hilos anclados), pero su mérito es no estorbar: el techo de resolución siempre es el tuyo.
 
-## Compilar desde el código
+Lo decimos claro: ningún truco hace correr *God of War* a 60 cuadros en un teléfono de 100 dólares. Cenit reduce la distancia entre "no es jugable" y "se puede disfrutar", y te muestra la evidencia de cada decisión.
 
-```
-CI de GitHub Actions (recomendada):
-  Actions → "Build" → build_type: release   (o push a master; genera el artifact)
+---
 
-Local (Linux/Windows):
-  Requisitos: Android NDK 28.2.13676358, CMake 3.22+, JDK 17, SDK de Android
-  git clone https://github.com/HUEVOMAN77/Cenit && cd Cenit
-  ./gradlew assembleRelease
-  Salida: app/build/outputs/apk/release/
-```
+## Cómo empezar
 
-El proyecto completo se compila en `.github/workflows/build.yml` con cada push: si algo roto sube, la pestaña Actions lo muestra en minutos.
+1. Descarga `Cenit-0.6.6.apk` desde [Lanzamientos](https://github.com/HUEVOMAN77/Cenit/releases) e instálala (Android pedirá permitir apps de esta fuente la primera vez).
+2. Abre la app y sigue el asistente: coloca la **BIOS extraída de tu propia PS2** y elige la carpeta de tus juegos.
+3. Toca un juego de la biblioteca y listo. Con una partida abierta, el panel **Ajustes → Rendimiento** muestra todos los mandos de Cenit.
+4. Consejo: la primera semana activa el mostrador de velocidad en pantalla y verás qué está haciendo el motor por ti.
 
-## Por qué las APK van firmadas con clave de debug
+## Por qué la firma es de prueba
 
-Cenit es un proyecto personal, sin cuenta de desarrollador ni intención de tienda. La firma de debug es lo honesto para un build de comunidad: la APK se instala directa, y no suplanta a ninguna firma oficial. Si alguna vez eso cambia, se anunciará aquí y en cada release.
+Cenit es un proyecto personal, sin cuenta de desarrollador ni intención de tienda. La firma de prueba es lo honesto para un proyecto comunitario: la APK se instala directa y no suplanta ninguna firma oficial. Si eso cambia algún día, se anunciará aquí y en cada lanzamiento.
 
-## Hoja de ruta
+## Lo que viene
 
-Lo siguiente, en orden de impacto medido:
+En orden de impacto medido:
 
-- **Hacks por-juego finos con UI**: TextureInsideRt (lectura del framebuffer dentro de la GPU — el de mayor rendimiento posible en juegos con agua/reflejos), NativeScaling y SkipDraw. Las tres infraestructuras (capa por-juego + siembra GameDB + reload en caliente) ya existen; falta exponerlas con criterio y con la evidencia del regidor como guía.
-- **Base de datos de rendimiento propia**: usar lo que los perfiles de memoria juntan (escala sostenida, cpu-bound, cuotas) para sugerir un preset por juego y, con el tiempo, compartir una tabla de la comunidad.
-- **Limpieza del binario**: el build de Android arrastra el recompiler x86 completo que nunca corre (≈2 MB muertos) — sacarlos del CMake de Android.
-- **Mejoras térmicas activas**: colaboración con el framework de potencia de Android (ADPF en API 33+) para que el SoC suba frecuencia *antes* del pico en vez de recortarla después.
-- **Más allá del governor**: lectura del modo de juego real para no recortar resolución durante FMVs y cortes de escena (ya hay heurística; el paso fino requiere medir en más títulos).
+- **Más ajustes por juego con criterio propio:** lectura de texturas dentro de la gráfica (el de mayor salto en juegos con agua y reflejos), escalado nativo de sprites y salto de dibujos, todos con la evidencia que ya juntan los perfiles de memoria como guía.
+- **Tabla de rendimiento de la comunidad:** que lo que Cenit aprende en cada teléfono (escala sostenida, tipo de cuello de botella) se convierta en una configuración sugerida por juego, compartida entre usuarios.
+- **Celular más frío, menos recortes:** colaboración con el sistema de energía de Android para que el procesador suba frecuencia *antes* del pico en lugar de recortarla después.
+- **Menos recortes en video y escenas:** que la resolución dinámica no baje durante cinemáticas ni cortes de escena.
+- **Mejoras de estabilidad continua:** cada versión pasa por compilación y pruebas automatizadas antes de publicarse.
 
 ## Créditos y ascendencia
 
-- **[PCSX2](https://github.com/PCSX2/pcsx2)** — el emulador. Todo el mérito del motor es de sus autores.
-- **[PCSX2_ARM64](https://github.com/pontos2024/PCSX2_ARM64)** — la recompilería ARM64 nativa sobre la que se apoya el port.
-- **[PSX2 (izzy2lost)](https://github.com/izzy2lost/PSX2)** — el port Android del que este repositorio es fork directo.
+- **[PCSX2](https://github.com/PCSX2/pcsx2)** — el emulador; todo el mérito del motor es de sus autores.
+- **[PCSX2_ARM64](https://github.com/pontos2024/PCSX2_ARM64)** — la compilación nativa para ARM64 sobre la que se apoya el adaptador Android.
+- **[PSX2 (izzy2lost)](https://github.com/izzy2lost/PSX2)** — el proyecto Android del que este repositorio es bifurcación directa.
 
-Cenit es una capa propia (identidad, interfaz, governor de rendimiento, capa por-juego, perfiles de hardware) sobre esa ascendencia, publicada bajo la misma licencia GPL-3.0 y mantenida por una sola persona, poco a poco. Los problemas del motor son del motor; las ideas de este archivo, de este fork.
+Cenit es una capa propia (identidad, interfaz, motor de rendimiento adaptativo, ajustes por juego y perfiles de hardware) sobre esa base, publicada bajo la misma licencia GPL-3.0 y mantenida por una sola persona, poco a poco. Los problemas del motor son del motor; las ideas de este proyecto, de este fork.
 
 ## Aviso legal
 
-Cenit es un proyecto educativo y de uso personal, sin afiliación con Sony Interactive Entertainment, con el equipo de PCSX2 ni con Google. No distribuye BIOS ni juegos: para usarlo necesitas tu propio hardware de PS2 del que extraer la BIOS y tus propias copias de los juegos.
+Cenit es un proyecto educativo y de uso personal, sin vínculo con Sony Interactive Entertainment, con el equipo de PCSX2 ni con Google. No distribuye BIOS ni juegos: necesitas tu propia consola PS2 de la que extraer la BIOS y tus propias copias de los juegos.
