@@ -190,7 +190,23 @@ static void ApplyHardwarePerformanceProfile()
     // el nivel más rápido de zstd. Guardar una estado no debe costar cuadros;
     // cambia tamaño, no fiabilidad.
     if (AndroidDeviceDetection::GetDeviceTier() == 0)
+    {
         s_settings_interface.SetIntValue("EmuCore", "SavestateCompressionRatio", 0);
+
+        // §2.2: en gama baja el ancho de banda es el recurso más escaso y el
+        // readback síncrono del MTGS es lo que más traba el pipeline. 3 =
+        // Unsynchronized: la lectura sigue HACIéndose (GSReadLocalMemoryUnsync,
+        // agua/reflejos siguen teniendo datos reales con ventana de carrera)
+        // pero el EE no espera al GPU. El 4 (Disabled) fue descartado porque en
+        // MTGS.cpp:289 devuelve MEMSET de ceros: rompe efectos enteros.
+        // Se escribe en la capa BASE, así que el orden del núcleo sigue siendo:
+        // base -> GameDB -> gamesettings/<serial>.ini. Un juego con reflejos
+        // problemáticos se excepciona desde GameIndex.yaml con HWDownloadMode
+        // (la infraestructura por-título ya existe) o desde el INI del propio
+        // juego, sin tocar el perfil. El aviso de arranque de VMManager.cpp:3659
+        // ("may break rendering in some games") sale a propósito: es honesto.
+        s_settings_interface.SetIntValue("EmuCore/GS", "HWDownloadMode", 3);
+    }
 
     // Renderer/upscale are NOT set here: MainActivity pushes the user's saved
     // values after initialize() (applyGlobalSettingsBatch), so a native write
