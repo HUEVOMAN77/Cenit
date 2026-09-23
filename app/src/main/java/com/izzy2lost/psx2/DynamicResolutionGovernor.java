@@ -74,10 +74,21 @@ final class DynamicResolutionGovernor {
     private float pendingApply = 0f;
     private int pendingTicks = 0;
     private boolean selfDisabled = false;
-    // Regidor v2: estado térmico visto por última vez (-2 = sin oyente, p. ej.
-    // API < 29 o el sistema no expone PowerManager). -1 = normal.
+    // Regidor v2: estado térmico visto por última vez (-2 = sin señal, p. ej.
+    // API < 29). -1 = normal.
+    //
+    // Las APIs térmicas se usan POR REFLEXIÓN a propósito: add/remove-
+    // ThermalStatusChangedListener fallan de compilar contra algunos android.jar
+    // del runner (métodos que sí existen en runtime, resueltos de forma
+    // inconsistente según la plataforma instalada). Con reflexión el código
+    // compila contra cualquier SDK y, si el método no está en runtime (API 26-28
+    // o ROM recortada), el regidor trabaja sin señal térmica. Nunca revienta.
     private final android.os.PowerManager powerManager;
-    private Object thermalListener; // android.os.PowerManager.OnThermalStatusChangedListener
+    private final java.lang.reflect.Method thermalAdd;
+    private final java.lang.reflect.Method thermalRemove;
+    private final java.lang.reflect.Method thermalGet;
+    private final Class<?> thermalListenerClass;
+    private Object thermalListener; // instancia del listener, vía Proxy
     private int lastThermalStatus = -2;
     // Para no repetir el aviso de "es CPU, no GPU" en cada tick.
     private boolean cpuBoundLogged = false;
@@ -98,24 +109,65 @@ final class DynamicResolutionGovernor {
         try { pm = (android.os.PowerManager) app.getSystemService(Context.POWER_SERVICE); }
         catch (Throwable ignored) {}
         this.powerManager = pm;
+        java.lang.reflect.Method add = null, remove = null, get = null;
+        Class<?> iface = null;
+        if (pm != null && android.os.Build.VERSION.SDK_INT >= 29) {
+            try {
+                iface = Class.forName(
+                        "android.os.PowerManager$OnThermalStatusChangedListener");
+                add = android.os.PowerManager.class.getMethod(
+                        "addThermalStatusChangedListener", iface);
+                remove = android.os.PowerManager.class.getMethod(
+                        "removeThermalStatusChangedListener", iface);
+                get = android.os.PowerManager.class.getMethod("getCurrentThermalStatus");
+            } catch (Throwable ignored) {
+                add = remove = get = null;
+                iface = null;
+            }
+        }
+        thermalAdd = add;
+        thermalRemove = remove;
+        thermalGet = get;
+        thermalListenerClass = iface;
     }
 
     /** API 29+: el sistema avisa cuando recorta frecuencias por calor. */
-    @android.annotation.TargetApi(29)
-    private void attachThermalListener(android.os.PowerManager pm) {
-        if (thermalListener != null) return;
-        final android.os.PowerManager.OnThermalStatusChangedListener listener = status -> {
-            // El overload sin Executor entrega en el hilo principal; aún así,
-            // PostDelayed aquí es barato y evita asumir el contrato.
-            lastThermalStatus = status;
-            if (active) {
-                main.removeCallbacks(tick);
-                main.postDelayed(tick, 200L);
-            }
-        };
-        thermalListener = listener;
-        pm.addThermalStatusChangedListener(listener);
-        lastThermalStatus = pm.getCurrentThermalStatus();
+    private void attachThermalListener() {
+        if (thermalListener != null || thermalAdd == null || thermalListenerClass == null)
+            return;
+        try {
+            final Object listener = java.lang.reflect.Proxy.newProxyInstance(
+                    thermalListenerClass.getClassLoader(),
+                    new Class<?>[]{thermalListenerClass},
+                    (proxy, method, args) -> {
+                        if ("onThermalStatusChanged".equals(method.getName())
+                                && args != null && args.length == 1) {
+                            // Entrega en el hilo principal; re-programar el tick
+                            // aquí es barato y evita asumir el contrato.
+                            lastThermalStatus = ((Number) args[0]).intValue();
+                            if (active) {
+                                main.removeCallbacks(tick);
+                                main.postDelayed(tick, 200L);
+                            }
+                        }
+                        return null;
+                    });
+            thermalAdd.invoke(powerManager, listener);
+            thermalListener = listener;
+            final Object cur = thermalGet.invoke(powerManager);
+            lastThermalStatus = (cur instanceof Number) ? ((Number) cur).intValue() : -1;
+        } catch (Throwable ignored) {
+            thermalListener = null;
+        }
+    }
+
+    private void detachThermalListener() {
+        if (thermalListener == null) return;
+        if (thermalRemove != null) {
+            try { thermalRemove.invoke(powerManager, thermalListener); } catch (Throwable ignored) {}
+        }
+        // Sin nullear, el próximo start() creería que sigue enganchado.
+        thermalListener = null;
     }
 
     /** true = el SoC está recortando por temperatura: no subir nunca de escala. */
@@ -128,10 +180,7 @@ final class DynamicResolutionGovernor {
         if (active) return;
         active = true;
         selfDisabled = false; // juego nuevo, capa por juego nueva: otra oportunidad
-        // En 26-28 no hay señal térmica accesible: el regidor trabaja sin ella.
-        if (powerManager != null && android.os.Build.VERSION.SDK_INT >= 29) {
-            try { attachThermalListener(powerManager); } catch (Throwable ignored) {}
-        }
+        attachThermalListener(); // sin-op si no hay señal térmica accesible
         reset();
         main.postDelayed(tick, TICK_MS);
     }
@@ -144,17 +193,9 @@ final class DynamicResolutionGovernor {
         final float ceiling = ceiling();
         if (applied > 0f && applied < ceiling - 0.001f) host.applyUpscale(ceiling);
         applied = 0f;
-        // El regidor vive mientras viva la Activity; el oyente térmico también,
-        // pero se quita al apagar para que una pantalla apagada no despierte ticks.
-        if (thermalListener != null && powerManager != null
-                && android.os.Build.VERSION.SDK_INT >= 29) {
-            try {
-                powerManager.removeThermalStatusChangedListener(
-                        (android.os.PowerManager.OnThermalStatusChangedListener) thermalListener);
-            } catch (Throwable ignored) {}
-            // Sin nullear, el próximo start() creería que sigue enganchado.
-            thermalListener = null;
-        }
+        // El oyente térmico se quita al apagar para que una pantalla apagada no
+        // despierte ticks.
+        detachThermalListener();
     }
 
     /** El usuario tocó algo que invalida la medición: olvidar y volver al techo. */
