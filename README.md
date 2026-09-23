@@ -9,6 +9,24 @@
 
 No es una copia con otro logo. Cada versión suma mejoras de rendimiento y de uso que no existen ni en PSX2 ni en PCSX2, medidas sobre celulares reales.
 
+**Cenit 0.6.6 es la primera versión pública de este proyecto.** Es una base que funciona y se nota, pero el camino recién empieza: poco a poco, versión tras versión, el foco va a seguir siendo el mismo —que los celulares de gama baja y media mejoren— y van a sumarse soporte fino para más marcas de procesador, más ajustes inteligentes y una tabla de rendimiento construida entre todos los que lo usen.
+
+---
+
+## Soporte por marca de procesador
+
+Cenit reconoce y clasifica el hardware al instalar. Esto es lo que puedes esperar hoy:
+
+| Marca | Estado |
+|---|---|
+| **Qualcomm Snapdragon (Adreno)** | Soporte completo: perfil de rendimiento dedicado, detección del modelo exacto (incluso con los apodos internos que usan muchas marcas) y controladores gráficos Turnip importables. |
+| **MediaTek Helio / Dimensity (Mali)** | Detectado y clasificado por gama (desde Helio G/P económicos hasta Dimensity tope de línea) con su perfil de rendimiento. El ajuste fino específico para Mali está en el camino. |
+| **Samsung Exynos** | Detectado y clasificado por gama, del Exynos 7870 al 2400, con perfil según su potencia. |
+| **Huawei Kirin** | Detectado y clasificado; al ser un ecosistema con menos presencia global, su ajuste fino llega más adelante. |
+| **Otros (Google Tensor, Apple en Mac, etc.)** | Si el teléfono corre Android de 64 bits, Cenit funciona con el perfil conservador de gama baja hasta tener clasificación propia. |
+
+La regla del proyecto: si tu procesador no está catalogado, se asume el perfil más seguro (gama baja) para no prometer rendimiento que no puede dar, y se agrega en cuanto hay mediciones reales.
+
 ---
 
 ## Lo esencial
@@ -82,7 +100,24 @@ Lo decimos claro: ningún truco hace correr *God of War* a 60 cuadros en un tel�
 1. Descarga `Cenit-0.6.6.apk` desde [Lanzamientos](https://github.com/HUEVOMAN77/Cenit/releases) e instálala (Android pedirá permitir apps de esta fuente la primera vez).
 2. Abre la app y sigue el asistente: coloca la **BIOS extraída de tu propia PS2** y elige la carpeta de tus juegos.
 3. Toca un juego de la biblioteca y listo. Con una partida abierta, el panel **Ajustes → Rendimiento** muestra todos los mandos de Cenit.
-4. Consejo: la primera semana activa el mostrador de velocidad en pantalla y verás qué está haciendo el motor por ti.
+4. Consejo: la primera semana activa el "HUD de rendimiento" en Ajustes y verás qué está haciendo el motor por ti.
+
+## ¿Algo no funciona? Avísame
+
+Cenit lo desarrolla una sola persona, y eso tiene una ventaja directa: **no hay un formulario que se pierde en una bandeja compartida — tus reportes los lee el creador del proyecto.**
+
+Para contar un problema o pedir una mejora, usa la pestaña **[Issues](https://github.com/HUEVOMAN77/Cenit/issues)** de este repositorio (Incidencias). No necesitas saber programar ni escribir en inglés; alcanza con contarlo en español. Para que el reporte sirva de verdad, trata de incluir:
+
+- **Tu celular**: marca y modelo (por ejemplo, *Samsung A34*, *Redmi Note 12*).
+- **El juego** que falla, y si te da igual con otro.
+- **Qué esperabas y qué pasó**: "se queda en pantalla negra", "va a 40% de velocidad", "el audio se corta", "se cierra solo al guardar".
+- **Si puedes, una captura** del HUD de rendimiento en pantalla (el interruptor está en Ajustes, sección "Cuenta y extras": "HUD de rendimiento").
+
+Los reportes de juegos específicos son los más valiosos que existen para este proyecto: son la materia prima con la que se construye la tabla de rendimiento y el ajuste fino por marca de procesador. Si tu gama baja corre algo que antes era injugable, también vale la pena contarlo.
+
+Las versiones se publican en [Lanzamientos](https://github.com/HUEVOMAN77/Cenit/releases); cada una explica con letra clara qué cambió y qué sigue sin resolverse.
+
+---
 
 ## Por qué la firma es de prueba
 
@@ -93,6 +128,7 @@ Cenit es un proyecto personal, sin cuenta de desarrollador ni intención de tien
 En orden de impacto medido:
 
 - **Más ajustes por juego con criterio propio:** lectura de texturas dentro de la gráfica (el de mayor salto en juegos con agua y reflejos), escalado nativo de sprites y salto de dibujos, todos con la evidencia que ya juntan los perfiles de memoria como guía.
+- **Ajuste fino por marca de procesador:** perfiles específicos para MediaTek/Mali y Samsung/Exynos (hoy reciben el perfil general según su gama), con la misma lógica de medición que ya usa Snapdragon.
 - **Tabla de rendimiento de la comunidad:** que lo que Cenit aprende en cada teléfono (escala sostenida, tipo de cuello de botella) se convierta en una configuración sugerida por juego, compartida entre usuarios.
 - **Celular más frío, menos recortes:** colaboración con el sistema de energía de Android para que el procesador suba frecuencia *antes* del pico en lugar de recortarla después.
 - **Menos recortes en video y escenas:** que la resolución dinámica no baje durante cinemáticas ni cortes de escena.
