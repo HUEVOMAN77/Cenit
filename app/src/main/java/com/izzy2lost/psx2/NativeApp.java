@@ -97,6 +97,13 @@ public class NativeApp {
 		if (hasNoNativeBinary) return 100f;
 		try { return getEmulationSpeed(); } catch (Throwable t) { return 100f; }
 	}
+	// Resolución interna realmente en uso (la capa por juego manda sobre el INI
+	// global; el regidor la lee para no insistir sobre una escala que no puede tocar).
+	public static native float getEffectiveUpscale();
+	public static float safeGetEffectiveUpscale() {
+		if (hasNoNativeBinary) return 0f;
+		try { return getEffectiveUpscale(); } catch (Throwable t) { return 0f; }
+	}
 
 	public static native void renderUpscalemultiplier(float value);
     public static void renderUpscalemultiplierAsync(float value) {

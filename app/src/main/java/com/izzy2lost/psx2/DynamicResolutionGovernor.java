@@ -21,7 +21,8 @@ import android.os.Looper;
  *  - El valor de "upscale_multiplier" es el TECHO elegido; nunca se sube de ahí.
  *  - Baja rápido (2 segundos de tirones) y sube lento (8 segundos holgados),
  *    con enfriamiento de 2 s entre pasos: evita el aleteo.
- *  - Los pasos usan la misma escala que la interfaz: 1, 1.25, 1.5, 2, 2.5, 3, 4.
+ *  - Los pasos usan exactamente la escala que ofrece el menú (1x ... 8x), para
+ *    que un escalón del regidor se pueda reproducir a mano.
  *  - Si el usuario mueve la escala, si cambia el techo, o si hay mando de
  *    velocidad (fast-forward), toda la memoria del regidor se olvida.
  */
@@ -32,7 +33,9 @@ final class DynamicResolutionGovernor {
     private static final float HOLDS_ABOVE_PCT = 99.5f; // por encima: va sobrado
     private static final int SLOW_TICKS_TO_DROP = 2;
     private static final int FAST_TICKS_TO_RAISE = 8;
-    private static final float[] STEPS = {1f, 1.25f, 1.5f, 2f, 2.5f, 3f, 4f};
+    // Los mismos escalones que ofrece el menú: una sola fuente de verdad. Si el
+    // regidor tuviera lista propia, bajar desde un techo alto saltaría de 8x a 4x.
+    private static final float[] STEPS = SettingsScreenController.SCALE_VALUES;
 
     interface Host {
         boolean isGameRunning();
@@ -50,6 +53,12 @@ final class DynamicResolutionGovernor {
     private float applied = 0f;
     // Techo que el regidor recuerda, para detectar cuando el usuario lo mueve.
     private float rememberedCeiling = 0f;
+    // Si un paso aplicado no llega a la resolución efectiva (los ajustes por juego
+    // pueden tener su propio upscale_multiplier, que manda sobre el INI global), el
+    // regidor se rinde para esta sesión en vez de bajar escalones contra una pared.
+    private float pendingApply = 0f;
+    private int pendingTicks = 0;
+    private boolean selfDisabled = false;
 
     private final Runnable tick = new Runnable() {
         @Override public void run() {
@@ -69,6 +78,7 @@ final class DynamicResolutionGovernor {
     void start() {
         if (active) return;
         active = true;
+        selfDisabled = false; // juego nuevo, capa por juego nueva: otra oportunidad
         reset();
         main.postDelayed(tick, TICK_MS);
     }
@@ -92,6 +102,8 @@ final class DynamicResolutionGovernor {
         slowTicks = 0;
         fastTicks = 0;
         cooldownTicks = 0;
+        pendingApply = 0f;
+        pendingTicks = 0;
         rememberedCeiling = ceiling();
         if (applied > 0f) {
             host.applyUpscale(rememberedCeiling);
@@ -109,6 +121,27 @@ final class DynamicResolutionGovernor {
     }
 
     private void evaluate() {
+        // ¿El último paso llegó realmente a la resolución en uso? Si no, es que los
+        // ajustes por juego fijan su propia escala y mandan sobre el INI global:
+        // insistir solo haría bajar escalones sin efecto. Rendirse una vez, en seco.
+        // Se esperan dos ticks: la aplicación viaja por un executor asíncrono y
+        // juzgarla demasiado pronto cerraría el regidor por un falso positivo.
+        if (pendingApply > 0f) {
+            if (pendingTicks > 0) {
+                pendingTicks--;
+                return;
+            }
+            final float effective = NativeApp.safeGetEffectiveUpscale();
+            final float want = pendingApply;
+            pendingApply = 0f;
+            if (effective > 0f && Math.abs(effective - want) > 0.01f) {
+                selfDisabled = true;
+                android.util.Log.i("DynRes", "effective upscale " + effective
+                        + "x ignores requested " + want + "x (per-game settings); disabling");
+                return;
+            }
+        }
+        if (selfDisabled) return;
         // Con la CPU emulada a otra velocidad, medir "porcentaje de velocidad" deja
         // de significar "el teléfono no da abasto": el juego va lento porque el
         // usuario lo pidió. Congelar el regidor hasta que vuelva al 100%.
@@ -165,6 +198,8 @@ final class DynamicResolutionGovernor {
                 final float next = nextStepDown(applied, ceiling);
                 if (next < applied - 0.001f) {
                     applied = next;
+                    pendingApply = next;
+                    pendingTicks = 2;
                     host.applyUpscale(next);
                     cooldownTicks = 2;
                 } else {
@@ -177,6 +212,8 @@ final class DynamicResolutionGovernor {
             if (fastTicks >= FAST_TICKS_TO_RAISE) {
                 fastTicks = 0;
                 applied = nextStepUp(applied, ceiling);
+                pendingApply = applied;
+                pendingTicks = 2;
                 host.applyUpscale(applied);
                 cooldownTicks = 2;
             }

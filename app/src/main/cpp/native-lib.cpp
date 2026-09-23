@@ -887,6 +887,15 @@ Java_com_izzy2lost_psx2_NativeApp_getEmulationSpeed(JNIEnv *env, jclass clazz) {
     return (jfloat)PerformanceMetrics::GetSpeed();
 }
 
+// Resolución interna realmente en uso. Puede no coincidir con lo que se pidió:
+// la capa de ajustes por juego (UpdateGameSettingsLayer) tiene prioridad sobre el
+// INI global, y el regidor necesita saberlo para no insistir sobre oídos sordos.
+extern "C"
+JNIEXPORT jfloat JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getEffectiveUpscale(JNIEnv *env, jclass clazz) {
+    return (jfloat)EmuConfig.GS.UpscaleMultiplier;
+}
+
 extern "C"
 JNIEXPORT void JNICALL
 Java_com_izzy2lost_psx2_NativeApp_renderUpscalemultiplier(JNIEnv *env, jclass clazz,
