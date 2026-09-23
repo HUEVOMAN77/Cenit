@@ -302,6 +302,39 @@
                                 style="@style/Cenit.Settings.Caption"
                                 android:text="Detecta las cargas (pantalla quieta, GPU sin usar) y acelera solo esos segundos. Se apaga cuando vuelve el juego." />
 
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/set_sw_pinning"
+                                style="@style/Cenit.Settings.Switch"
+                                android:text="Fijar emulación al núcleo rápido" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Mantiene el motor del juego y los gráficos en los núcleos potentes del teléfono, sin que el sistema los mueva a los economizados a mitad de partida. Apágalo solo para diagnosticar: si algo iba mejor sin esto, quítalo." />
+
+                            <TextView
+                                style="@style/Cenit.Settings.FieldLabel"
+                                android:text="Cola de cuadros" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Cuántos cuadros van por delante. Óptima responde antes al mando, pero el procesador y la gráfica dejan de trabajar a la vez y exige más al teléfono. Si ves que la velocidad baja, prueba con 1 o 2." />
+
+                            <Spinner
+                                android:id="@+id/set_sp_framequeue"
+                                style="@style/Cenit.Settings.Spinner" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.FieldLabel"
+                                android:text="Precarga de texturas" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Completa sube todas las texturas del juego a la vez (menos apariciones repentinas, más memoria). Parcial o apagada liberan RAM para juegos enormes en teléfonos cortos de memoria." />
+
+                            <Spinner
+                                android:id="@+id/set_sp_preload"
+                                style="@style/Cenit.Settings.Spinner" />
+
                             <TextView
                                 style="@style/Cenit.Settings.FieldLabel"
                                 android:text="Velocidad de la CPU emulada" />

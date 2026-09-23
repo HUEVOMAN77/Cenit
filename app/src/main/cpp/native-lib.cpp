@@ -177,6 +177,20 @@ static void ApplyHardwarePerformanceProfile()
     s_settings_interface.SetBoolValue("EmuCore/CPU/Recompiler", "EnableFastmem", true);
     s_settings_interface.SetBoolValue("EmuCore/CPU/Recompiler", "EnableVUProgramCache", true);
 
+    // BLOQUE 1 (0.6.6): fijado de hilos al núcleo rápido, garantizado. El core
+    // YA sabe hacerlo — VMManager::SetEmuThreadAffinities ordena los procesadores
+    // por frecuencia (cpuinfo, ignorando SMT) y asigna EE/VU/GS a los núcleos más
+    // rápidos: VMManager.cpp:4118-4151, MTGS incluido. Lo que no estaba garantizado
+    // es que el bit llegue encendido: el core solo lo fuerza cuando los clústeres
+    // reportados son >1 Y hay >=3 núcleos (VMManager.cpp:4035). Hay SoCs que
+    // big.LITTLE que cpuinfo agrupa en un solo clúster, y teléfonos de 2 núcleos
+    // rápidos — en ambos el pinning se quedaba apagado y el kernel del teléfono
+    // movía el hilo del EE a un E-core a mitad de frame. Aquí se garantiza siempre:
+    // si la lista de procesadores sale corta, SetEmuThreadAffinities ya se
+    // auto-deshace con SetAffinity(0) (VMManager.cpp:4113), así que forzar no
+    // puede romper nada. Java lo re-escribe después con la preferencia del usuario.
+    s_settings_interface.SetBoolValue("EmuCore", "EnableThreadPinning", true);
+
     // GS: stop the CPU spinning on GPU readbacks (huge on Adreno). The hardware
     // renderer default download mode already keeps MTGS off the EE's critical
     // path; per-game UserHacks come from GameIndex.yaml via the game-settings
@@ -206,6 +220,32 @@ static void ApplyHardwarePerformanceProfile()
         // juego, sin tocar el perfil. El aviso de arranque de VMManager.cpp:3659
         // ("may break rendering in some games") sale a propósito: es honesto.
         s_settings_interface.SetIntValue("EmuCore/GS", "HWDownloadMode", 3);
+
+        // BLOQUE 3 (0.6.6): pre-carga de texturas. "Full" (el default del core)
+        // sube a la GPU TODA textura que el juego toca, incluyendo las que nunca
+        // se dibujan en pantalla — en un teléfono con 4-6 GB eso son cientos de MB
+        // de VRAM compartida y micro-cortes cuando el cacheador purga. "Partial"
+        // (1) solo precarga las que van a salir: menos RAM, menos stutter en el
+        // primer contacto con una zona nueva. La clave real es "texture_preloading"
+        // en EmuCore/GS (Pcsx2Config.cpp:1086), y GS.cpp:958 recarga la caché al
+        // cambiarla, así que se puede tocar en caliente. El GameDB sigue mandando:
+        // los juegos que exigen Full lo fijan en su capa, esta escritura es solo
+        // el valor base.
+        s_settings_interface.SetIntValue("EmuCore/GS", "texture_preloading", 1);
+    }
+    else
+    {
+        // BLOQUE 2 (0.6.6): ritmo de cuadro. VsyncQueueSize=0 (lo que FullscreenUI
+        // llama "Optimal Frame Pacing") hace que el EE espere a que el GS termine
+        // CADA cuadro (MTGS.cpp:274) en vez de ir dos cuadros por delante. Menos
+        // input lag y el ritmo irregular desaparece cuando el teléfono DE VERDAD
+        // sobra para el juego. Justo por eso solo se fuerza en tier >= 1: en gama
+        // baja quitar los dos cuadros de amortiguación convierte cualquier pico
+        // del GPU en el EE durmiendo, y la velocidad de emulación cae. Con cola=2
+        // (el default del core) los picos se absorben. No hay riesgo de cuelgue:
+        // el GS publica el semáforo al vaciar el anillo incluso sin trabajo
+        // (MTGS.cpp:598).
+        s_settings_interface.SetIntValue("EmuCore/GS", "VsyncQueueSize", 0);
     }
 
     // Renderer/upscale are NOT set here: MainActivity pushes the user's saved
@@ -537,6 +577,50 @@ Java_com_izzy2lost_psx2_NativeApp_setMaxAnisotropy(JNIEnv* env, jclass, jint lev
 {
     if (level != 2 && level != 4 && level != 8 && level != 16) level = 0;
     s_settings_interface.SetIntValue("EmuCore/GS", "MaxAnisotropy", level);
+    if (VMManager::HasValidVM()) VMManager::ApplySettings();
+    if (MTGS::IsOpen()) MTGS::ApplySettings();
+}
+
+// Cenit 0.6.6: pre-carga de texturas (Off/Partial/Full -> 0/1/2, el orden del
+// enum TexturePreloadingLevel). Cambiarla recarga la caché de texturas por sí
+// solo (GS.cpp:958), así que se nota sin reiniciar el juego: la primera pantalla
+// puede tardar un poco más en rellenarse, y después va más suelta.
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setTexturePreloading(JNIEnv* env, jclass, jint level)
+{
+    if (level < 0) level = 0; if (level > 2) level = 2;
+    s_settings_interface.SetIntValue("EmuCore/GS", "texture_preloading", level);
+    if (VMManager::HasValidVM()) VMManager::ApplySettings();
+    if (MTGS::IsOpen()) MTGS::ApplySettings();
+}
+
+// Cenit 0.6.6: ritmo de cuadro. 0 = "óptimo" (el EE espera a que el GS drena el
+// cuadro antes de seguir: mínimo input lag, más exigente); 1..n = cuadros en
+// cola (amortigua los picos de GPU a costa de latencia). Ojo: MTGS.cpp:274
+// aplica el límite SIEMPRE (la excepción de "sin vsync" está comentada ahí
+// arriba desde hace años), así que esto cambia el ritmo también con VSync
+// apagado. Se aplica en caliente: ApplySettings releen EmuConfig y la cola se
+// consulta en cada vsync.
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setFrameLatencyQueue(JNIEnv* env, jclass, jint frames)
+{
+    if (frames < 0) frames = 0; if (frames > 6) frames = 6;
+    s_settings_interface.SetIntValue("EmuCore/GS", "VsyncQueueSize", frames);
+    if (VMManager::HasValidVM()) VMManager::ApplySettings();
+    if (MTGS::IsOpen()) MTGS::ApplySettings();
+}
+
+// Cenit 0.6.6: fijado de hilos al núcleo rápido. El trabajo fino lo hace el
+// núcleo (VMManager::SetEmuThreadAffinities); este setter solo enciende o apaga
+// el bit, y ApplySettings re-afina las afinidades al cambiar (la comprobación
+// de VMManager.cpp:3512 dispara justo cuando EnableThreadPinning cambia).
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setThreadPinning(JNIEnv* env, jclass, jboolean enabled)
+{
+    s_settings_interface.SetBoolValue("EmuCore", "EnableThreadPinning", enabled == JNI_TRUE);
     if (VMManager::HasValidVM()) VMManager::ApplySettings();
     if (MTGS::IsOpen()) MTGS::ApplySettings();
 }

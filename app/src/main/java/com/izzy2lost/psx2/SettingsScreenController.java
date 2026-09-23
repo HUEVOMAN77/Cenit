@@ -74,6 +74,10 @@ public final class SettingsScreenController {
     private int halfPixelShown = -1;
     // Lo mismo para cuotas de EE (0.6.5): adoptar la primera posición sin escribir.
     private int cycleSkipShown = -1;
+    // Y para los dos spinners de 0.6.6, que no son por-juego pero tampoco deben
+    // escribirse solos al inflar la vista (el primer disparo es siempre posición 0).
+    private int frameQueueShown = -1;
+    private int preloadShown = -1;
 
     public SettingsScreenController(@NonNull Context context, @NonNull ViewGroup parent,
                                     @NonNull Host host) {
@@ -244,6 +248,34 @@ public final class SettingsScreenController {
         // lee ambas preferencias en cada start(); no hay que notificarle nada.
         toggle(R.id.set_sw_adaptive, "adaptive_perf", true, null);
         toggle(R.id.set_sw_autoturbo, "auto_turbo", false, null);
+
+        // 0.6.6 (bloques 1-3): pinning, cola de cuadros y precarga. El pinning
+        // vive en EmuCore del INI base, que en este port es memoria rellena por
+        // ApplyHardwarePerformanceProfile en cada arranque — por eso Java debe
+        // re-escribir la voluntad del usuario SIEMPRE (applySavedSettings), no
+        // solo cuando se toca aquí.
+        toggle(R.id.set_sw_pinning, "thread_pinning", true,
+                checked -> NativeApp.setThreadPinningAsync(checked));
+
+        // La posición del spinner ES el valor de la clave (ver arrays.xml). Como
+        // con medio píxel y cuotas: el primer disparo del adaptador se ADOPTA sin
+        // escribir, para no guardar "Óptima" en el teléfono de todo el mundo.
+        spinner(R.id.set_sp_framequeue, R.array.frame_queue_entries, position -> {
+            if (frameQueueShown < 0) { frameQueueShown = position; return; }
+            if (position == frameQueueShown) return;
+            prefs.edit().putInt("frame_queue", position).apply();
+            NativeApp.setFrameLatencyQueueAsync(position);
+            frameQueueShown = position;
+        });
+
+        spinner(R.id.set_sp_preload, R.array.preload_entries, position -> {
+            if (preloadShown < 0) { preloadShown = position; return; }
+            if (position == preloadShown) return;
+            prefs.edit().putInt("texture_preload", position).apply();
+            NativeApp.setTexturePreloadingAsync(position);
+            preloadShown = position;
+        });
+
         // Mantener pulsado el interruptor de memoria borra lo aprendido del juego
         // actual — el usuario no tiene por qué abrir adb para empezar de cero.
         View adaptiveSw = root.findViewById(R.id.set_sw_adaptive);
@@ -513,6 +545,11 @@ public final class SettingsScreenController {
         check(R.id.set_sw_dynres, prefs.getBoolean("dynamic_res", true));
         check(R.id.set_sw_adaptive, prefs.getBoolean("adaptive_perf", true));
         check(R.id.set_sw_autoturbo, prefs.getBoolean("auto_turbo", false));
+        check(R.id.set_sw_pinning, prefs.getBoolean("thread_pinning", true));
+        setSpinner(R.id.set_sp_framequeue,
+                prefs.getInt("frame_queue", NativeApp.defaultFrameLatencyQueue()));
+        setSpinner(R.id.set_sp_preload,
+                prefs.getInt("texture_preload", NativeApp.defaultTexturePreloading()));
         setSpinner(R.id.set_sp_ee_cycle,
                 Math.max(0, Math.min(6, prefs.getInt("ee_cycle_rate", 0) + 3)));
         setSpinner(R.id.set_sp_blending, prefs.getInt("blending_accuracy", 1));

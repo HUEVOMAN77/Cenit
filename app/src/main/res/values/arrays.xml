@@ -121,4 +121,22 @@
         <item>Moderado</item>
         <item>Máximo</item>
     </string-array>
+
+    <!-- Cola de cuadros (VsyncQueueSize), Cenit 0.6.6. La posición ES el valor
+         de la clave: 0 = ritmo óptimo (menos input lag, más exigente), 1..n =
+         n cuadros por delante. -->
+    <string-array name="frame_queue_entries">
+        <item>Óptima (respuesta rápida)</item>
+        <item>1 cuadro</item>
+        <item>2 cuadros</item>
+        <item>3 cuadros</item>
+        <item>4 cuadros</item>
+    </string-array>
+
+    <!-- Precarga de texturas (TexturePreloading): 0 Off, 1 Partial, 2 Full. -->
+    <string-array name="preload_entries">
+        <item>Apagada</item>
+        <item>Parcial</item>
+        <item>Completa</item>
+    </string-array>
 </resources>

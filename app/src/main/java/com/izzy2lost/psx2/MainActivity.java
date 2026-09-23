@@ -1948,6 +1948,16 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         // Turbo de CPU (EECycleRate). Con el VM parado solo queda guardado en el INI;
         // al arrancar el juego ya se carga desde ahí.
         NativeApp.speedhackEecyclerate(prefs.getInt("ee_cycle_rate", 0));
+        // Cenit 0.6.6 (bloques 1-3): pinning, cola de cuadros y precarga. Se
+        // re-escriben SIEMPRE aquí y no solo en Ajustes, porque el perfil nativo
+        // (ApplyHardwarePerformanceProfile) pone por defecto pinning encendido y
+        // cola según la gama en CADA arranque: si el usuario los apagó, su
+        // voluntad tiene que ganar después del perfil y antes de arrancar el VM.
+        NativeApp.setThreadPinning(prefs.getBoolean("thread_pinning", true));
+        NativeApp.setFrameLatencyQueue(prefs.getInt("frame_queue",
+                NativeApp.defaultFrameLatencyQueue()));
+        NativeApp.setTexturePreloading(prefs.getInt("texture_preload",
+                NativeApp.defaultTexturePreloading()));
         if (mDynRes != null) mDynRes.reset();
         AudioOutputPreference.apply(this);
     }

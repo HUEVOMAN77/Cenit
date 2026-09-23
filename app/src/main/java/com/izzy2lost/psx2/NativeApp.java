@@ -200,6 +200,39 @@ public class NativeApp {
     public static void setVsyncEnabledAsync(boolean enabled) {
         runNativeSettingAsync("setVsyncEnabled", () -> setVsyncEnabled(enabled));
     }
+
+    // --- Cenit 0.6.6: los tres mandos nuevos (bloque 1, 2 y 3) --------------
+    // Fijado de hilos al núcleo rápido. El core ya hace el reparto; esto solo da
+    // el permiso. Default encendido: apagarlo solo tiene sentido para diagnosticar.
+    public static native void setThreadPinning(boolean enabled);
+    public static void setThreadPinningAsync(boolean enabled) {
+        runNativeSettingAsync("setThreadPinning", () -> setThreadPinning(enabled));
+    }
+    // Cola de cuadros (0 = ritmo óptimo con menos input lag; 1..n = más
+    // amortiguación). Por defecto depende de la gama: 0 si el teléfono sobra.
+    public static native void setFrameLatencyQueue(int frames);
+    public static void setFrameLatencyQueueAsync(int frames) {
+        runNativeSettingAsync("setFrameLatencyQueue", () -> setFrameLatencyQueue(frames));
+    }
+    // Pre-carga de texturas: 0 apagada, 1 parcial (gama baja), 2 completa.
+    public static native void setTexturePreloading(int level);
+    public static void setTexturePreloadingAsync(int level) {
+        runNativeSettingAsync("setTexturePreloading", () -> setTexturePreloading(level));
+    }
+    // El default de las dos anteriores sigue al hardware detectado por el núcleo.
+    // Gama baja (tier 0): cola=2 y pre-carga parcial. Gama media/alta: cola=0
+    // (ritmo óptimo) y pre-carga completa (2). Se escribe como clave por si el
+    // usuario la cambia en Ajustes; si no, el default vive aquí.
+    public static int defaultFrameLatencyQueue() {
+        return safeGetDevicePerformanceTier() == 0 ? 2 : 0;
+    }
+    public static int defaultTexturePreloading() {
+        return safeGetDevicePerformanceTier() == 0 ? 1 : 2;
+    }
+    public static int safeGetDevicePerformanceTier() {
+        if (hasNoNativeBinary) return 0;
+        try { return getDevicePerformanceTier(); } catch (Throwable t) { return 0; }
+    }
     
     // Audio output device (0 = follow system routing)
     public static native void setAudioOutputDevice(int deviceId);
