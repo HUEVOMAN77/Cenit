@@ -229,6 +229,20 @@ public final class SettingsScreenController {
             NativeApp.renderUpscalemultiplierAsync(value);
         });
 
+        // Resolución dinámica: el regidor lee la preferencia en cada tick y solo
+        // necesita que le devuelvan el techo cuando se apaga con el juego corriendo.
+        toggle(R.id.set_sw_dynres, "dynamic_res", true, null);
+
+        spinner(R.id.set_sp_ee_cycle, R.array.ee_cycle_entries, position -> {
+            // La posición 3 es el 100% (normal); EECycleRate = posición - 3.
+            int rate = position - 3;
+            if (rate < -3) rate = -3;
+            if (rate > 3) rate = 3;
+            if (rate == prefs.getInt("ee_cycle_rate", 0)) return;
+            prefs.edit().putInt("ee_cycle_rate", rate).apply();
+            NativeApp.setEECycleRateAsync(rate);
+        });
+
         spinner(R.id.set_sp_blending, R.array.blending_accuracy_entries, position -> {
             if (position == prefs.getInt("blending_accuracy", 1)) return;
             prefs.edit().putInt("blending_accuracy", position).apply();
@@ -449,6 +463,9 @@ public final class SettingsScreenController {
         if (tg != null && target != null) tg.check(target.getId());
 
         setSpinner(R.id.set_sp_scale, scaleIndexFor(prefs.getFloat("upscale_multiplier", 1f)));
+        check(R.id.set_sw_dynres, prefs.getBoolean("dynamic_res", true));
+        setSpinner(R.id.set_sp_ee_cycle,
+                Math.max(0, Math.min(6, prefs.getInt("ee_cycle_rate", 0) + 3)));
         setSpinner(R.id.set_sp_blending, prefs.getInt("blending_accuracy", 1));
         setSpinner(R.id.set_sp_filtering, prefs.getInt("texture_filtering", 2));
         setSpinner(R.id.set_sp_mipmap, prefs.getBoolean("hw_mipmap", true) ? 1 : 0);

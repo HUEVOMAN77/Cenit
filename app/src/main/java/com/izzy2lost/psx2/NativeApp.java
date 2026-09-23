@@ -87,6 +87,17 @@ public class NativeApp {
 	public static native void speedhackEecyclerate(int value);
 	public static native void speedhackEecycleskip(int value);
 
+	// Cenit 0.6.3: estos dos hacían falta de verdad. Antes eran stubs vacíos.
+	public static void setEECycleRateAsync(int value) {
+		runNativeSettingAsync("speedhackEecyclerate", () -> speedhackEecyclerate(value));
+	}
+	// Velocidad real de emulación en % (100 = a tiempo). Barata, lectura pura.
+	public static native float getEmulationSpeed();
+	public static float safeGetEmulationSpeed() {
+		if (hasNoNativeBinary) return 100f;
+		try { return getEmulationSpeed(); } catch (Throwable t) { return 100f; }
+	}
+
 	public static native void renderUpscalemultiplier(float value);
     public static void renderUpscalemultiplierAsync(float value) {
         runNativeSettingAsync("renderUpscalemultiplier", () -> renderUpscalemultiplier(value));

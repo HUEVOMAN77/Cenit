@@ -96,4 +96,17 @@
         <item>Desactivado</item>
         <item>Activado (Recomendado)</item>
     </string-array>
+
+    <!-- La posición n corresponde a EECycleRate = n - 3 (ver FullscreenUI_Settings).
+         Es control de VELOCIDAD, no de rendimiento: por debajo de 100% el juego va
+         más lento pero clavado; por encima corre de más y el audio se rompe. -->
+    <string-array name="ee_cycle_entries">
+        <item>50% (lento y clavado)</item>
+        <item>60% (lento y clavado)</item>
+        <item>75% (casi jugable, sin tirones)</item>
+        <item>100% (Normal)</item>
+        <item>130% (rápido, el audio se desfasa)</item>
+        <item>180% (velocidad de viñeta)</item>
+        <item>300% (solo para saltar escenas)</item>
+    </string-array>
 </resources>

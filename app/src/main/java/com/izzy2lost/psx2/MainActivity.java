@@ -123,6 +123,8 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
     private HomeScreenController mHomeScreen;
     private SettingsScreenController mSettingsScreen;
     private CenitIntroController mIntro;
+    // Baja y sube la resolución interna sola, midiendo la velocidad real del juego.
+    private DynamicResolutionGovernor mDynRes;
     private boolean mPendingSetupWizard;
     private boolean mHomeScreenVisible = true;
     // Un reinicio de juego apaga la VM antes de volver a encenderla. Sin esta marca,
@@ -1116,6 +1118,19 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         mHomeHandler.removeCallbacks(mVmEndWatcher);
         if (playing) mHomeHandler.postDelayed(mVmEndWatcher, 600);
 
+        // El regidor de resolución solo mide con un juego delante.
+        if (mDynRes == null) {
+            mDynRes = new DynamicResolutionGovernor(this, new DynamicResolutionGovernor.Host() {
+                @Override public boolean isGameRunning() { return isThread(); }
+                @Override public boolean isTimeScaled() { return mFastForwardEnabled; }
+                @Override public void applyUpscale(float value) {
+                    NativeApp.renderUpscalemultiplierAsync(value);
+                }
+            });
+        }
+        if (playing) mDynRes.start();
+        else mDynRes.stop();
+
         if (showHome) refreshHomeScreenData();
         android.util.Log.d("HomeScreen", reason + ": home=" + showHome + " playing=" + playing);
     }
@@ -1918,6 +1933,10 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         NativeApp.setMaxAnisotropy(prefs.getInt("max_anisotropy", 0));
         NativeApp.setCASMode(prefs.getInt("cas_mode", 0), prefs.getInt("cas_sharpness", 50));
         NativeApp.setHalfPixelOffset(prefs.getInt("half_pixel_offset", 1));
+        // Turbo de CPU (EECycleRate). Con el VM parado solo queda guardado en el INI;
+        // al arrancar el juego ya se carga desde ahí.
+        NativeApp.speedhackEecyclerate(prefs.getInt("ee_cycle_rate", 0));
+        if (mDynRes != null) mDynRes.reset();
         AudioOutputPreference.apply(this);
     }
 
@@ -2337,6 +2356,9 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
 
     @Override
     protected void onDestroy() {
+        if (mDynRes != null) {
+            try { mDynRes.stop(); } catch (Throwable ignored) {}
+        }
         // La cortinilla vive en el content view: al recrearse la activity (giro,
         // cambio de idioma) hay que quitarla o quedaría tapando la interfaz nueva.
         if (mIntro != null) {

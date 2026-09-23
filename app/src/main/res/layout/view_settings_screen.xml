@@ -275,6 +275,27 @@
                                 android:id="@+id/set_sp_scale"
                                 style="@style/Cenit.Settings.Spinner" />
 
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/set_sw_dynres"
+                                style="@style/Cenit.Settings.Switch"
+                                android:text="Resolución dinámica" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Si un juego se atrasa, baja la resolución solo y la devuelve cuando afloja. La escala de arriba pasa a ser el máximo." />
+
+                            <TextView
+                                style="@style/Cenit.Settings.FieldLabel"
+                                android:text="Velocidad de la CPU emulada" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="No es un truco de fluidez: por debajo de 100% el juego va más lento pero sin tirones, y por encima corre de más con el audio roto. Se llama cámara lenta a cambio de estabilidad." />
+
+                            <Spinner
+                                android:id="@+id/set_sp_ee_cycle"
+                                style="@style/Cenit.Settings.Spinner" />
+
                             <TextView
                                 style="@style/Cenit.Settings.FieldLabel"
                                 android:text="Precisión de mezcla" />

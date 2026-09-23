@@ -845,22 +845,46 @@ Java_com_izzy2lost_psx2_NativeApp_setAspectRatio(JNIEnv *env, jclass clazz,
     }
 }
 
+// Cenit 0.6.3: estos tres stubs venían vacíos del port (botones zombi que no
+// hacían nada). Quedan implementados escribiendo el INI y aplicando en caliente,
+// igual que los demás setters. El recompilador ARM64 lee EECycleRate bloque a
+// bloque, así que el cambio se nota sin reiniciar el juego.
+
 extern "C"
 JNIEXPORT void JNICALL
 Java_com_izzy2lost_psx2_NativeApp_speedhackLimitermode(JNIEnv *env, jclass clazz,
                                                           jint p_value) {
+    // Sin clave INI equivalente en este núcleo; se deja explícitamente vacío.
+    (void)p_value;
 }
 
 extern "C"
 JNIEXPORT void JNICALL
 Java_com_izzy2lost_psx2_NativeApp_speedhackEecyclerate(JNIEnv *env, jclass clazz,
                                                           jint p_value) {
+    // 0 = normal; -1/-2/-3 = 75/60/50% (menos carga por cuadro), 1..3 = turbo.
+    if (p_value < -3) p_value = -3;
+    if (p_value > 3) p_value = 3;
+    s_settings_interface.SetIntValue("EmuCore/Speedhacks", "EECycleRate", (int)p_value);
+    if (VMManager::HasValidVM()) VMManager::ApplySettings();
 }
 
 extern "C"
 JNIEXPORT void JNICALL
 Java_com_izzy2lost_psx2_NativeApp_speedhackEecycleskip(JNIEnv *env, jclass clazz,
                                                           jint p_value) {
+    if (p_value < 0) p_value = 0;
+    if (p_value > 3) p_value = 3;
+    s_settings_interface.SetIntValue("EmuCore/Speedhacks", "EECycleSkip", (int)p_value);
+    if (VMManager::HasValidVM()) VMManager::ApplySettings();
+}
+
+// Velocidad real de emulación en % (100 = a tiempo). El governor de resolución
+// dinámica en Java lee esto una vez cada pocos ticks.
+extern "C"
+JNIEXPORT jfloat JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getEmulationSpeed(JNIEnv *env, jclass clazz) {
+    return (jfloat)PerformanceMetrics::GetSpeed();
 }
 
 extern "C"
