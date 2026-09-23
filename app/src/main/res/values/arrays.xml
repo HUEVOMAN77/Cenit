@@ -109,4 +109,16 @@
         <item>180% (velocidad de viñeta)</item>
         <item>300% (solo para saltar escenas)</item>
     </string-array>
+
+    <!-- Cuotas de EE por juego (EECycleSkip): el EE emulado corre a menos ciclos
+         por cuadro real. Es underclock: solo ayuda en el pequeño subset de juegos
+         que NUNCA llegan a tiempo con el EE al 100% (Shadow of the Colossus).
+         PCSX2 mismo avisa que casi siempre es perjudicial: de ahí que sea
+         opt-in y por-juego, no default. -->
+    <string-array name="cycle_skip_entries">
+        <item>Normal</item>
+        <item>Suave</item>
+        <item>Moderado</item>
+        <item>Máximo</item>
+    </string-array>
 </resources>

@@ -72,6 +72,8 @@ public final class SettingsScreenController {
     // Última posición del spinner de medio píxel que se mostró (o -1 si no hay
     // juego delante). Evita que setSelection dispare la escritura por reflejo.
     private int halfPixelShown = -1;
+    // Lo mismo para cuotas de EE (0.6.5): adoptar la primera posición sin escribir.
+    private int cycleSkipShown = -1;
 
     public SettingsScreenController(@NonNull Context context, @NonNull ViewGroup parent,
                                     @NonNull Host host) {
@@ -238,6 +240,25 @@ public final class SettingsScreenController {
         // necesita que le devuelvan el techo cuando se apaga con el juego corriendo.
         toggle(R.id.set_sw_dynres, "dynamic_res", true, null);
 
+        // 0.6.5 (invento Cenit): memoria por juego y turbo de cargas. El regidor
+        // lee ambas preferencias en cada start(); no hay que notificarle nada.
+        toggle(R.id.set_sw_adaptive, "adaptive_perf", true, null);
+        toggle(R.id.set_sw_autoturbo, "auto_turbo", false, null);
+        // Mantener pulsado el interruptor de memoria borra lo aprendido del juego
+        // actual — el usuario no tiene por qué abrir adb para empezar de cero.
+        View adaptiveSw = root.findViewById(R.id.set_sw_adaptive);
+        if (adaptiveSw != null) {
+            adaptiveSw.setOnLongClickListener(v -> {
+                final String uri = host.runningGamePath();
+                if (uri == null || uri.isEmpty()) return false;
+                AdaptiveProfile.forget(context, uri);
+                android.widget.Toast.makeText(context, "Memoria borrada para este juego",
+                        android.widget.Toast.LENGTH_SHORT).show();
+                readValuesIntoUi();
+                return true;
+            });
+        }
+
         spinner(R.id.set_sp_ee_cycle, R.array.ee_cycle_entries, position -> {
             // La posición 3 es el 100% (normal); EECycleRate = posición - 3.
             int rate = position - 3;
@@ -287,6 +308,18 @@ public final class SettingsScreenController {
             if (uri == null || uri.isEmpty()) return;
             if (NativeApp.safeSetGameUserHackInt(uri, NativeApp.HACK_HALF_PIXEL_OFFSET, position))
                 halfPixelShown = position;
+        });
+
+        // Cuotas de EE (0.6.5): también por juego, pero en la sección de Speedhacks
+        // del core — no es un UserHack del GS, así que la capa por-juego genérica
+        // lo escribe sin sembrar MaskUserHacks. Misma guardia de adopción.
+        spinner(R.id.set_sp_cycleskip, R.array.cycle_skip_entries, position -> {
+            if (cycleSkipShown < 0) { cycleSkipShown = position; return; }
+            if (position == cycleSkipShown) return;
+            final String uri = host.runningGamePath();
+            if (uri == null || uri.isEmpty()) return;
+            if (NativeApp.safeSetGameSettingInt(uri, "EmuCore/Speedhacks", "EECycleSkip", position))
+                cycleSkipShown = position;
         });
 
         spinner(R.id.set_sp_cas, R.array.cas_entries, position -> {
@@ -478,6 +511,8 @@ public final class SettingsScreenController {
 
         setSpinner(R.id.set_sp_scale, scaleIndexFor(prefs.getFloat("upscale_multiplier", 1f)));
         check(R.id.set_sw_dynres, prefs.getBoolean("dynamic_res", true));
+        check(R.id.set_sw_adaptive, prefs.getBoolean("adaptive_perf", true));
+        check(R.id.set_sw_autoturbo, prefs.getBoolean("auto_turbo", false));
         setSpinner(R.id.set_sp_ee_cycle,
                 Math.max(0, Math.min(6, prefs.getInt("ee_cycle_rate", 0) + 3)));
         setSpinner(R.id.set_sp_blending, prefs.getInt("blending_accuracy", 1));
@@ -499,6 +534,34 @@ public final class SettingsScreenController {
             hpNote.setText(hpAvailable
                     ? "Guardado solo para el juego que está delante, y se aplica al instante."
                     : "Ajuste por juego: abre un juego para cambiarlo.");
+        }
+        // Cuotas de EE: mismo patrón por-juego. La nota usa la EVIDENCIA real que
+        // guardó el regidor (ticks en 1x yendo atrasado) en vez de adivinar.
+        cycleSkipShown = hpAvailable
+                ? Math.max(0, Math.min(3, NativeApp.safeGetGameSettingInt(
+                        hpUri, "EmuCore/Speedhacks", "EECycleSkip", 0)))
+                : 0;
+        setSpinner(R.id.set_sp_cycleskip, cycleSkipShown);
+        Spinner csSp = root.findViewById(R.id.set_sp_cycleskip);
+        if (csSp != null) csSp.setEnabled(hpAvailable);
+        TextView csNote = root.findViewById(R.id.set_tv_cycleskip_note);
+        if (csNote != null) {
+            if (!hpAvailable) {
+                csNote.setText("Ajuste por juego: abre un juego para cambiarlo.");
+            } else {
+                final AdaptiveProfile prof = new AdaptiveProfile(context, hpUri);
+                // ~16 ticks = en torno a 15 s clavado por debajo del 95% en 1x
+                // (el regidor mide una vez por segundo).
+                if (prof.slowFloorTicks >= 16) {
+                    csNote.setText("Cenit notó este juego atrasado "
+                            + (prof.slowFloorTicks / 16) + " s en 1x. Aquí es donde las "
+                            + "cuotas pueden ayudar: prueba Suave con el HUD puesto.");
+                } else {
+                    csNote.setText("Solo ayuda en juegos que nunca llegan a tiempo (SOTC). "
+                            + "En todo lo demás quita velocidad real — este juego no muestra "
+                            + "ese patrón, así que lo normal es dejarlo en Normal.");
+                }
+            }
         }
         int casMode = prefs.getInt("cas_mode", 0);
         setSpinner(R.id.set_sp_cas, casMode);

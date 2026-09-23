@@ -84,6 +84,12 @@ public class NativeApp {
         });
     }
 	public static native void speedhackLimitermode(int value);
+	// Cenit 0.6.5: turbo de cargas del regidor. 0=Nominal 1=Turbo 2=Slomo
+	// 3=Unlimited. Asíncrono como los demás setters: se invoca desde el hilo
+	// principal del governor.
+	public static void setLimiterModeAsync(int value) {
+		runNativeSettingAsync("speedhackLimitermode", () -> speedhackLimitermode(value));
+	}
 	public static native void speedhackEecyclerate(int value);
 	public static native void speedhackEecycleskip(int value);
 
@@ -300,6 +306,23 @@ public class NativeApp {
     // Valor sin definir en ese juego = p_fallback (la capa por juego puede no
     // existir todavía; el nativo cae al GameDB y de ahí al fallback).
     public static native int getGameUserHackInt(String gameUri, String key, int fallback);
+    // Cenit 0.6.5: variante con sección explícita, para claves que NO son user
+    // hacks (modo cuotas: EECycleSkip en EmuCore/Speedhacks). Si la clave resulta
+    // ser un hack conocido, el nativo siembra igualmente antes de escribir.
+    public static native boolean setGameSettingInt(String gameUri, String section, String key, int value);
+    public static native int getGameSettingInt(String gameUri, String section, String key, int fallback);
+    public static boolean safeSetGameSettingInt(String gameUri, String section, String key, int value) {
+        if (hasNoNativeBinary || gameUri == null || gameUri.isEmpty()) return false;
+        synchronized (CDVD_LOCK) {
+            try { return setGameSettingInt(gameUri, section, key, value); } catch (Throwable t) { return false; }
+        }
+    }
+    public static int safeGetGameSettingInt(String gameUri, String section, String key, int fallback) {
+        if (hasNoNativeBinary || gameUri == null || gameUri.isEmpty()) return fallback;
+        synchronized (CDVD_LOCK) {
+            try { return getGameSettingInt(gameUri, section, key, fallback); } catch (Throwable t) { return fallback; }
+        }
+    }
     public static boolean safeSetGameUserHackInt(String gameUri, String key, int value) {
         if (hasNoNativeBinary || gameUri == null || gameUri.isEmpty()) return false;
         // Mismo candado que getGameCrcSafe: el nativo abre el ISO para el CRC.

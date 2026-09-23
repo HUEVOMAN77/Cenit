@@ -686,31 +686,33 @@ static std::string ResolveGameSettingsPathForUri(const std::string& game_path)
     return with_crc;
 }
 
-// Escribe (o siembra+escribe) un entero en el INI por-juego. Devuelve false si
-// no se pudo resolver el juego. Si el VM está corriendo ESE juego, recarga la
-// capa por-juego en caliente (VMManager::ReloadGameSettings).
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_izzy2lost_psx2_NativeApp_setGameUserHackInt(JNIEnv* env, jclass,
-                                                     jstring p_gameUri,
-                                                     jstring p_key,
-                                                     jint p_value)
+// Escritura genérica en la capa por-juego. Si la clave es un user hack conocido
+// (tabla s_game_user_hack_ini_keys), primero SIEMBRA los gsHWFixes del GameDB y
+// activa UserHacks=true; si no (p. ej. EECycleSkip en Speedhacks, que MaskUserHacks
+// no toca), escribe directo sin activar el modo manual. Luego, si ese juego es
+// el que está corriendo, recarga la capa en caliente (igual que FullscreenUI.cpp:717,
+// en el hilo de emulación porque ReloadGameSettings -> ApplySettings espera MTGS/VU).
+static bool WriteGameLayerInt(const std::string& game_path, const char* section,
+                              const std::string& key, int value)
 {
-    const std::string game_path = GetJavaString(env, p_gameUri);
-    const std::string key = GetJavaString(env, p_key);
     const std::string path = ResolveGameSettingsPathForUri(game_path);
-    if (path.empty() || key.empty())
-        return JNI_FALSE;
+    if (path.empty() || key.empty() || !section || !*section)
+        return false;
+
+    bool is_user_hack = false;
+    for (const char* const k : s_game_user_hack_ini_keys)
+    {
+        if (k && StringUtil::Strcasecmp(k, key.c_str()) == 0)
+        {
+            is_user_hack = true;
+            break;
+        }
+    }
 
     INISettingsInterface game_settings(path);
     game_settings.Load(); // puede no existir todavía: carga vacío
 
-    // Primera edición de hacks en este juego: sembrar los valores del GameDB
-    // ANTES de tocar nada, y recién después activar el modo manual del juego.
-    // UserHacks se escribió como bool, así que se lee como bool.
-    bool seeded = game_settings.GetBoolValue("EmuCore/GS", "UserHacks", false);
-
-    if (!seeded)
+    if (is_user_hack && !game_settings.GetBoolValue("EmuCore/GS", "UserHacks", false))
     {
         const std::string serial = GetGameSerialForPath(game_path);
         if (!serial.empty())
@@ -720,27 +722,24 @@ Java_com_izzy2lost_psx2_NativeApp_setGameUserHackInt(JNIEnv* env, jclass,
             {
                 // Sembrar TODO fix de usuario que el DB tenga para este serial,
                 // para que activar el modo manual del juego no pierda nada.
-                for (const auto& [id, value] : game->gsHWFixes)
+                for (const auto& [id, value_db] : game->gsHWFixes)
                 {
                     const u32 index = static_cast<u32>(id);
                     if (index >= std::size(s_game_user_hack_ini_keys))
                         continue;
                     const char* ini_key = s_game_user_hack_ini_keys[index];
                     if (ini_key)
-                        game_settings.SetIntValue("EmuCore/GS", ini_key, value);
+                        game_settings.SetIntValue("EmuCore/GS", ini_key, value_db);
                 }
             }
         }
         game_settings.SetBoolValue("EmuCore/GS", "UserHacks", true);
     }
 
-    game_settings.SetIntValue("EmuCore/GS", key.c_str(), (int)p_value);
+    game_settings.SetIntValue(section, key.c_str(), value);
     if (!game_settings.Save())
-        return JNI_FALSE;
+        return false;
 
-    // Si este juego es el que está corriendo, recargar la capa por-juego ya.
-    // Igual que FullscreenUI (FullscreenUI.cpp:717), el recargo tiene que ir al
-    // hilo de emulación: ReloadGameSettings -> ApplySettings espera a MTGS/VU.
     if (VMManager::HasValidVM())
     {
         const std::string edited_serial = GetGameSerialForPath(game_path);
@@ -754,7 +753,66 @@ Java_com_izzy2lost_psx2_NativeApp_setGameUserHackInt(JNIEnv* env, jclass,
             });
         }
     }
-    return JNI_TRUE;
+    return true;
+}
+
+// Escribe (o siembra+escribe) un entero en el INI por-juego. Devuelve false si
+// no se pudo resolver el juego. Si el VM está corriendo ESE juego, recarga la
+// capa por-juego en caliente (VMManager::ReloadGameSettings).
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setGameUserHackInt(JNIEnv* env, jclass,
+                                                     jstring p_gameUri,
+                                                     jstring p_key,
+                                                     jint p_value)
+{
+    const std::string game_path = GetJavaString(env, p_gameUri);
+    const std::string key = GetJavaString(env, p_key);
+    return WriteGameLayerInt(game_path, "EmuCore/GS", key, (int)p_value) ? JNI_TRUE : JNI_FALSE;
+}
+
+// Cenit 0.6.5: variante con sección explícita para claves que NO son user hacks
+// y viven en otra sección (EmuCore/Speedhacks: EECycleSkip/EECycleRate del modo
+// cuotas). Mismo ciclo siembra/recarga que arriba, pero sin activar UserHacks
+// salvo que la clave pertenezca a la tabla de hacks.
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setGameSettingInt(JNIEnv* env, jclass,
+                                                    jstring p_gameUri,
+                                                    jstring p_section,
+                                                    jstring p_key,
+                                                    jint p_value)
+{
+    const std::string game_path = GetJavaString(env, p_gameUri);
+    const std::string section = GetJavaString(env, p_section);
+    const std::string key = GetJavaString(env, p_key);
+    return WriteGameLayerInt(game_path, section.c_str(), key, (int)p_value) ? JNI_TRUE : JNI_FALSE;
+}
+
+// Lectura genérica por sección (la específica de user hacks sigue abajo).
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getGameSettingInt(JNIEnv* env, jclass,
+                                                    jstring p_gameUri,
+                                                    jstring p_section,
+                                                    jstring p_key,
+                                                    jint p_fallback)
+{
+    const std::string game_path = GetJavaString(env, p_gameUri);
+    const std::string section = GetJavaString(env, p_section);
+    const std::string key = GetJavaString(env, p_key);
+    const std::string path = ResolveGameSettingsPathForUri(game_path);
+    if (path.empty() || key.empty() || section.empty())
+        return p_fallback;
+
+    INISettingsInterface game_settings(path);
+    if (game_settings.Load())
+    {
+        int value = 0;
+        if (game_settings.GetIntValue(section.c_str(), key.c_str(), &value))
+            return value;
+    }
+    return p_fallback;
 }
 
 // Lectura para la UI: valor efectivo de un hack de este juego (capa por-juego;

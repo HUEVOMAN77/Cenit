@@ -1132,6 +1132,9 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                 @Override public void applyUpscale(float value) {
                     NativeApp.renderUpscalemultiplierAsync(value);
                 }
+                @Override public String currentGameUri() {
+                    return m_szGamefile == null ? "" : m_szGamefile;
+                }
             });
         }
         if (playing) mDynRes.start();

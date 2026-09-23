@@ -284,6 +284,24 @@
                                 style="@style/Cenit.Settings.Caption"
                                 android:text="Si un juego se atrasa, baja la resolución solo y la devuelve cuando afloja. La escala de arriba pasa a ser el máximo." />
 
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/set_sw_adaptive"
+                                style="@style/Cenit.Settings.Switch"
+                                android:text="Recordar rendimiento por juego" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Cenit aprende qué escala aguanta cada juego en este teléfono: la próxima vez arranca directo ahí y no vuelve a recortar lo que ya sabe que no sirve." />
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/set_sw_autoturbo"
+                                style="@style/Cenit.Settings.Switch"
+                                android:text="Turbo en pantallas de carga" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Detecta las cargas (pantalla quieta, GPU sin usar) y acelera solo esos segundos. Se apaga cuando vuelve el juego." />
+
                             <TextView
                                 style="@style/Cenit.Settings.FieldLabel"
                                 android:text="Velocidad de la CPU emulada" />
@@ -351,6 +369,20 @@
 
                             <Spinner
                                 android:id="@+id/set_sp_halfpixel"
+                                style="@style/Cenit.Settings.Spinner" />
+
+                            <TextView
+                                android:id="@+id/set_tv_cycleskip_label"
+                                style="@style/Cenit.Settings.FieldLabel"
+                                android:text="Cuotas de EE (por juego)" />
+
+                            <TextView
+                                android:id="@+id/set_tv_cycleskip_note"
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="El EE corre a menos ciclos: solo ayuda en juegos que nunca llegan a tiempo (SOTC). Casi siempre perjudica — pruébalo con el HUD puesto." />
+
+                            <Spinner
+                                android:id="@+id/set_sp_cycleskip"
                                 style="@style/Cenit.Settings.Spinner" />
 
                             <View style="@style/Cenit.Settings.Divider" />
