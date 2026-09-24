@@ -1,0 +1,174 @@
+name: Build Cenit Turnip (adrenotools driver pack)
+
+# Proyecto Cenit-Turnip: compila el driver Vulkan Turnip (Mesa/freedreno,
+# MIT) para Android arm64 y lo empaqueta como driver-pack adrenotools
+# (meta.json + .so), el mismo formato que ya importa el diálogo
+# «Controlador gráfico personalizado» de Cenit.
+#
+# La receta base (cross-file de meson + flags) es la que usa la comunidad,
+# validada por los CI de StevenMXZ/Adreno-Tools-Drivers e
+# ilhan-athn7/freedreno_turnip-CI; aquí se añade lo nuestro:
+#   - binario SIN strip subido como artefacto de símbolos, para poder
+#     traducir PCs de backtraces reales (p. ej. el pc 0x653470 del
+#     SIGSEGV dentro de vulkan.ad07xx.so en SOTC) a funciones concretas
+#     con llvm-addr2line.
+#   - meta.json con libraryName única (vulkan.cenit.so) para que el pack
+#     de Cenit no se confunda con drivers importados de terceros.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mesa_ref:
+        description: "Etiqueta o rama de Mesa (gitlab freedesktop/mesa)"
+        type: string
+        default: "mesa-25.2.8"
+      buildtype:
+        description: "Tipo de build"
+        type: choice
+        options: [release, debugoptimized, plain]
+        default: debugoptimized
+      lto:
+        description: "ThinLTO (más lento de compilar, ~mismo rendimiento)"
+        type: boolean
+        default: false
+      make_release:
+        description: "Publicar el pack como Release (cenit-turnip-*)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  NDK_VER: android-ndk-r29
+  SDK_VER: "34"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Herramientas del sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build patchelf flex bison zip unzip curl git python3-mako
+          pip install --user mako pyyaml || true
+
+      - name: NDK de Android
+        run: |
+          curl -sL https://dl.google.com/android/repository/$NDK_VER-linux.zip -o ndk.zip
+          unzip -q ndk.zip
+          echo "NDK=$GITHUB_WORKSPACE/$NDK_VER/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_ENV"
+
+      - name: Fuente de Mesa (parcial, vía blob filter)
+        run: |
+          git clone --depth 1 --branch "${{ inputs.mesa_ref }}" --filter=blob:none \
+            https://gitlab.freedesktop.org/mesa/mesa.git mesa
+          git -C mesa rev-parse HEAD > MESA_SHA
+          cat mesa/VERSION > MESA_VERSION
+          echo "mesa ${{ inputs.mesa_ref }} ($(cat MESA_SHA | cut -c1-10))"
+
+      - name: Cross file arm64-android
+        run: |
+          cat > android-aarch64.txt <<EOF
+          [binaries]
+          ar = '$NDK/llvm-ar'
+          c = '$NDK/aarch64-linux-android$SDK_VER-clang'
+          cpp = '$NDK/aarch64-linux-android$SDK_VER-clang++'
+          c_ld = '$NDK/ld.lld'
+          cpp_ld = '$NDK/ld.lld'
+          strip = '$NDK/llvm-strip'
+
+          [host_machine]
+          system = 'android'
+          cpu_family = 'aarch64'
+          cpu = 'armv8'
+          endian = 'little'
+          EOF
+          cat > native.txt <<EOF
+          [build_machine]
+          system = 'linux'
+          cpu_family = 'x86_64'
+          cpu = 'x86_64'
+          endian = 'little'
+          EOF
+
+      - name: Configurar (solo Vulkan freedreno, KMD kgsl)
+        working-directory: mesa
+        run: |
+          LTO_ARGS="-Db_lto=false"
+          if [ "${{ inputs.lto }}" = "true" ]; then
+            LTO_ARGS="-Db_lto=true -Db_lto_mode=thin"
+          fi
+          # strip=false SIEMPRE: empaquetamos a mano (pack sin símbolos y
+          # artefacto con símbolos aparte). debugoptimized conserva líneas de
+          # depuración sin el coste de -O0.
+          # shellcheck disable=SC2086
+          meson setup build-android \
+            --cross-file ../android-aarch64.txt \
+            --native-file ../native.txt \
+            -Dbuildtype=${{ inputs.buildtype }} \
+            -Dplatforms=android \
+            -Dplatform-sdk-version="$SDK_VER" \
+            -Dandroid-stub=true \
+            -Dgallium-drivers= \
+            -Dvulkan-drivers=freedreno \
+            -Dvulkan-beta=true \
+            -Dfreedreno-kmds=kgsl \
+            $LTO_ARGS \
+            -Dstrip=false \
+            -Degl=disabled
+
+      - name: Compilar Turnip
+        working-directory: mesa
+        run: |
+          ninja -C build-android src/freedreno/vulkan/libvulkan_freedreno.so -j"$(nproc)"
+          test -f build-android/src/freedreno/vulkan/libvulkan_freedreno.so
+
+      - name: Empaquetar driver-pack adrenotools
+        run: |
+          mkdir -p out
+          cp mesa/build-android/src/freedreno/vulkan/libvulkan_freedreno.so out/vulkan.cenit.symbols.so
+          cp out/vulkan.cenit.symbols.so out/vulkan.cenit.so
+          "$NDK/llvm-strip" out/vulkan.cenit.so
+          "$NDK/llvm-objcopy" --add-gnu-debuglink=out/vulkan.cenit.symbols.so out/vulkan.cenit.so 2>/dev/null || true
+          patchelf --set-soname vulkan.cenit.so out/vulkan.cenit.so
+          MESAVER=$(cat MESA_VERSION)
+          SHA=$(cut -c1-10 MESA_SHA)
+          cat > out/meta.json <<EOF
+          {
+            "schemaVersion": 1,
+            "name": "Cenit Turnip",
+            "description": "Turnip (Mesa $MESAVER-$SHA) compilado por Cenit para Adreno gen6+gen7, con simbolos para diagnostico de cierres",
+            "author": "Cenit (HUEVOMAN77)",
+            "packageVersion": "1",
+            "vendor": "Mesa 3D",
+            "driverVersion": "$MESAVER-cenit1 ($SHA)",
+            "minApi": 26,
+            "libraryName": "vulkan.cenit.so"
+          }
+          EOF
+          # El pack va en el ZIP sin símbolos (más pequeño); los símbolos
+          # quedan solo como artefacto del workflow para traducir PCs.
+          (cd out && zip -9 ../Cenit-Turnip-$MESAVER-$SHA.zip vulkan.cenit.so meta.json)
+          (cd out && zip -9 ../cenit-turnip-symbols.zip vulkan.cenit.symbols.so)
+          ls -la Cenit-Turnip-*.zip
+
+      - name: Subir artefactos
+        uses: actions/upload-artifact@v4
+        with:
+          name: cenit-turnip-pack
+          path: |
+            Cenit-Turnip-*.zip
+            cenit-turnip-symbols.zip
+
+      - name: Publicar Release del driver
+        if: inputs.make_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PACK=$(ls Cenit-Turnip-*.zip)
+          TAG="cenit-turnip-$(date -u +%Y%m%d-%H%M)"
+          gh release create "$TAG" "$PACK" \
+            --title "Cenit Turnip (${{ inputs.mesa_ref }})" \
+            --notes "Driver-pack Turnip compilado por Cenit desde Mesa ${{ inputs.mesa_ref }} (buildtype ${{ inputs.buildtype }}, LTO ${{ inputs.lto }}). Importar este .zip en Cenit → Ajustes → Controlador gráfico personalizado, y tocar «Forzar otra vez el driver seleccionado». Los símbolos (.dbg) quedan en el artefacto del workflow para traducir direcciones de backtrace reales; este pack no los incluye a propósito."
