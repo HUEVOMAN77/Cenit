@@ -65,6 +65,13 @@ public class NativeApp {
     public static native String getGameTitleFromUri(String gameUri);
 	public static native String getGameSerial();
 	public static native float getFPS();
+	/** Cuadros por segundo reales, o 0 si el binario no está o la consulta falla.
+	 *  0 también es el valor ANTES del primer cuadro presentado, así que un valor
+	 *  positivo prueba que el juego está dibujando de verdad. */
+	public static float safeGetFPS() {
+		if (hasNoNativeBinary) return 0f;
+		try { return getFPS(); } catch (Throwable t) { return 0f; }
+	}
 
 	public static native String getPauseGameTitle();
 	public static native String getPauseGameSerial();

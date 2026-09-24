@@ -138,6 +138,12 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
     // Un reinicio de juego apaga la VM antes de volver a encenderla. Sin esta marca,
     // el vigilante interpretaría ese hueco como "el usuario salió del juego".
     private volatile boolean mEmulationRestarting = false;
+    // Cenit 0.6.8: ventana de gracia del guardarraya de drivers. El vigilante gira
+    // cada 600 ms, así que 40 ticks son ~24 s de cuadro continuo: tiempo de sobra
+    // para el arranque de un juego y sus cinemáticas de apertura, que es donde el
+    // driver Turnip mataba a Shadow of the Colossus.
+    private static final int DRIVER_GRACE_TICKS = 40;
+    private int bootGoodTicks = 0;
     private final android.os.Handler mHomeHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable mVmEndWatcher = new Runnable() {
         @Override
@@ -149,9 +155,32 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
             }
             if (!isThread()) {
                 // El juego terminó (salida, cierre o fallo): se vuelve al inicio.
+                // Cenit 0.6.8: si el usuario apagó el juego, returnToHome() ya
+                // confirmó y limpió la marca del driver, y además quita este
+                // vigilante; o sea que llegar aquí con la VM apagada significa
+                // cierre espontáneo. La marca NO se toca: es la evidencia que la
+                // cosecha del próximo arranque usa para atribuir el fallo al driver.
+                bootGoodTicks = 0;
                 m_szGamefile = "";
                 applyHomeScreenState("emulation stopped");
             } else {
+                // Cenit 0.6.8: confirmar que el arranque superó la ventana crítica.
+                // NO basta con ver cuadros: con el driver Turnip, Shadow of the
+                // Colossus LLEGA a dibujar (los avisos se ven en pantalla) y se
+                // cierra un poco después. Confirmar al primer FPS positivo dejaría
+                // el cierre sin atribuir y el ciclo se repetiría igual. Se exige la
+                // ventana completa con cuadros reales antes de dar el arranque por
+                // bueno.
+                if (CustomDriverManager.hasPendingAttempt(MainActivity.this)) {
+                    if (NativeApp.safeGetFPS() > 0.5f) bootGoodTicks++;
+                    else bootGoodTicks = 0;
+                    if (bootGoodTicks >= DRIVER_GRACE_TICKS) {
+                        CustomDriverManager.confirmBoot(MainActivity.this);
+                        bootGoodTicks = 0;
+                    }
+                } else {
+                    bootGoodTicks = 0;
+                }
                 mHomeHandler.postDelayed(this, 600);
             }
         }
@@ -1216,6 +1245,12 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         mUserPauseRequested = false;
         mEmulationRestarting = true;
         mHomeHandler.removeCallbacks(mVmEndWatcher);
+        // Cenit 0.6.8: salida deliberada. Si el guardarraya de drivers tenía un
+        // intento pendiente, aquí se limpia: el usuario se fue, el driver no falló.
+        // Sin esto, salir de un juego dentro de la ventana de gracia culparía al
+        // driver en el próximo arranque.
+        CustomDriverManager.confirmBoot(getApplicationContext());
+        bootGoodTicks = 0;
         mEmulationControlExecutor.execute(() -> {
             try {
                 if (isThread()) NativeApp.shutdown();
@@ -2453,6 +2488,17 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
     public void Initialize() {
         NativeApp.initializeOnce(getApplicationContext());
 
+        // Cenit 0.6.8: cosecha del guardarraya de drivers, aquí y no al arrancar un
+        // juego. Un cierre del código nativo (driver Turnip incompatible) se lleva el
+        // proceso entero: no hay excepción que Java atrape ni finally que corra. Si al
+        // nacer un proceso nuevo queda una marca sin confirmar, ese intento murió a
+        // medias y el par driver+juego se apunta como fallido para que el próximo
+        // arranque use el driver del sistema en lugar de cerrarse otra vez.
+        final String failed = CustomDriverManager.harvestUnconfirmedAttempt(getApplicationContext());
+        if (failed != null) {
+            android.util.Log.w("CustomDriverManager", "previous boot attempt never confirmed: " + failed);
+        }
+
         // Set up JNI
         SDLControllerManager.nativeSetupJNI();
 
@@ -2504,7 +2550,23 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
             // Must run before prepareVMStart/runVMThread: the first MTGS::Open (inside
             // the VM thread) triggers Vulkan::LoadVulkanLibrary, which reads whatever
             // driver selection was pinned here.
-            CustomDriverDialogFragment.applyStoredSelection(getApplicationContext());
+            //
+            // Cenit 0.6.8: la selección pasa por el guardarraya con la URI del juego
+            // como clave. La COSECHA de intentos sin confirmar no va aquí sino en
+            // Initialize(): si fuera aquí, reiniciar un juego dentro de la ventana de
+            // gracia (rebootEmu) cosecharía su propio intento y culparía al driver
+            // sin haber fallado nada.
+            CustomDriverDialogFragment.applyStoredSelection(getApplicationContext(), gameFile,
+                    describeGameForNotice(gameFile));
+            // Si el guardarraya devolvió este juego al driver del sistema, se dice
+            // una sola vez y en español: sin el aviso, el usuario no entiende por qué
+            // su driver dejó de aplicarse.
+            final String driverNotice =
+                    CustomDriverManager.consumeFallbackNotice(getApplicationContext());
+            if (driverNotice != null) {
+                runOnUiThread(() -> Toast.makeText(getApplicationContext(), driverNotice,
+                        Toast.LENGTH_LONG).show());
+            }
             NativeApp.prepareVMStart();
 
             Thread emulationThread = new Thread(() -> {
@@ -2810,6 +2872,11 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                 .setMessage("¿Quieres salir de Cenit?")
                 .setIcon(android.R.drawable.ic_dialog_alert)
                 .setPositiveButton("Salir", (dialog, which) -> {
+                    // Cenit 0.6.8: salida deliberada de la app. Si quedaba un
+                    // intento de driver pendiente, se descarta aquí; si no, el
+                    // guardarraya lo confundiría con un cierre nativo al
+                    // reiniciar la app y culparía al driver sin razón.
+                    CustomDriverManager.clearAttempt(getApplicationContext());
                     // Stop emulator first
                     NativeApp.shutdown();
                     // Quit the app
@@ -3569,6 +3636,23 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         updatePausePlayButton();
     }
 
+    /** Nombre legible para el aviso del guardarraya de drivers. Se saca SOLO de
+     *  la URI, sin abrir el disco: NativeApp.getGameTitleFromUriSafe() pasaría por
+     *  CDVD justo antes de levantar el VM, y ese no es momento para eso. */
+    private String describeGameForNotice(String gameFile) {
+        try {
+            String tail = gameFile;
+            int slash = tail.lastIndexOf('/');
+            if (slash >= 0 && slash + 1 < tail.length()) tail = tail.substring(slash + 1);
+            int dot = tail.lastIndexOf('.');
+            if (dot > 0) tail = tail.substring(0, dot);
+            tail = Uri.decode(tail);
+            if (!tail.isEmpty()) return tail;
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
     /**
      * Cenit 0.6.7. Arma un único archivo de texto con cabecera del dispositivo y
      * el final del registro de esta sesión y de la anterior, y lo abre en el
@@ -3605,6 +3689,8 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
             String path = null;
             String error = null;
             try {
+                StringBuilder body = new StringBuilder();
+                boolean any = false;
                 File logDir = null;
                 final String nativeDir = NativeApp.safeGetLogDirectory();
                 if (nativeDir != null) {
@@ -3618,41 +3704,55 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                         if (d.isDirectory()) logDir = d;
                     }
                 }
+
+                // Estado del propio canal de archivo, reportado tal cual. Si emulog.txt
+                // no apareció, eso YA es diagnóstico: se dice en el reporte en vez de
+                // quedarse una vez más sin evidencia.
+                body.append("=== REGISTRO EN ARCHIVO ===\n");
                 if (logDir == null) {
-                    error = "sin";
+                    body.append("carpeta de registros: no existe todavía\n");
                 } else {
                     File cur = new File(logDir, "emulog.txt");
                     File prev = new File(logDir, "emulog.prev.txt");
-                    StringBuilder body = new StringBuilder();
-                    boolean any = false;
+                    body.append("carpeta: ").append(logDir.getAbsolutePath()).append('\n');
+                    body.append("emulog.txt: ")
+                            .append(cur.isFile() ? (cur.length() + " bytes") : "no existe").append('\n');
+                    body.append("emulog.prev.txt: ")
+                            .append(prev.isFile() ? (prev.length() + " bytes") : "no existe").append('\n');
                     if (prev.isFile()) {
-                        body.append("=== SESIÓN ANTERIOR (se cerró; las últimas ")
+                        body.append("\n=== SESIÓN ANTERIOR (se cerró; últimas ")
                                 .append(LOG_TAIL_LINES).append(" líneas) ===\n");
                         any |= appendTail(prev, body);
-                        body.append('\n');
                     }
                     if (cur.isFile()) {
-                        body.append("=== SESIÓN ACTUAL (últimas ")
+                        body.append("\n=== SESIÓN ACTUAL (últimas ")
                                 .append(LOG_TAIL_LINES).append(" líneas) ===\n");
                         any |= appendTail(cur, body);
                     }
-                    if (!any) {
-                        error = "vacío";
-                    } else {
-                        File outDir = new File(getCacheDir(), "logs");
-                        if (!outDir.isDirectory() && !outDir.mkdirs()) {
-                            error = "caché";
-                        } else {
-                            File out = new File(outDir, "cenit-reporte.txt");
-                            try (Writer w = new java.io.OutputStreamWriter(
-                                    new FileOutputStream(out), java.nio.charset.StandardCharsets.UTF_8);
-                                 PrintWriter pw = new PrintWriter(w)) {
-                                pw.print(deviceHeader);
-                                pw.print(body);
-                            }
-                            path = out.getAbsolutePath();
-                        }
+                }
+
+                // El canal que sí sobrevive a un cierre nativo: el registro del sistema.
+                // El núcleo espeja cada línea ahí (common/Console.cpp:80), y Android lo
+                // mantiene aunque el proceso muera a mitad del arranque. Sin esto, un
+                // fallo como el del driver Turnip no deja nada que adjuntar.
+                body.append("\n=== REGISTRO DEL SISTEMA (últimas ")
+                        .append(LOGCAT_LINES).append(" líneas de Cenit) ===\n");
+                any |= appendLogcatTail(body);
+
+                File outDir = new File(getCacheDir(), "logs");
+                if (!any) {
+                    error = "vacío";
+                } else if (!outDir.isDirectory() && !outDir.mkdirs()) {
+                    error = "caché";
+                } else {
+                    File out = new File(outDir, "cenit-reporte.txt");
+                    try (Writer w = new java.io.OutputStreamWriter(
+                            new FileOutputStream(out), java.nio.charset.StandardCharsets.UTF_8);
+                         PrintWriter pw = new PrintWriter(w)) {
+                        pw.print(deviceHeader);
+                        pw.print(body);
                     }
+                    path = out.getAbsolutePath();
                 }
             } catch (Throwable t) {
                 error = "error";
@@ -3663,8 +3763,8 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
             runOnUiThread(() -> {
                 if (ready == null) {
                     Toast.makeText(getApplicationContext(),
-                            "Aún no hay registro que enviar" + ("sin".equals(why) || "vacío".equals(why)
-                                    ? ": inténtalo justo después de que el juego se cierre." : "."),
+                            "No se pudo armar el registro"
+                                    + ("vacío".equals(why) ? " y el sistema tampoco tiene líneas de Cenit." : "."),
                             Toast.LENGTH_LONG).show();
                     return;
                 }
@@ -3686,6 +3786,55 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
 
     /** Últimas LOG_TAIL_LINES líneas de un archivo, sin cargarlo entero en memoria. */
     private static final int LOG_TAIL_LINES = 400;
+
+    /** Ventana del registro del sistema que se lee. Android ya limita a un proceso
+     *  a sus propias líneas, así que no se filtra por app: solo por etiqueta. */
+    private static final int LOGCAT_LINES = 1200;
+
+    /**
+     * Vuelca las últimas líneas del registro del sistema que pertenecen a Cenit.
+     * Es el canal que sí sobrevive a un cierre del código nativo: el núcleo espeja
+     * cada línea ahí (common/Console.cpp:80) y Android la conserva aunque el
+     * proceso muera a mitad del arranque, justo cuando emulog.txt puede no existir.
+     */
+    private boolean appendLogcatTail(StringBuilder into) {
+        java.util.List<String> lines = new ArrayList<>();
+        Process proc = null;
+        try {
+            // -d: volcar y salir (nunca bloquear). Sin filtro de paquete: el propio
+            // Android ya restringe lo que este proceso puede ver.
+            proc = new ProcessBuilder("logcat", "-d", "-v", "time", "-t", String.valueOf(LOGCAT_LINES))
+                    .redirectErrorStream(true).start();
+            try (BufferedReader r = new BufferedReader(
+                    new java.io.InputStreamReader(proc.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = r.readLine()) != null) {
+                    // El núcleo usa NDK_LOG; Java usa las etiquetas propias de cada clase.
+                    if (line.contains("NDK_LOG") || line.contains("Cenit") || line.contains("DynRes")
+                            || line.contains("MainActivity") || line.contains("CustomDriverManager")
+                            || line.contains("AndroidRuntime") || line.contains("libc")
+                            || line.contains("DEBUG")) {
+                        lines.add(line);
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            into.append("(no se pudo leer el registro del sistema)\n");
+            return false;
+        } finally {
+            if (proc != null) {
+                try { proc.waitFor(); } catch (Throwable ignored) {}
+                proc.destroy();
+            }
+        }
+        if (lines.isEmpty()) {
+            into.append("(el sistema no tiene líneas de Cenit en la ventana leída)\n");
+            return false;
+        }
+        int from = Math.max(0, lines.size() - LOG_TAIL_LINES);
+        for (int i = from; i < lines.size(); i++) into.append(lines.get(i)).append('\n');
+        return true;
+    }
 
     private boolean appendTail(File f, StringBuilder into) {
         Deque<String> tail = new ArrayDeque<>(LOG_TAIL_LINES);

@@ -4,6 +4,8 @@ import android.content.Context;
 import android.net.Uri;
 import android.util.Log;
 
+import androidx.annotation.Nullable;
+
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
@@ -259,6 +261,131 @@ public final class CustomDriverManager {
         return null;
     }
 
+    // ---- Guardarraya de arranque (Cenit 0.6.8) ------------------------------
+    //
+    // Un driver Turnip que no va con CIERTO juego mata el proceso nativo durante
+    // el arranque, y eso no es una excepción que Java pueda atrapar: el hilo de
+    // emulación simplemente desaparece y la app vuelve al inicio sin decir nada.
+    // Peor: la selección del driver queda guardada, así que cada intento futuro
+    // reproduce el mismo cierre. El usuario no tiene forma de saber que fue el
+    // driver, porque la app no muestra ningún error.
+    //
+    // Se corta el ciclo con una marca de "intento sin confirmar": antes de arrancar
+    // se anota qué driver se va a usar con qué juego, y solo se borra cuando el
+    // juego demuestra que está dando cuadros de verdad. Si la app arranca y
+    // encuentra una marca sin confirmar, es que ese intento murió a medias: ese
+    // par driver+juego se apunta como fallido y, de ahí en adelante, ese juego
+    // arranca con el driver del sistema en vez de quedarse cerrado para siempre.
+    // El driver sigue activo para el resto de los juegos.
+
+    private static final String PREFS = "app_prefs";
+    private static final String KEY_PENDING = "cdv_pending";
+    private static final String KEY_FAILED = "cdv_failed";
+    private static final String KEY_NOTICE = "cdv_notice";
+
+    private static android.content.SharedPreferences prefs(Context c) {
+        return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    /** Identificador del intento: driver + juego. Por juego, porque un driver
+     *  puede ir perfecto en diez títulos y matar el onceavo. */
+    private static String attemptKey(String driverId, String gameKey) {
+        return driverId + "|" + gameKey;
+    }
+
+    /** true si ese par ya falló antes: no volver a usar el driver con él. */
+    public static boolean isKnownBadCombo(Context context, String driverId, String gameKey) {
+        if (driverId == null || gameKey == null || gameKey.isEmpty()) return false;
+        String bad = prefs(context).getString(KEY_FAILED, "");
+        return bad != null && bad.contains(";" + attemptKey(driverId, gameKey) + ";");
+    }
+
+    /** Marca el intento en curso. Llamar ANTES de arrancar el VM, con el driver
+     *  que realmente se va a usar. */
+    public static void beginAttempt(Context context, String driverId, String gameKey) {
+        if (driverId == null || driverId.isEmpty() || gameKey == null || gameKey.isEmpty()) return;
+        prefs(context).edit().putString(KEY_PENDING, attemptKey(driverId, gameKey)).apply();
+    }
+
+    /** true si hay un intento de arranque sin confirmar en este momento. */
+    public static boolean hasPendingAttempt(Context context) {
+        final String pending = prefs(context).getString(KEY_PENDING, null);
+        return pending != null && !pending.isEmpty();
+    }
+
+    /** El juego ya da cuadros: el driver funcionó. Borra la marca. */
+    public static void confirmBoot(Context context) {
+        if (prefs(context).getString(KEY_PENDING, null) == null) return;
+        prefs(context).edit().remove(KEY_PENDING).apply();
+    }
+
+    /** Descarta un intento en curso sin marcar nada (p. ej. el driver ya fue
+     *  excluido para este juego, o no hay driver activo). */
+    public static void clearAttempt(Context context) {
+        if (prefs(context).getString(KEY_PENDING, null) == null) return;
+        prefs(context).edit().remove(KEY_PENDING).apply();
+    }
+
+    /** Quita todos los fracasos atribuidos a un driver: el usuario volvió a
+     *  elegirlo conscientemente en el diálogo y merece una oportunidad limpia. */
+    public static void clearFailuresForDriver(Context context, String driverId) {
+        if (driverId == null || driverId.isEmpty()) return;
+        final android.content.SharedPreferences p = prefs(context);
+        final String bad = p.getString(KEY_FAILED, "");
+        if (bad == null || bad.isEmpty()) return;
+        StringBuilder kept = new StringBuilder(";");
+        for (String entry : bad.split(";")) {
+            // Se CONSERVAN los fracasos de otros drivers; se descartan solo los
+            // de este, que el usuario acaba de volver a elegir a conciencia.
+            if (entry.isEmpty() || entry.startsWith(driverId + "|")) continue;
+            kept.append(entry).append(';');
+        }
+        p.edit().putString(KEY_FAILED, kept.length() == 1 ? "" : kept.toString()).apply();
+    }
+
+    /** Aviso de una sola vez, preparado cuando el guardarraya devuelve al driver
+     *  del sistema; lo consume MainActivity para explicárselo al usuario. */
+    public static void setFallbackNotice(Context context, String message) {
+        prefs(context).edit().putString(KEY_NOTICE, message).apply();
+    }
+
+    @Nullable
+    public static String consumeFallbackNotice(Context context) {
+        final android.content.SharedPreferences p = prefs(context);
+        final String msg = p.getString(KEY_NOTICE, null);
+        if (msg != null) p.edit().remove(KEY_NOTICE).apply();
+        return msg;
+    }
+
+    /** Convierte el intento pendiente en fracaso atribuido a ese driver+juego. */
+    public static void markPendingAttemptFailed(Context context) {
+        final android.content.SharedPreferences p = prefs(context);
+        final String pending = p.getString(KEY_PENDING, null);
+        if (pending == null || pending.isEmpty()) return;
+        p.edit().remove(KEY_PENDING).apply();
+        String bad = p.getString(KEY_FAILED, "");
+        if (bad == null) bad = "";
+        if (!bad.contains(";" + pending + ";")) {
+            p.edit().putString(KEY_FAILED, ";" + bad.replaceFirst("^;", "") + pending + ";").apply();
+            Log.i(TAG, "driver attempt " + pending + " failed -> marked as bad");
+        }
+    }
+
+    /**
+     * Se llama al arrancar la app, antes de aplicar la selección de driver.
+     * Un cierre del código nativo se lleva el proceso por delante y no deja
+     * excepción que Java atrape: si al volver hay una marca sin confirmar, ese
+     * intento murió a medias y el par se registra como fallido. Devuelve la clave
+     * del par fallido, o null si no había nada pendiente.
+     */
+    public static String harvestUnconfirmedAttempt(Context context) {
+        final android.content.SharedPreferences p = prefs(context);
+        final String pending = p.getString(KEY_PENDING, null);
+        if (pending == null || pending.isEmpty()) return null;
+        markPendingAttemptFailed(context);
+        return pending;
+    }
+
     // ---- Native bridge ------------------------------------------------------
 
     /** Push the active selection to native. Pass null to revert to the
@@ -269,8 +396,7 @@ public final class CustomDriverManager {
         if (installed == null) {
             NativeApp.setCustomVulkanDriver("", "", "", "");
             return;
-        }
-        // adrenotools' path resolution wants the driver dir to end with a
+        }        // adrenotools' path resolution wants the driver dir to end with a
         // slash. The redirect dir doesn't strictly require it but we pass
         // it the same way for consistency.
         String driverDirPath = installed.driverDir.getAbsolutePath() + "/";

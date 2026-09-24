@@ -53,8 +53,16 @@ public class CustomDriverDialogFragment extends DialogFragment {
     /** Resolves the saved driver id against what's actually installed
      *  (a saved id can go stale if the driver was deleted outside this
      *  dialog) and pushes the result to native. Safe to call
-     *  unconditionally before every VM start. */
+     *  unconditionally before every VM start.
+     *
+     *  Cenit 0.6.8: con juego delante, la selección pasa por el guardarraya de
+     *  CustomDriverManager. Si ese driver ya reventó el arranque de ESTE juego,
+     *  se arranca con el del sistema en lugar de repetir el cierre, y se avisa. */
     public static void applyStoredSelection(Context context) {
+        applyStoredSelection(context, null, null);
+    }
+
+    public static void applyStoredSelection(Context context, String gameKey, String gameLabel) {
         String id = getSelectedDriverId(context);
         CustomDriverManager.InstalledDriver selected = null;
         if (id != null) {
@@ -65,6 +73,20 @@ public class CustomDriverDialogFragment extends DialogFragment {
                 }
             }
         }
+        if (selected != null && gameKey != null
+                && CustomDriverManager.isKnownBadCombo(context, selected.id, gameKey)) {
+            CustomDriverManager.setFallbackNotice(context,
+                    "El driver «" + selected.name + "» cerró " + (gameLabel == null ? "este juego" : gameLabel)
+                            + " al arrancar la última vez. Para este juego Cenit usó el driver del sistema."
+                            + " Puedes forzar el driver otra vez en «Controlador gráfico personalizado».");
+            CustomDriverManager.clearAttempt(context);
+            CustomDriverManager.applyToNative(context, null);
+            return;
+        }
+        if (selected != null && gameKey != null)
+            CustomDriverManager.beginAttempt(context, selected.id, gameKey);
+        else
+            CustomDriverManager.clearAttempt(context); // sin driver o sin juego: nada que vigilar
         CustomDriverManager.applyToNative(context, selected);
     }
 
@@ -102,10 +124,15 @@ public class CustomDriverDialogFragment extends DialogFragment {
             if (position == 0) {
                 editor.remove(PREF_CUSTOM_DRIVER_ID).apply();
             } else {
-                editor.putString(PREF_CUSTOM_DRIVER_ID, installedDrivers.get(position - 1).id).apply();
+                final String picked = installedDrivers.get(position - 1).id;
+                editor.putString(PREF_CUSTOM_DRIVER_ID, picked).apply();
+                // Cenit 0.6.8: elegir un driver otra vez ES la forma de decirle a
+                // Cenit "inténtalo de nuevo". Se limpian los fracasos anotados para
+                // él, si no, el guardarraya lo seguiría excluyendo en silencio.
+                CustomDriverManager.clearFailuresForDriver(ctx, picked);
             }
             applyStoredSelection(ctx);
-            Toast.makeText(ctx, "Applies the next time the game starts", Toast.LENGTH_SHORT).show();
+            Toast.makeText(ctx, "Se aplica al iniciar el próximo juego", Toast.LENGTH_SHORT).show();
         });
 
         btnImport.setOnClickListener(v -> {
@@ -117,7 +144,7 @@ public class CustomDriverDialogFragment extends DialogFragment {
 
         btnDelete.setOnClickListener(v -> {
             if (selectedIndex == 0) {
-                Toast.makeText(requireContext(), "Select an imported driver first", Toast.LENGTH_SHORT).show();
+                Toast.makeText(requireContext(), "Primero selecciona un driver importado", Toast.LENGTH_SHORT).show();
                 return;
             }
             CustomDriverManager.InstalledDriver target = installedDrivers.get(selectedIndex - 1);
@@ -128,15 +155,15 @@ public class CustomDriverDialogFragment extends DialogFragment {
                         .remove(PREF_CUSTOM_DRIVER_ID).apply();
                 applyStoredSelection(ctx);
             }
-            Toast.makeText(ctx, "Deleted " + target.name, Toast.LENGTH_SHORT).show();
+            Toast.makeText(ctx, "Se eliminó " + target.name, Toast.LENGTH_SHORT).show();
             loadDrivers();
             refreshAdapter();
         });
 
         return new MaterialAlertDialogBuilder(requireContext())
-                .setCustomTitle(UiUtils.centeredDialogTitle(requireContext(), "CUSTOM GPU DRIVER"))
+                .setCustomTitle(UiUtils.centeredDialogTitle(requireContext(), "CONTROLADOR GRÁFICO PERSONALIZADO"))
                 .setView(view)
-                .setNegativeButton("Close", null)
+                .setNegativeButton("Cerrar", null)
                 .create();
     }
 
@@ -145,7 +172,7 @@ public class CustomDriverDialogFragment extends DialogFragment {
         String currentId = getSelectedDriverId(requireContext());
         selectedIndex = 0;
         List<String> labels = new ArrayList<>();
-        labels.add("System Default (no override)");
+        labels.add("Driver del sistema (sin cambio)");
         for (int i = 0; i < installedDrivers.size(); i++) {
             CustomDriverManager.InstalledDriver d = installedDrivers.get(i);
             String label = d.version.isEmpty() ? d.name : d.name + " (" + d.version + ")";
@@ -171,20 +198,20 @@ public class CustomDriverDialogFragment extends DialogFragment {
 
     private void importDriver(Uri uri) {
         Context appCtx = requireContext().getApplicationContext();
-        Toast.makeText(appCtx, "Importing driver...", Toast.LENGTH_SHORT).show();
+        Toast.makeText(appCtx, "Importando driver...", Toast.LENGTH_SHORT).show();
         Executors.newSingleThreadExecutor().execute(() -> {
             CustomDriverManager.InstalledDriver installed = CustomDriverManager.installFromUri(appCtx, uri);
             if (getActivity() == null)
                 return;
             requireActivity().runOnUiThread(() -> {
                 if (installed == null) {
-                    Toast.makeText(appCtx, "Import failed — not a valid driver .zip", Toast.LENGTH_LONG).show();
+                    Toast.makeText(appCtx, "La importación falló: el .zip no es un driver válido", Toast.LENGTH_LONG).show();
                     return;
                 }
                 appCtx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                         .putString(PREF_CUSTOM_DRIVER_ID, installed.id).apply();
                 applyStoredSelection(appCtx);
-                Toast.makeText(appCtx, "Installed " + installed.name, Toast.LENGTH_SHORT).show();
+                Toast.makeText(appCtx, "Instalado " + installed.name, Toast.LENGTH_SHORT).show();
                 loadDrivers();
                 refreshAdapter();
             });

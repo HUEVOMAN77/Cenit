@@ -14,7 +14,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Replace the system Vulkan driver with a custom one (e.g. a Mesa Turnip build) for the GS renderer. Vulkan renderer + Adreno GPUs only. Import a driver .zip you already have, then select it below. Takes effect the next time the game starts."
+            android:text="Sustituye el driver Vulkan del sistema por uno personalizado (por ejemplo una build de Mesa Turnip) en el renderer GS. Solo funciona con el renderer Vulkan y GPUs Adreno. Importa un .zip de driver que ya tengas y selecciónalo abajo. Se aplica al iniciar el próximo juego."
             android:textSize="14sp"
             android:layout_marginBottom="16dp"
             android:textColor="?android:attr/textColorSecondary" />
@@ -39,7 +39,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:layout_marginEnd="4dp"
-                android:text="Import .zip"
+                android:text="Importar .zip"
                 style="@style/Widget.Material3.Button.OutlinedButton" />
 
             <com.google.android.material.button.MaterialButton
@@ -48,7 +48,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:layout_marginStart="4dp"
-                android:text="Delete Selected"
+                android:text="Eliminar seleccionado"
                 style="@style/Widget.Material3.Button.OutlinedButton" />
 
         </LinearLayout>
