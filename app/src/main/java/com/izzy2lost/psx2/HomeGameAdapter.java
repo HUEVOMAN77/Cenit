@@ -115,6 +115,7 @@ public class HomeGameAdapter extends RecyclerView.Adapter<HomeGameAdapter.VH> {
     public void onBindViewHolder(@NonNull VH holder, int position) {
         Entry entry = shown.get(position);
         loadImage(entry.coverPath, entry.coverUrl, holder.cover);
+        holder.title.setText(displayTitle(entry.title));
 
         holder.itemView.setOnClickListener(v -> {
             int pos = holder.getBindingAdapterPosition();
@@ -207,12 +208,35 @@ public class HomeGameAdapter extends RecyclerView.Adapter<HomeGameAdapter.VH> {
         return shown.size();
     }
 
+    /**
+     * Convierte lo que trae el escáner (a veces el nombre del archivo tal cual)
+     * en un título presentable debajo de la carátula: quita extensiones y
+     * capítulos, puntos y guiones bajos, y el código de región entre paréntesis.
+     * "Shadow.of.the.Colossus.(USA).ch1.iso" -> "Shadow of the Colossus".
+     */
+    static String displayTitle(String raw) {
+        if (raw == null || raw.isEmpty()) return "—";
+        String s = raw;
+        int q = s.indexOf('?');
+        if (q > 0) s = s.substring(0, q);            // por si llega una URI sin decodificar
+        s = s.replaceAll("(?i)\\.(iso|bin|img|mdf|chd|cso|gz|zip|dump|cue|nrg|pbp)$", "");
+        s = s.replaceAll("(?i)(\\.?\\s*ch\\.?\\d+)+$", ""); // dumps multicapítulo: .ch1.ch2.ch3
+        s = s.replaceAll("(?i)\\(\\s*(usa|europe|pal|ntsc[ -]?[uj]?|japan|jap|us|eu)([^)]*)\\)", "");
+        s = s.replaceAll("(?i)\\[[^]]*(read ?n?lock|best|fixed|scr[ée]?nshot)[^]]*\\]", "");
+        s = s.replaceAll("[._]+", " ");
+        s = s.replaceAll("\\s{2,}", " ").trim();
+        if (s.isEmpty()) s = raw;
+        return s;
+    }
+
     static class VH extends RecyclerView.ViewHolder {
         final ShapeableImageView cover;
+        final android.widget.TextView title;
 
         VH(@NonNull View itemView) {
             super(itemView);
             cover = itemView.findViewById(R.id.image_cover);
+            title = itemView.findViewById(R.id.game_title);
         }
     }
 }

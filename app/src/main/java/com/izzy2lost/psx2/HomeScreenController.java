@@ -81,6 +81,17 @@ public final class HomeScreenController {
     private TextView emptyText;
     private View emptyAction;
 
+    // Secciones del rediseño 0.6.9: encabezados con marcador neón y contador,
+    // más el carrusel de "siguiendo donde lo dejaste".
+    private View recentSectionHeader;
+    private TextView recentSectionTitle;
+    private TextView recentSectionCount;
+    private RecyclerView recentRow;
+    private HomeRecentAdapter recentAdapter;
+    private View librarySectionHeader;
+    private TextView librarySectionTitle;
+    private TextView librarySectionCount;
+
     private View tabHome, tabLibrary, tabFolders, tabSettings;
 
     public HomeScreenController(@NonNull Context context, @NonNull ViewGroup parent, @NonNull Host host) {
@@ -128,6 +139,31 @@ public final class HomeScreenController {
         tabLibrary = root.findViewById(R.id.tab_library);
         tabFolders = root.findViewById(R.id.tab_folders);
         tabSettings = root.findViewById(R.id.tab_settings);
+
+        // ---- Secciones del rediseño ----
+        recentSectionHeader = root.findViewById(R.id.home_section_recent);
+        if (recentSectionHeader != null) {
+            recentSectionTitle = recentSectionHeader.findViewById(R.id.section_title);
+            recentSectionCount = recentSectionHeader.findViewById(R.id.section_count);
+            if (recentSectionTitle != null) recentSectionTitle.setText("SIGUIENDO DONDE LO DEJASTE");
+        }
+        librarySectionHeader = root.findViewById(R.id.home_section_library);
+        if (librarySectionHeader != null) {
+            librarySectionTitle = librarySectionHeader.findViewById(R.id.section_title);
+            librarySectionCount = librarySectionHeader.findViewById(R.id.section_count);
+            if (librarySectionTitle != null) librarySectionTitle.setText("TU BIBLIOTECA");
+        }
+        recentRow = root.findViewById(R.id.home_recent_row);
+        if (recentRow != null) {
+            recentRow.setHasFixedSize(true);
+            recentRow.setLayoutManager(
+                    new androidx.recyclerview.widget.LinearLayoutManager(context,
+                            androidx.recyclerview.widget.LinearLayoutManager.HORIZONTAL, false));
+            recentAdapter = new HomeRecentAdapter(context, entry -> {
+                if (entry != null) host.onPlayGame(entry.uri);
+            });
+            recentRow.setAdapter(recentAdapter);
+        }
 
         View grid = root.findViewById(R.id.home_grid);
         if (grid instanceof RecyclerView rv) {
@@ -292,6 +328,7 @@ public final class HomeScreenController {
         rise(root.findViewById(R.id.home_wordmark), 60);
         rise(root.findViewById(R.id.home_tagline), 130);
         rise(statusCard, 210);
+        rise(librarySectionHeader, 240);
         rise(root.findViewById(R.id.home_grid), 260);
         rise(root.findViewById(R.id.home_bottom_bar), 320);
     }
@@ -396,6 +433,44 @@ public final class HomeScreenController {
         if (adapter != null && !animated) adapter.notifyDataSetChanged();
         lastScanning = false;
         renderEmpty();
+        renderSections();
+    }
+
+    /**
+     * Contadores y carrusel de recientes. La marca "last_played:<uri>" la escribe
+     * MainActivity cada vez que se abre un juego; aquí solo se lee, y solo se
+     * muestran los últimos 7 días, hasta 8 títulos.
+     */
+    private void renderSections() {
+        if (librarySectionCount != null) {
+            int total = entries.size();
+            librarySectionCount.setText(String.valueOf(total));
+            librarySectionCount.setVisibility(total > 0 ? View.VISIBLE : View.GONE);
+        }
+        List<HomeGameAdapter.Entry> recents = new ArrayList<>();
+        try {
+            SharedPreferences prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE);
+            long cutoff = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000;
+            java.util.Map<Long, HomeGameAdapter.Entry> timed = new java.util.TreeMap<>(
+                    java.util.Collections.reverseOrder());
+            for (HomeGameAdapter.Entry e : entries) {
+                long t = prefs.getLong("last_played:" + e.uri, 0L);
+                if (t >= cutoff) timed.put(t, e);
+            }
+            for (HomeGameAdapter.Entry e : timed.values()) {
+                if (recents.size() >= 8) break;
+                recents.add(e);
+            }
+        } catch (Throwable ignored) {
+            recents.clear();
+        }
+        boolean show = !recents.isEmpty() && recentSectionHeader != null && recentRow != null;
+        if (recentSectionHeader != null) recentSectionHeader.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (recentRow != null) recentRow.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (show) {
+            if (recentSectionCount != null) recentSectionCount.setText(String.valueOf(recents.size()));
+            if (recentAdapter != null) recentAdapter.setItems(recents);
+        }
     }
 
     private void renderEmpty() {

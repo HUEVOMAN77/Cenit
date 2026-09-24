@@ -1,14 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  Tarjeta de juego de la pantalla de inicio. Antes era solo la carátula suelta;
-  ahora es una tarjeta con la imagen a sangre (proporción PS2 fija), un velo
-  oscuro abajo para que el título se lea siempre, y el nombre del juego debajo.
--->
+<!-- Tarjeta de "Jugados recientemente": imagen a sangre con velo y nombre. -->
 <com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:layout_width="match_parent"
+    android:layout_width="116dp"
     android:layout_height="wrap_content"
-    android:layout_margin="6dp"
+    android:layout_marginStart="8dp"
+    android:layout_marginTop="4dp"
+    android:layout_marginEnd="8dp"
+    android:layout_marginBottom="8dp"
     android:clickable="true"
     android:focusable="true"
     app:cardBackgroundColor="#0B1018"
@@ -22,7 +21,7 @@
         android:layout_height="wrap_content">
 
         <com.google.android.material.imageview.ShapeableImageView
-            android:id="@+id/image_cover"
+            android:id="@+id/recent_cover"
             android:layout_width="0dp"
             android:layout_height="0dp"
             android:contentDescription="@null"
@@ -35,32 +34,28 @@
 
         <View
             android:layout_width="0dp"
-            android:layout_height="40dp"
+            android:layout_height="46dp"
             android:background="@drawable/home_cover_scrim"
-            app:layout_constraintBottom_toBottomOf="@id/image_cover"
-            app:layout_constraintEnd_toEndOf="@id/image_cover"
-            app:layout_constraintStart_toStartOf="@id/image_cover" />
+            app:layout_constraintBottom_toBottomOf="@id/recent_cover"
+            app:layout_constraintEnd_toEndOf="@id/recent_cover"
+            app:layout_constraintStart_toStartOf="@id/recent_cover" />
 
         <TextView
-            android:id="@+id/game_title"
+            android:id="@+id/recent_title"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:layout_marginBottom="10dp"
+            android:layout_marginStart="6dp"
+            android:layout_marginEnd="6dp"
+            android:layout_marginBottom="6dp"
             android:ellipsize="end"
-            android:gravity="center"
             android:includeFontPadding="false"
-            android:letterSpacing="0.01"
             android:maxLines="2"
-            android:paddingStart="7dp"
-            android:paddingEnd="7dp"
             android:text="Shadow of the Colossus"
-            android:textColor="#EDF1F6"
-            android:textSize="12sp"
+            android:textColor="#F2F5F9"
+            android:textSize="11sp"
             android:textStyle="bold"
-            app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@id/image_cover" />
+            app:layout_constraintBottom_toBottomOf="@id/recent_cover"
+            app:layout_constraintEnd_toEndOf="@id/recent_cover"
+            app:layout_constraintStart_toStartOf="@id/recent_cover" />
     </androidx.constraintlayout.widget.ConstraintLayout>
 </com.google.android.material.card.MaterialCardView>

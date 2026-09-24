@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Pantalla de inicio de Cenit, réplica de la captura:
-  header negro (logo + Cenit / PS2 EMULATOR + buscar + 3 puntos),
-  grilla de cajas PS2 de 4 columnas y barra inferior
-  Inicio · Biblioteca · Carpetas · Ajustes.
+  Pantalla de inicio de Cenit, rediseño 0.6.9:
+  cabecera con degradado neón (logo + Cenit / PS2 EMULATOR + buscar + 3 puntos),
+  carrusel "SIGUIENDO DONDE LO DEJASTE", sección "TU BIBLIOTECA" con contador,
+  grilla de tarjetas con carátula + nombre, y barra inferior con filete neón.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/home_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/home_black"
+    android:background="@drawable/bg_home_gradient"
     android:orientation="vertical">
 
     <!-- ============ HEADER ============ -->
@@ -18,7 +18,6 @@
         android:id="@+id/home_header"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@color/home_black"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingStart="14dp"
@@ -163,7 +162,6 @@
             android:id="@+id/home_scroll"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:background="@color/home_black"
             android:clipToPadding="false"
             android:fillViewport="true"
             android:paddingBottom="12dp">
@@ -173,13 +171,37 @@
                 android:layout_height="wrap_content"
                 android:orientation="vertical">
 
+                <!-- ===== Recientes (se oculta si no hay historial) ===== -->
+                <include
+                    android:id="@+id/home_section_recent"
+                    layout="@layout/include_home_section"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:visibility="gone" />
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/home_recent_row"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:clipToPadding="false"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:visibility="gone" />
+
+                <!-- ===== Biblioteca ===== -->
+                <include
+                    android:id="@+id/home_section_library"
+                    layout="@layout/include_home_section"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
                 <androidx.recyclerview.widget.RecyclerView
                     android:id="@+id/home_grid"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="7dp"
-                    android:layout_marginTop="8dp"
-                    android:layout_marginEnd="7dp"
+                    android:layout_marginStart="6dp"
+                    android:layout_marginTop="2dp"
+                    android:layout_marginEnd="6dp"
                     android:nestedScrollingEnabled="false"
                     android:overScrollMode="never" />
 
@@ -233,13 +255,13 @@
         android:id="@+id/home_bottom_bar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@color/home_black"
+        android:background="#E6050810"
         android:orientation="vertical">
 
         <View
             android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="#1A222C" />
+            android:layout_height="2dp"
+            android:background="@drawable/bg_home_divider" />
 
         <LinearLayout
             android:layout_width="match_parent"

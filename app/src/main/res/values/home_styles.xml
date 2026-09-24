@@ -10,6 +10,16 @@
         <item name="cornerSize">18dp</item>
     </style>
 
+    <!-- La carátula dentro de la tarjeta: solo redondea arriba, porque abajo
+         pega con el nombre del juego. -->
+    <style name="ShapeAppearance.Cenit.CoverTop" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSizeTopLeft">14dp</item>
+        <item name="cornerSizeTopRight">14dp</item>
+        <item name="cornerSizeBottomLeft">0dp</item>
+        <item name="cornerSizeBottomRight">0dp</item>
+    </style>
+
     <style name="Cenit.Home.SectionTitle" parent="TextAppearance.Material3.TitleSmall">
         <item name="android:textColor">@color/md_theme_onSurface</item>
         <item name="android:letterSpacing">0.08</item>

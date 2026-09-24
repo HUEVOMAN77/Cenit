@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Filete neón que separa el contenido de la barra inferior. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:angle="0"
+        android:centerColor="#1A39E6FF"
+        android:endColor="#337A5CFF"
+        android:startColor="#00000000"
+        android:type="linear" />
+</shape>
