@@ -78,7 +78,7 @@ En un gama alta eso se perdona porque sobra potencia. En un gama media o baja es
 
 ### La experiencia de usarlo
 
-- **Pantalla de inicio propia.** Biblioteca en cuadrícula con carátulas de cajas descargadas automáticamente, buscador en vivo, "Continuar" con lo último jugado y barra inferior: Inicio · Biblioteca · Carpetas · Ajustes. Los mandos táctiles solo aparecen con un juego en marcha.
+- **Pantalla de inicio propia (rediseñada en 0.6.9).** Tarjetas con relieve y el nombre del juego debajo de cada carátula —limpiado de extensiones, códigos de región y etiquetas de scene—, carrusel "Siguiendo donde lo dejaste" con lo jugado en la última semana, secciones con contador, carátula neón por defecto cuando no hay imagen, fondo con degradado medianoche y barra inferior: Inicio · Biblioteca · Carpetas · Ajustes. Buscador en vivo incluido. Los mandos táctiles solo aparecen con un juego en marcha.
 - **Asistente de primera vez.** Tres pasos con progreso claro: BIOS, carpetas y listo. Nunca te deja atrapado ni te pide saber de emuladores.
 - **Mandos en pantalla rediseñados.** Estilo fantasma transparente, con hombros y gatillos arriba (L3/L2/L1 · R2/R1/R3), cruceta y botones con los símbolos de PS2, y cruceta direccional en rombo sobre el stick.
 - **Soporte de mandos externos.** Bluetooth y USB, con pantalla de prueba de botones.
