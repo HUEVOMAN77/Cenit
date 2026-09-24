@@ -308,7 +308,14 @@ final class DynamicResolutionGovernor {
         // Con la CPU emulada a otra velocidad, medir "porcentaje de velocidad" deja
         // de significar "el teléfono no da abasto": el juego va lento porque el
         // usuario lo pidió. Congelar el regidor hasta que vuelva al 100%.
-        if (prefs.getInt("ee_cycle_rate", 0) != 0) {
+        // 0.6.12: se mira el valor EFECTIVO (capa por-juego incluida), no solo la
+        // preferencia global — un -1 guardado en el INI de SOTC debe congelar igual,
+        // y un 0 por-juego que anule un global viejo no puede dejar esto dormido.
+        // La lectura nativa es barata (un entero); el fallback ante cualquier fallo
+        // es la preferencia global de siempre.
+        final int effectiveRate = NativeApp.safeGetEffectiveEECycleRate();
+        if (effectiveRate != 0 || (NativeApp.hasNoNativeBinary
+                && prefs.getInt("ee_cycle_rate", 0) != 0)) {
             if (applied > 0f) {
                 host.applyUpscale(ceiling());
                 applied = 0f;

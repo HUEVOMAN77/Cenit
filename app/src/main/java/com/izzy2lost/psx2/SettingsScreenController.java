@@ -76,6 +76,9 @@ public final class SettingsScreenController {
     private int halfPixelShown = -1;
     // Lo mismo para cuotas de EE (0.6.5): adoptar la primera posición sin escribir.
     private int cycleSkipShown = -1;
+    // 0.6.12: y para el Ciclo EE, que pasó de global puro a por-juego con
+    // fallback global (sin juego delante sigue escribiendo la preferencia de siempre).
+    private int eeCycleShown = -1;
     // Y para los dos spinners de 0.6.6, que no son por-juego pero tampoco deben
     // escribirse solos al inflar la vista (el primer disparo es siempre posición 0).
     private int frameQueueShown = -1;
@@ -309,9 +312,26 @@ public final class SettingsScreenController {
             int rate = position - 3;
             if (rate < -3) rate = -3;
             if (rate > 3) rate = 3;
+            // Primera pasada tras inflar: ADOPTAR, no escribir (mismo guard que
+            // medio píxel y cuotas; aquí el centinela no puede ser -1 porque el
+            // valor -1 ES válido, por eso se compara contra eeCycleShown).
+            if (eeCycleShown < 0) { eeCycleShown = position; return; }
+            if (position == eeCycleShown) return;
+            final String uri = host.runningGamePath();
+            if (uri != null && !uri.isEmpty()) {
+                // 0.6.12: con juego delante, el Ciclo EE se guarda SOLO para ese
+                // juego (capa por-juego, misma ruta probada del modo cuotas:
+                // escribe el INI y recarga la capa en caliente). Así SOTC puede
+                // arrancar siempre en -1 sin que el resto de la librería se vea
+                // afectada.
+                if (NativeApp.safeSetGameSettingInt(uri, "EmuCore/Speedhacks", "EECycleRate", rate))
+                    eeCycleShown = position;
+                return;
+            }
             if (rate == prefs.getInt("ee_cycle_rate", 0)) return;
             prefs.edit().putInt("ee_cycle_rate", rate).apply();
             NativeApp.setEECycleRateAsync(rate);
+            eeCycleShown = position;
         });
 
         spinner(R.id.set_sp_blending, R.array.blending_accuracy_entries, position -> {
@@ -566,8 +586,43 @@ public final class SettingsScreenController {
                 prefs.getInt("frame_queue", NativeApp.defaultFrameLatencyQueue()));
         setSpinner(R.id.set_sp_preload,
                 prefs.getInt("texture_preload", NativeApp.defaultTexturePreloading()));
-        setSpinner(R.id.set_sp_ee_cycle,
-                Math.max(0, Math.min(6, prefs.getInt("ee_cycle_rate", 0) + 3)));
+        // Ciclo EE (0.6.12): con juego delante se lee SOLO su INI; si el juego no
+        // tiene valor guardado, manda la preferencia global (que es lo que el
+        // núcleo va a aplicar). seteeCycleShown ANTES de setSpinner, para que el
+        // disparo reflejo del cambio de selección no escriba nada.
+        final String cycUri = host.runningGamePath();
+        final boolean cycAvailable = cycUri != null && !cycUri.isEmpty();
+        final int cycGlobal = prefs.getInt("ee_cycle_rate", 0);
+        final int cycShown = cycAvailable
+                ? NativeApp.safeGetGameSettingInt(cycUri, "EmuCore/Speedhacks",
+                        "EECycleRate", cycGlobal)
+                : cycGlobal;
+        eeCycleShown = Math.max(0, Math.min(6, cycShown + 3));
+        setSpinner(R.id.set_sp_ee_cycle, eeCycleShown);
+        TextView eeLabel = root.findViewById(R.id.set_tv_ee_cycle_label);
+        if (eeLabel != null) eeLabel.setText(cycAvailable
+                ? "Velocidad de la CPU emulada (por juego)"
+                : "Velocidad de la CPU emulada");
+        TextView eeNote = root.findViewById(R.id.set_tv_ee_cycle_note);
+        if (eeNote != null) {
+            if (cycAvailable) {
+                String extra = "";
+                if (cycShown != cycGlobal) {
+                    final String[] cycEntries =
+                            context.getResources().getStringArray(R.array.ee_cycle_entries);
+                    final int gp = Math.max(0, Math.min(cycEntries.length - 1, cycGlobal + 3));
+                    extra = " (El global está en " + cycEntries[gp] + ")";
+                }
+                eeNote.setText("Se guarda solo para el juego que está delante y se "
+                        + "aplica al instante. Por debajo de 100% el juego va más lento "
+                        + "pero clavado: es la salida para los que nunca llegan a tiempo "
+                        + "(SOTC, God of War)." + extra);
+            } else {
+                eeNote.setText("Ajuste global (ningún juego abierto): los juegos que "
+                        + "tengan su propio valor aquí lo ignoran. Abre uno para guardarlo "
+                        + "solo para él.");
+            }
+        }
         setSpinner(R.id.set_sp_blending, prefs.getInt("blending_accuracy", 1));
         setSpinner(R.id.set_sp_filtering, prefs.getInt("texture_filtering", 2));
         setSpinner(R.id.set_sp_mipmap, prefs.getBoolean("hw_mipmap", true) ? 1 : 0);

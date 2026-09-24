@@ -117,6 +117,16 @@ public class NativeApp {
 		if (hasNoNativeBinary) return 0f;
 		try { return getEffectiveUpscale(); } catch (Throwable t) { return 0f; }
 	}
+	// Cenit 0.6.12: Ciclo EE (EECycleRate) REALMENTE en uso, capa por-juego
+	// incluida. 0 con la consola apagada. El regidor de resolución ya no se
+	// congela mirando solo la preferencia global: un -1 guardado en el INI del
+	// juego congela ahora igual que lo hacía el global, y un 0 por-juego que
+	// anule un global viejo deja de tener al regidor dormido para siempre.
+	public static native int getEffectiveEECycleRate();
+	public static int safeGetEffectiveEECycleRate() {
+		if (hasNoNativeBinary) return 0;
+		try { return getEffectiveEECycleRate(); } catch (Throwable t) { return 0; }
+	}
 	// Cenit 0.6.4 (regidor v2): uso de GPU como fracción (1.0 = GPU justo a
 	// tiempo) y milisegundos medios de GPU por cuadro. Con esto el regidor
 	// distingue un bache de GPU (bajar resolución ayuda) de uno de CPU

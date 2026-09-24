@@ -354,10 +354,12 @@
                                 style="@style/Cenit.Settings.Spinner" />
 
                             <TextView
+                                android:id="@+id/set_tv_ee_cycle_label"
                                 style="@style/Cenit.Settings.FieldLabel"
                                 android:text="Velocidad de la CPU emulada" />
 
                             <TextView
+                                android:id="@+id/set_tv_ee_cycle_note"
                                 style="@style/Cenit.Settings.Caption"
                                 android:text="No es un truco de fluidez: por debajo de 100% el juego va más lento pero sin tirones, y por encima corre de más con el audio roto. Se llama cámara lenta a cambio de estabilidad." />
 

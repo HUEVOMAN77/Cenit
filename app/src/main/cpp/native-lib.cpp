@@ -1400,6 +1400,24 @@ Java_com_izzy2lost_psx2_NativeApp_getEffectiveUpscale(JNIEnv *env, jclass clazz)
     return (jfloat)EmuConfig.GS.UpscaleMultiplier;
 }
 
+// Cenit 0.6.12: Ciclo EE (EECycleRate) REALMENTE en uso, capa por-juego incluida.
+// Con VM válido, EmuConfig ya refleja la cascada completa (perfil de hardware ->
+// INI global -> INI por-juego), así que esto es la verdad operativa: el juego con
+// su -1 guardado congela al regidor igual que lo hacía el -1 global, y un 0
+// escrito a mano en el INI del juego deja de tener al regidor dormido para siempre.
+// Sin VM (consola apagada, juego todavía arrancando) se lee el INI global: es lo
+// que se va a aplicar en cuanto el VM nazca, y evita una ventana de un segundo en
+// la que el regidor se creería que todo va al 100% durante el logo de PS2.
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getEffectiveEECycleRate(JNIEnv *env, jclass clazz) {
+    if (VMManager::HasValidVM())
+        return (jint)EmuConfig.Speedhacks.EECycleRate;
+    int rate = 0;
+    s_settings_interface.GetIntValue("EmuCore/Speedhacks", "EECycleRate", &rate);
+    return (jint)rate;
+}
+
 // Cenit 0.6.4 (plan del inge §5): porcentaje de uso de GPU (misma métrica que
 // muestra el HUD). El regidor v2 la compara con la velocidad de emulación para
 // saber si el bache es de GPU (bajar resolución ayuda) o de CPU emulada (bajar
