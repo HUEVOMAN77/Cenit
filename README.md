@@ -54,7 +54,7 @@ En un gama alta eso se perdona porque sobra potencia. En un gama media o baja es
 
 ### Rendimiento inteligente (lo que hace especial a Cenit)
 
-- **Perfil automático por hardware.** Al instalarlo reconoce el procesador (incluidos los apodos internos de Qualcomm que muchas marcas no reportan bien) y deja lista la línea base: aceleradores de CPU seguros, recompilación completa, sin esperas inútiles a la gráfica y registros silenciados. No hay que tocar nada: arranca ya configurado para tu gama.
+- **Perfil automático por hardware.** Al instalarlo reconoce el procesador (incluidos los apodos internos de Qualcomm que muchas marcas no reportan bien) y deja lista la línea base: aceleradores de CPU seguros, recompilación completa y sin esperas inútiles a la gráfica. No hay que tocar nada: arranca ya configurado para tu gama.
 - **Resolución dinámica.** Si un juego se atrasa, baja un escalón de resolución solo y lo devuelve cuando afloja. Respeta la escala que elegiste como techo, se congela si pausas o usas aceleración, y se rinde en paz si los ajustes del juego mandan más que él.
 - **Memoria por juego.** Cenit recuerda qué resolución sostuvo cada juego *en tu teléfono*. La próxima partida arranca directo ahí, sin pelear desde el máximo. Y si un juego resultó limitado por CPU, deja de recortarle píxeles que no le sirven. Se borra manteniendo pulsado el interruptor de memoria.
 - **Recorte térmico anticipado.** Muchos celulares bajan su potencia por calor sin avisar. Cenit detecta la caída silenciosa y baja un paso *antes* de que sientas el tirón, con un máximo por partida para no pasarse de listo.
@@ -71,6 +71,7 @@ En un gama alta eso se perdona porque sobra potencia. En un gama media o baja es
 - **Importación manual de controladores gráficos (drivers Vulkan).** En celulares Snapdragon/Adreno puedes cargar un controlador Turnip (Mesa) descargado por ti, en el formato de paquete estándar de la comunidad (el mismo de Yuzu, Strato y Vita3K): botón en Ajustes, eliges el `.zip`, se instala y se activa. Es la vía para ganar velocidad y corrección gráfica donde el controlador de fábrica se queda corto. Solo aplica a teléfonos con gráfica Adreno; en el resto, el botón no tiene efecto.
 - **Packs de texturas.** Importa y gestiona paquetes de texturas de alta resolución por juego, con carga asíncrona y precarga opcionales.
 - **Arreglos automáticos de compatibilidad.** El motor aplica las correcciones conocidas para cada juego, y ninguna función de Cenit las rompe al tocar ajustes manuales.
+- **Los dos aceleradores delicados, ahora con interruptor.** La lectura de disco acelerada (Fast CDVD) y el VU1 en hilo aparte (MTVU) son las dos ayudas que pueden romper un juego concreto: la primera recorta la espera simulada del DVD y hay títulos que leen sincronizado; la segunda puede colgar algunos. Hasta ahora Cenit los encendía por su cuenta y no había forma de apagarlos. Los dos están en Ajustes, con su explicación, y el de disco viene apagado por defecto: en un teléfono el ahorro es mínimo porque el juego ya es un archivo en memoria flash, así que no valía la pena el riesgo.
 - **Trampas, tarjetas de memoria y estados de guardado.** Menú de trampas, administrador completo de memory cards (crear, importar, exportar) y guardado/cargado rápido en cualquier momento.
 - **Logros (RetroAchievements).** Inicia sesión y juega por logros, con notificaciones dentro del juego.
 
@@ -112,6 +113,7 @@ Para contar un problema o pedir una mejora, usa la pestaña **[Issues](https://g
 - **El juego** que falla, y si te da igual con otro.
 - **Qué esperabas y qué pasó**: "se queda en pantalla negra", "va a 40% de velocidad", "el audio se corta", "se cierra solo al guardar".
 - **Si puedes, una captura** del HUD de rendimiento en pantalla (el interruptor está en Ajustes, sección "Cuenta y extras": "HUD de rendimiento").
+- **Y lo más útil de todo: el registro.** Si un juego se cierra solo o no arranca, abre Ajustes → "Cuenta y extras" → **Enviar registro de errores**. Cenit arma un archivo con tu modelo de celular, la versión y lo último que pasó antes del cierre, y te deja enviarlo por correo o adjuntarlo a la incidencia. Sin ese archivo, diagnosticar un cierre es adivinar; con él, casi siempre se ve la causa. Desde Android 11 no puedes sacar ese registro con un explorador de archivos — por eso el botón existe.
 
 Los reportes de juegos específicos son los más valiosos que existen para este proyecto: son la materia prima con la que se construye la tabla de rendimiento y el ajuste fino por marca de procesador. Si tu gama baja corre algo que antes era injugable, también vale la pena contarlo.
 
