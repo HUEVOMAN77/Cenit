@@ -6,6 +6,7 @@
 #include "MTVU.h"
 #include "VMManager.h"
 #include "Vif_Dynarec.h"
+#include "common/Timer.h" // Cenit 0.6.13: medición de espera WaitVU/ExecuteVU
 
 #include <thread>
 
@@ -123,6 +124,13 @@ void VU_Thread::Reset()
 	for (size_t i = 0; i < 4; ++i)
 		vu1Thread.vuCycles[i] = 0;
 	vu1Thread.mtvuInterrupts = 0;
+	// Cenit 0.6.13: las métricas de sincronía también parten de cero en cada
+	// arranque/reset, para que el delta que lee PerformanceMetrics nunca envuelva
+	// (u64) ni arrastre la sesión anterior.
+	m_waitvu_calls = 0;
+	m_waitvu_ns = 0;
+	m_execvu_calls = 0;
+	m_execvu_ns = 0;
 }
 
 void VU_Thread::ExecuteRingBuffer()
@@ -435,12 +443,28 @@ bool VU_Thread::IsDone()
 void VU_Thread::WaitVU()
 {
 	MTVU_LOG("MTVU - WaitVU!");
+	// Cenit 0.6.13: solo se mide con MTVU real (los call-sites ya llegan filtrados
+	// por THREAD_VU1, pero este guard extra garantiza que un juego sin VU1 en hilo
+	// no pague ni las dos lecturas de reloj). relaxed: métricas, no control.
+	if (!THREAD_VU1)
+	{
+		semaEvent.WaitForEmpty();
+		return;
+	}
+	const Common::Timer::Value t0 = Common::Timer::GetCurrentValue();
 	semaEvent.WaitForEmpty();
+	const Common::Timer::Value t1 = Common::Timer::GetCurrentValue();
+	m_waitvu_ns.fetch_add(static_cast<u64>(Common::Timer::ConvertValueToNanoseconds(t1 - t0)), std::memory_order_relaxed);
+	m_waitvu_calls.fetch_add(1, std::memory_order_relaxed);
 }
 
 void VU_Thread::ExecuteVU(u32 vu_addr, u32 vif_top, u32 vif_itop, u32 fbrst)
 {
 	MTVU_LOG("MTVU - ExecuteVU!");
+	// Cenit 0.6.13: ExecuteVU SOLO se alcanza por el camino MTVU (es el método del
+	// VU_Thread), así que medir aquí no castiga a juegos sin VU1 en hilo. Dos
+	// lecturas de reloj por programa VU (no por instrucción): coste despreciable.
+	const Common::Timer::Value t0 = Common::Timer::GetCurrentValue();
 	Get_MTVUChanges(); // Clear any pending interrupts
 	ReserveSpace(5);
 	Write(MTVU_VU_EXECUTE);
@@ -456,6 +480,9 @@ void VU_Thread::ExecuteVU(u32 vu_addr, u32 vif_top, u32 vif_itop, u32 fbrst)
 	cpuRegs.cycle += skip_cycles * EmuConfig.Speedhacks.EECycleSkip;
 	VU0.cycle += skip_cycles * EmuConfig.Speedhacks.EECycleSkip;
 	Get_MTVUChanges();
+	const Common::Timer::Value t1 = Common::Timer::GetCurrentValue();
+	m_execvu_ns.fetch_add(static_cast<u64>(Common::Timer::ConvertValueToNanoseconds(t1 - t0)), std::memory_order_relaxed);
+	m_execvu_calls.fetch_add(1, std::memory_order_relaxed);
 
 	if (!INSTANT_VU1)
 	{

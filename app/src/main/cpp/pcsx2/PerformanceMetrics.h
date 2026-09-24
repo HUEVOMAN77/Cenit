@@ -114,6 +114,21 @@ namespace PerformanceMetrics
 	double GetGPUAverageVSInvocations();
 	double GetGPUAveragePSInvocations();
 
+	/// Cenit 0.6.13: coste de la sincronía EE<->VU1 en la última ventana de
+	/// actualización (0.5 s). wait_ms = tiempo que el EE estuvo BLOQUEADO esperando
+	/// al VU1; wait_calls = cuántas veces. exec_ms = tiempo publicando trabajo.
+	/// Con esto se responde con números "¿el frame lento esperaba al VU1 o el VU1
+	/// estaba ocupado de verdad?" — la pregunta que la revisión de ingeniería pidió
+	/// responder antes de tocar ningún hack.
+	struct MtvuSyncStats
+	{
+		double wait_ms = 0.0;
+		u32 wait_calls = 0;
+		double exec_ms = 0.0;
+		u32 exec_calls = 0;
+	};
+	MtvuSyncStats GetMtvuSyncStats();
+
 	const FrameTimeHistory& GetFrameTimeHistory();
 	u32 GetFrameTimeHistoryPos();
 

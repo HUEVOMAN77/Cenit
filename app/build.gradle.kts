@@ -68,8 +68,8 @@ android {
         applicationId = "com.izzy2lost.psx2"
         minSdk = 26
         targetSdk = 36
-        versionCode = 48
-        versionName = "0.6.12"
+        versionCode = 49
+        versionName = "0.6.13"
 
         externalNativeBuild {
             cmake {
@@ -78,7 +78,13 @@ android {
                     "-DANDROID=true",
                     "-DCMAKE_BUILD_TYPE=Release",
                     "-DANDROID_STL=c++_static",
-                    "-DPCSX2_PROFILER=OFF"
+                    "-DPCSX2_PROFILER=OFF",
+                    // Cenit 0.6.13 (revisión de ingeniería, prioridad 4): el CI
+                    // necesita poder LEER la línea de compilación real de los
+                    // archivos calientes (microVU, iR5900) para auditar si de
+                    // verdad van con -O3/Release. Sin esta base no hay
+                    // compile_commands.json y la auditoría es a ciegas.
+                    "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
                 )
             }
         }

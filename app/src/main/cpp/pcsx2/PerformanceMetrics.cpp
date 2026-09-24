@@ -85,6 +85,17 @@ namespace PerformanceMetrics
 	static u32 s_presents_since_last_update = 0;
 	static double s_average_gpu_vs_invocations = 0.0;
 	static double s_average_gpu_ps_invocations = 0.0;
+
+	// Cenit 0.6.13: sincronía EE<->VU1. Los contadores crudos viven en VU_Thread
+	// (los escribe el hilo EE); aquí se muestrean por ventana para convertirlos en
+	// "cuánto esperó el EE al VU1 en los últimos 0.5 s". s_last_* son las lecturas
+	// del muestreo anterior; si MTVU se apaga o se resetea el hilo, se re-siembran
+	// para no reportar un delta gigante o negativo.
+	static u64 s_last_waitvu_ns = 0;
+	static u64 s_last_waitvu_calls = 0;
+	static u64 s_last_execvu_ns = 0;
+	static u64 s_last_execvu_calls = 0;
+	static MtvuSyncStats s_mtvu_sync;
 	static u64 s_accumulated_gpu_vs_invocations = 0;
 	static u64 s_accumulated_gpu_ps_invocations = 0;
 
@@ -117,6 +128,14 @@ namespace PerformanceMetrics
 
 		s_average_gpu_time = 0.0f;
 		s_gpu_usage = 0.0f;
+
+		// Cenit 0.6.13: limpiar también la sincronía y sus últimas lecturas, para
+		// que un nuevo VM no arrastre la ventana ni los crudos de la sesión previa.
+		s_mtvu_sync = {};
+		s_last_waitvu_ns = 0;
+		s_last_waitvu_calls = 0;
+		s_last_execvu_ns = 0;
+		s_last_execvu_calls = 0;
 
 		s_frame_number = 0;
 		s_session_timer.Reset();
@@ -218,6 +237,44 @@ namespace PerformanceMetrics
 		s_accumulated_gpu_vs_invocations = 0;
 		s_accumulated_gpu_ps_invocations = 0;
 
+		// Cenit 0.6.13 (prioridad 1 de la revisión de ingeniería): separar el
+		// tiempo que el EE PERDIÓ ESPERANDO al VU1 del que el VU1 estuvo ocupado.
+		// Sin este dato, subir hacks o mover hilos solo cambia el síntoma. Los
+		// crudos los escribe el hilo EE; aquí (hilo GS) solo se leen atómicos.
+		// OJO: se pregunta por THREAD_VU1 (un bool de EmuConfig, igual que hace el
+		// resto de esta función) y NO por vu1Thread.IsOpen(): eso leería el
+		// std::thread mientras el hilo EE lo arranca/apaga, una carrera real. Con
+		// MTVU apagado los crudos no avanzan y la ventana reporta ceros.
+		if (THREAD_VU1)
+		{
+			const u64 w_ns = vu1Thread.m_waitvu_ns.load(std::memory_order_relaxed);
+			const u64 w_calls = vu1Thread.m_waitvu_calls.load(std::memory_order_relaxed);
+			const u64 e_ns = vu1Thread.m_execvu_ns.load(std::memory_order_relaxed);
+			const u64 e_calls = vu1Thread.m_execvu_calls.load(std::memory_order_relaxed);
+
+			// Delta a prueba de reset: si el crudo bajó (VU_Thread::Reset al
+			// reiniciar el hilo o al cambiar de juego), la ventana cuenta cero y
+			// la siguiente siembra desde el valor nuevo.
+			s_mtvu_sync.wait_ms = (w_ns >= s_last_waitvu_ns) ? static_cast<double>(w_ns - s_last_waitvu_ns) * 1e-6 : 0.0;
+			s_mtvu_sync.wait_calls = (w_calls >= s_last_waitvu_calls) ? static_cast<u32>(w_calls - s_last_waitvu_calls) : 0u;
+			s_mtvu_sync.exec_ms = (e_ns >= s_last_execvu_ns) ? static_cast<double>(e_ns - s_last_execvu_ns) * 1e-6 : 0.0;
+			s_mtvu_sync.exec_calls = (e_calls >= s_last_execvu_calls) ? static_cast<u32>(e_calls - s_last_execvu_calls) : 0u;
+
+			s_last_waitvu_ns = w_ns;
+			s_last_waitvu_calls = w_calls;
+			s_last_execvu_ns = e_ns;
+			s_last_execvu_calls = e_calls;
+		}
+		else
+		{
+			// Con MTVU apagado no hay nada que reportar. Se dejan las últimas
+			// lecturas intactas a propósito: al volver MTVU, VU_Thread::Open() hace
+			// Reset() y los crudos caen a 0, y la guarda "crudo >= último" de arriba
+			// ya siembra sola la siguiente ventana. Ponerlos a 0 aquí daría un pico
+			// falso enorme en el primer muestreo tras reactivar.
+			s_mtvu_sync = {};
+		}
+
 		// prefer privileged register write based framerate detection, it's less likely to have false positives
 		if (s_gs_privileged_register_writes_since_last_update > 0 && !EmuConfig.Gamefixes.BlitInternalFPSHack)
 		{
@@ -313,6 +370,14 @@ namespace PerformanceMetrics
 				static_cast<float>(s_log_accum_frames) / s_log_accum_time, s_cpu_thread_usage,
 				s_gs_thread_usage, s_vu_thread_usage, s_gpu_usage,
 				static_cast<unsigned long long>(s_frame_number));
+			// Cenit 0.6.13: la pregunta que la revisión pidió poder responder con
+			// números — ¿el EE esperaba al VU1 o el VU1 trabajaba? — viaja ahora en
+			// el log de rendimiento, que es lo que llega en el reporte del usuario.
+			if (s_mtvu_sync.wait_calls > 0 || s_mtvu_sync.exec_calls > 0)
+			{
+				Console.WriteLn("PerfLog: MTVU sync | wait %.2f ms en %u llamadas | exec %.2f ms en %u",
+					s_mtvu_sync.wait_ms, s_mtvu_sync.wait_calls, s_mtvu_sync.exec_ms, s_mtvu_sync.exec_calls);
+			}
 			s_log_accum_time = 0.0f;
 			s_log_accum_frames = 0;
 		}
@@ -463,6 +528,11 @@ namespace PerformanceMetrics
 	float GetGPUAverageTime()
 	{
 		return s_average_gpu_time;
+	}
+
+	MtvuSyncStats GetMtvuSyncStats()
+	{
+		return s_mtvu_sync;
 	}
 
 	double GetGPUAverageVSInvocations()

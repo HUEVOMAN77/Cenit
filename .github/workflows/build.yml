@@ -51,6 +51,37 @@ jobs:
               if: github.event.inputs.build_type == 'release'
               run: ./gradlew assembleRelease
 
+            # Cenit 0.6.13 (revisión de ingeniería, prioridad 4): no basta con
+            # pedir CMAKE_BUILD_TYPE=Release; hay que VER la línea de compilación
+            # real de los archivos calientes (¿-O2 o -O3?, ¿LTO?, ¿exceptions?) y el
+            # tamaño del .so. Esto sale en el log del job y viaja a quien audite.
+            # continue-on-error: es diagnóstico, nunca debe tumbar un release.
+            - name: Volcar flags de compilación del core (diagnóstico)
+              if: github.event.inputs.build_type == 'release'
+              continue-on-error: true
+              run: |
+                  set +e
+                  CCJ=$(find "$GITHUB_WORKSPACE/app" -name compile_commands.json 2>/dev/null | head -1)
+                  echo "compile_commands.json: ${CCJ:-NO ENCONTRADO}"
+                  if [ -n "$CCJ" ]; then
+                    for FRAG in microVU-arm64 iR5900-arm64 MTVU PerformanceMetrics; do
+                      echo "=== flags de $FRAG ==="
+                      jq -r --arg f "$FRAG" \
+                        '.[] | select(.file | contains($f)) | .command' "$CCJ" 2>/dev/null \
+                        | head -1 | tr ' ' '\n' \
+                        | grep -E '^(-O|-flto|-fno-rtti|-fno-exceptions|-fexceptions|-frtti|-march|-target)' \
+                        | sort -u
+                    done
+                  else
+                    echo "sin compile_commands.json: se buscan los flags en el log de CMake"
+                    grep -R -h -E "CMAKE_CXX_FLAGS|BUILD_TYPE" "$GITHUB_WORKSPACE/app/build" 2>/dev/null | head -5
+                  fi
+                  echo "=== tamaños de librerías nativas en el APK ==="
+                  APK=$(find "$GITHUB_WORKSPACE/app/build/outputs/apk/release" -name '*.apk' | head -1)
+                  if [ -n "$APK" ]; then
+                    unzip -l "$APK" | grep -E '\.so$' | awk '{print $1, $4}' | sort -rn | head -15
+                  fi
+
             - name: Upload debug APK artifact
               if: github.event.inputs.build_type == 'debug'
               uses: actions/upload-artifact@v4

@@ -70,6 +70,7 @@ SmallString s_cpu_usage_vu_line;
 std::vector<SmallString> s_software_thread_lines;
 SmallString s_capture_line;
 SmallString s_gpu_usage_line;
+SmallString s_mtvu_sync_line; // Cenit 0.6.13: espera EE->VU1 visible en el HUD
 SmallString s_gpu_debug_info_line;
 SmallString s_gpu_stats_line;
 SmallString s_speed_icon;
@@ -478,6 +479,18 @@ __ri void ImGuiManager::DrawPerformanceOverlay(float& position_y, float scale, f
 					s_cpu_usage_vu_line.assign("VU: ");
 					FormatProcessorStat(s_cpu_usage_vu_line, PerformanceMetrics::GetVUThreadUsage(), PerformanceMetrics::GetVUThreadAverageTime());
 					DRAW_LINE(osd_font, font_size, s_cpu_usage_vu_line.c_str(), white_color);
+
+					// Cenit 0.6.13 (revisión de ingeniería, prioridad 1): la fila
+					// que responde "¿el frame se perdía ESPERANDO al VU1 o el VU1
+					// estaba ocupado?". Es la métrica que faltaba para decidir si
+					// vale la pena tocar sincronía/afinidad o no.
+					const PerformanceMetrics::MtvuSyncStats sync = PerformanceMetrics::GetMtvuSyncStats();
+					if (sync.wait_calls > 0 || sync.exec_calls > 0)
+					{
+						s_mtvu_sync_line.format("MTVU: espera {:.2f} ms ({}x) | publica {:.2f} ms ({}x)",
+							sync.wait_ms, sync.wait_calls, sync.exec_ms, sync.exec_calls);
+						DRAW_LINE(osd_font, font_size, s_mtvu_sync_line.c_str(), white_color);
+					}
 				}
 
 				const u32 gs_sw_threads = PerformanceMetrics::GetGSSWThreadCount();

@@ -50,6 +50,21 @@ public:
 	std::atomic<u64> gsLabel; // Used for GS Label command
 	std::atomic<u64> gsSignal; // Used for GS Signal command
 
+	// Cenit 0.6.13 (instrumentación pedida en la revisión de ingeniería):
+	// contadores baratos, en nanosegundos acumulados, del coste REAL de la
+	// sincronía EE<->VU1. Solo los escribe el hilo EE (WaitVU/ExecuteVU se llaman
+	// desde ahí, ver nota de la clase); los lee el hilo GS en
+	// PerformanceMetrics::Update. relaxed basta: son métricas, no control.
+	//  - m_waitvu_calls / m_waitvu_ns: cuántas veces el EE se vio OBLIGADO a
+	//    esperar al VU1 y cuánto tiempo perdió haciéndolo. Si esto domina, el
+	//    cuello es la sincronía, no el JIT.
+	//  - m_execvu_calls / m_execvu_ns: tiempo del EE publicando trabajo (no
+	//    bloqueado). Junto con el anterior separa "esperar" de "trabajar".
+	std::atomic<u64> m_waitvu_calls{0};
+	std::atomic<u64> m_waitvu_ns{0};
+	std::atomic<u64> m_execvu_calls{0};
+	std::atomic<u64> m_execvu_ns{0};
+
 	VU_Thread();
 	~VU_Thread();
 

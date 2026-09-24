@@ -54,8 +54,14 @@ final class DynamicResolutionGovernor {
     private static final int SLOW_TICKS_TO_DROP = 2;
     private static final int FAST_TICKS_TO_RAISE = 8;
     // Regidor v2: con la GPU por debajo de este uso, un retraso NO es de píxeles.
-    // 0 = métrica todavía sin medir (GS recién abierto): no se filtra nada.
     private static final float GPU_BOUND_MIN = 0.65f;
+    // 0.6.13: por debajo de esto la métrica de GPU NO es fiable como lectura de
+    // "GPU ociosa": es "aún no existe" (GetGPUUsage devuelve s_gpu_usage, que vale
+    // 0 hasta el primer Update con presents reales, y se queda 0 si el driver no
+    // reporta tiempo de GPU). Antes se usaba 0.05 solo dentro de la condición de
+    // CPU-bound, y su efecto colateral era recortar resolución con el dato
+    // ausente. Ahora es un estado explícito.
+    private static final float GPU_METRIC_MIN = 0.05f;
     // Escalones de PowerManager.THERMAL_STATUS_*: MODERATE y más arriba significan
     // que el SoC ya está recortando frecuencias por calor.
     private static final int THERMAL_BLOCK_RAISE = 2; // THERMAL_STATUS_MODERATE
@@ -116,6 +122,8 @@ final class DynamicResolutionGovernor {
     private int lastThermalStatus = -2;
     // Para no repetir el aviso de "es CPU, no GPU" en cada tick.
     private boolean cpuBoundLogged = false;
+    // 0.6.13: igual, pero para el aviso de "métrica de GPU ausente, no adivino".
+    private boolean gpuMetricLogged = false;
 
     // ------------------------------------------------------------------
     // v3: memoria, pre-corte térmico, turbo de cargas y evidencia de cuotas
@@ -463,9 +471,32 @@ final class DynamicResolutionGovernor {
             // v3: además, si el perfil ya aprendió que ESTE juego es CPU-bound,
             // el filtro se aplica con un umbral más suave (0.8*GPU_BOUND_MIN)
             // porque la evidencia es de la partida anterior, no de este segundo.
+            //
+            // 0.6.13 (fix del bug que encontró la revisión de ingeniería): hay que
+            // distinguir TRES estados, no dos. gpu <= GPU_METRIC_MIN significa
+            // "la métrica todavía no existe" (GS recién abierto, o driver que no
+            // reporta tiempo de GPU), NO "la GPU está casi ociosa". Antes, con
+            // gpu==0 la condición de CPU-bound fallaba y el código caía a BAJAR
+            // resolución: justo lo contrario de la intención, recortando imagen de
+            // gratis en un juego CPU-bound. Ahora, métrica inválida = mantener la
+            // escala en neutral (no subir ni bajar), hasta que llegue un dato real.
             final float bound = (profile != null && profile.cpuBound)
                     ? GPU_BOUND_MIN * 0.8f : GPU_BOUND_MIN;
-            if (gpu > 0.05f && gpu < bound) {
+            if (gpu <= GPU_METRIC_MIN) {
+                // Estado desconocido: no fiarse para recortar. Dejar slowTicks en
+                // cero para que, cuando la métrica despierte, se necesiten los
+                // ticks completos de retraso real antes de mover nada.
+                slowTicks = 0;
+                fastTicks = 0;
+                if (!gpuMetricLogged) {
+                    gpuMetricLogged = true;
+                    android.util.Log.i("DynRes", "behind at " + speed
+                            + "% but GPU metric unavailable (" + gpu + "): holding scale, not guessing");
+                }
+                return;
+            }
+            gpuMetricLogged = false;
+            if (gpu < bound) {
                 slowTicks = 0;
                 fastTicks = 0;
                 cpuBoundTicks++;

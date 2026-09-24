@@ -4131,6 +4131,29 @@ void VMManager::SetEmuThreadAffinities()
 	const u32 gs_index = s_processor_list[mtvu ? 2 : 1];
 	INFO_LOG("Processor order assignment: EE={}, VU={}, GS={}", ee_index, vu_index, gs_index);
 
+	// Cenit 0.6.13 (revisión de ingeniería, prioridad 3): el índice por sí solo no
+	// prueba que sea el core rápido — el orden viene de cpuinfo y un kernel/ROM
+	// mal reportado puede engañar. Se imprime también cluster y frecuencia máxima
+	// de cada procesador elegido, para que un log del teléfono responda "¿EE cayó
+	// de verdad en el prime?" sin adivinar. Mismo acceso que el código de abajo
+	// (cpuinfo_get_processor + cluster_id); null-guard por si el índice no está.
+	auto logPinnedCore = [](const char* role, u32 proc_id) {
+		const cpuinfo_processor* proc = cpuinfo_get_processor(proc_id);
+		if (!proc)
+		{
+			INFO_LOG("  {} -> processor {} (desconocido para cpuinfo)", role, proc_id);
+			return;
+		}
+		const u32 cluster = proc->cluster ? proc->cluster->cluster_id : 0xFFFFFFFFu;
+		const u64 freq = proc->core ? proc->core->frequency : 0u; // kHz
+		INFO_LOG("  {} -> processor {} | cluster {} | {:.0f} MHz", role, proc_id, cluster,
+			static_cast<double>(freq) / 1000.0);
+	};
+	logPinnedCore("EE", ee_index);
+	if (mtvu)
+		logPinnedCore("VU1", vu_index);
+	logPinnedCore("GS", gs_index);
+
 	const u64 ee_affinity = static_cast<u64>(1) << ee_index;
 	INFO_LOG("  EE thread is on processor {} (0x{:x})", ee_index, ee_affinity);
 	s_vm_thread_handle.SetAffinity(ee_affinity);
