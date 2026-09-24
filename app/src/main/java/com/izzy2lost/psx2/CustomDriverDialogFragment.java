@@ -103,7 +103,7 @@ public class CustomDriverDialogFragment extends DialogFragment {
             CustomDriverManager.setFallbackNotice(context,
                     "El driver «" + selected.name + "» cerró " + (gameLabel == null ? "este juego" : gameLabel)
                             + " al arrancar la última vez. Para este juego Cenit usó el driver del sistema."
-                            + " Puedes forzar el driver otra vez en «Controlador gráfico personalizado»."
+                            + " Puedes forzarlo otra vez con el botón «Forzar otra vez el driver seleccionado»."
                             + " Si vuelve a cerrarse, envía el reporte: ahora queda la señal exacta del choque.");
             CustomDriverManager.clearAttempt(context);
             CustomDriverManager.applyToNative(context, null);
