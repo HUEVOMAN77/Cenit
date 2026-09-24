@@ -125,11 +125,15 @@ public class CustomDriverDialogFragment extends DialogFragment {
                 editor.remove(PREF_CUSTOM_DRIVER_ID).apply();
             } else {
                 final String picked = installedDrivers.get(position - 1).id;
+                final String previous = getSelectedDriverId(ctx);
                 editor.putString(PREF_CUSTOM_DRIVER_ID, picked).apply();
-                // Cenit 0.6.8: elegir un driver otra vez ES la forma de decirle a
-                // Cenit "inténtalo de nuevo". Se limpian los fracasos anotados para
-                // él, si no, el guardarraya lo seguiría excluyendo en silencio.
-                CustomDriverManager.clearFailuresForDriver(ctx, picked);
+                // Cenit 0.6.10: el historial de fallos SOLO se borra cuando el
+                // usuario cambia a un driver distinto del que estaba activo. En
+                // 0.6.8 se limpiaba con solo tocar el diálogo — y como la costumbre
+                // es re-picar el mismo driver antes de entrar al juego, el guardarraya
+                // se quedaba sin memoria justo antes de cada intento.
+                if (previous == null || !previous.equals(picked))
+                    CustomDriverManager.clearFailuresForDriver(ctx, picked);
             }
             applyStoredSelection(ctx);
             Toast.makeText(ctx, "Se aplica al iniciar el próximo juego", Toast.LENGTH_SHORT).show();

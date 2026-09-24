@@ -143,7 +143,13 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
     // para el arranque de un juego y sus cinemáticas de apertura, que es donde el
     // driver Turnip mataba a Shadow of the Colossus.
     private static final int DRIVER_GRACE_TICKS = 40;
-    private int bootGoodTicks = 0;
+    private volatile int bootGoodTicks = 0;
+    // Cuándo empezó el último intento de arranque: un fallo de archivo (ISO roto,
+    // ilegible) devuelve en milisegundos y NO es culpa del driver.
+    private volatile long mVmStartMs = 0L;
+    // Salida deliberada en curso (apagar, retroceder, cerrar la app). Sin esta
+    // marca, cerrar la app durante la ventana de gracia culparía al driver.
+    private volatile boolean mIntentionalExit = false;
     private final android.os.Handler mHomeHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable mVmEndWatcher = new Runnable() {
         @Override
@@ -155,11 +161,10 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
             }
             if (!isThread()) {
                 // El juego terminó (salida, cierre o fallo): se vuelve al inicio.
-                // Cenit 0.6.8: si el usuario apagó el juego, returnToHome() ya
-                // confirmó y limpió la marca del driver, y además quita este
-                // vigilante; o sea que llegar aquí con la VM apagada significa
-                // cierre espontáneo. La marca NO se toca: es la evidencia que la
-                // cosecha del próximo arranque usa para atribuir el fallo al driver.
+                // Cenit 0.6.10: la atribución del driver ya no se hace aquí; corre
+                // a cargo del finally del hilo de emulación, que SIEMPRE se ejecuta.
+                // Este hueco se apagaba antes de ser observado (applyHomeScreenState
+                // quita los callbacks), y por eso el fallo quedaba sin atribuir.
                 bootGoodTicks = 0;
                 m_szGamefile = "";
                 applyHomeScreenState("emulation stopped");
@@ -177,6 +182,10 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                     if (bootGoodTicks >= DRIVER_GRACE_TICKS) {
                         CustomDriverManager.confirmBoot(MainActivity.this);
                         bootGoodTicks = 0;
+                        // El driver ya demostró que aguanta el arranque: se le
+                        // devuelve al juego la resolución dinámica que se le retuvo
+                        // durante la ventana de gracia.
+                        if (mDynRes != null && isThread()) mDynRes.start();
                     }
                 } else {
                     bootGoodTicks = 0;
@@ -1181,8 +1190,24 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                 }
             });
         }
-        if (playing) mDynRes.start();
-        else mDynRes.stop();
+        // El regidor de resolución solo mide con un juego delante. Con un driver
+        // personalizado activo NO arranca (Cenit 0.6.10): cambiar la resolución
+        // interna en caliente obliga a recrear el swapchain, y los drivers de
+        // terceros —Turnip incluido— son notoriamente frágiles justo ahí. Si el
+        // juego se cerraba solo con driver propio y con la resolución quieta se
+        // mantiene en pie, esta es la causa; si no, el guardarraya lo registra
+        // igual y el driver queda excluido para ese juego.
+        if (playing) {
+            if (CustomDriverManager.hasPendingAttempt(getApplicationContext())) {
+                mDynRes.stop();
+                android.util.Log.i("CustomDriverManager",
+                        "dynamic resolution held off while a custom driver attempt is active");
+            } else {
+                mDynRes.start();
+            }
+        } else {
+            mDynRes.stop();
+        }
 
         if (showHome) refreshHomeScreenData();
         android.util.Log.d("HomeScreen", reason + ": home=" + showHome + " playing=" + playing);
@@ -1244,6 +1269,7 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         setFastForwardEnabled(false);
         mUserPauseRequested = false;
         mEmulationRestarting = true;
+        mIntentionalExit = true;
         mHomeHandler.removeCallbacks(mVmEndWatcher);
         // Cenit 0.6.8: salida deliberada. Si el guardarraya de drivers tenía un
         // intento pendiente, aquí se limpia: el usuario se fue, el driver no falló.
@@ -2568,6 +2594,11 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                         Toast.LENGTH_LONG).show());
             }
             NativeApp.prepareVMStart();
+            // Cenit 0.6.10: arranque nuevo, contador nuevo. Sin esto quedarían
+            // residuos del juego anterior y el guardarraya juzgaría mal.
+            bootGoodTicks = 0;
+            mVmStartMs = System.currentTimeMillis();
+            mIntentionalExit = false; // arranque nuevo: ya no estamos saliendo
 
             Thread emulationThread = new Thread(() -> {
                 try {
@@ -2590,6 +2621,20 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                         if (mEmulationThread == Thread.currentThread()) {
                             mEmulationThread = null;
                         }
+                    }
+                    // Cenit 0.6.10: la atribución del driver se hace AQUÍ y no solo
+                    // en el vigilante. Este finally siempre corre cuando el VM muere
+                    // por cualquier vía; el vigilante, en cambio, se apaga antes de
+                    // observar el hueco (applyHomeScreenState quita sus callbacks),
+                    // así que en 0.6.8/0.6.9 el fallo quedaba sin atribuir y el
+                    // "carga y se sale" se repetía infinito. Solo cuenta si el arranque
+                    // no superó la ventana de gracia y no fue un reinicio programado.
+                    if (!mEmulationRestarting && !mIntentionalExit && bootGoodTicks < DRIVER_GRACE_TICKS
+                            && mVmStartMs > 0L
+                            && System.currentTimeMillis() - mVmStartMs > 1500L
+                            && CustomDriverManager.hasPendingAttempt(getApplicationContext())) {
+                        CustomDriverManager.markPendingAttemptFailed(getApplicationContext());
+                        captureCrashEvidence("vm-thread-died");
                     }
                     // El juego terminó por sí solo (salida, cierre o fallo). Se vuelve
                     // al inicio, salvo que sea el hueco de un reinicio programado.
@@ -3739,6 +3784,10 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                         .append(LOGCAT_LINES).append(" líneas de Cenit) ===\n");
                 any |= appendLogcatTail(body);
 
+                // Y las fotos tomadas EN EL INSTANTE del cierre: son las únicas que
+                // garantizan ver la señal nativa antes de que Android la borre.
+                any |= appendCrashEvidence(body);
+
                 File outDir = new File(getCacheDir(), "logs");
                 if (!any) {
                     error = "vacío";
@@ -3790,6 +3839,84 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
     /** Ventana del registro del sistema que se lee. Android ya limita a un proceso
      *  a sus propias líneas, así que no se filtra por app: solo por etiqueta. */
     private static final int LOGCAT_LINES = 1200;
+
+    /**
+     * Cenit 0.6.10: guarda una foto del registro del sistema EN EL INSTANTE del
+     * cierre. Android conserva las señales nativas (SIGSEGV/SIGABRT y la librería
+     * culpable, incluidas los .so del driver Turnip) en un búfer que rota en
+     * minutos; media hora después ya no está. La foto vive en caché y el botón
+     * "Enviar registro de errores" la adjunta junto con lo demás.
+     */
+    private void captureCrashEvidence(String reason) {
+        new Thread(() -> {
+            try {
+                File dir = new File(getCacheDir(), "evidencia");
+                if (!dir.isDirectory() && !dir.mkdirs()) return;
+                // Poca cosa: solo lo último, que es donde está el cierre.
+                Process proc = new ProcessBuilder("logcat", "-d", "-v", "time")
+                        .redirectErrorStream(true).start();
+                java.util.List<String> lines = new ArrayList<>();
+                try (BufferedReader r = new BufferedReader(new java.io.InputStreamReader(
+                        proc.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = r.readLine()) != null) lines.add(line);
+                }
+                proc.waitFor();
+                proc.destroy();
+                int from = Math.max(0, lines.size() - 1500);
+                File out = new File(dir, "cierre-" + System.currentTimeMillis() + ".txt");
+                try (Writer w = new java.io.OutputStreamWriter(
+                        new FileOutputStream(out), java.nio.charset.StandardCharsets.UTF_8);
+                     PrintWriter pw = new PrintWriter(w)) {
+                    pw.println("=== EVIDENCIA DEL CIERRE (" + reason + ") ===");
+                    for (int i = from; i < lines.size(); i++) pw.println(lines.get(i));
+                }
+                // Solo se guardan las tres últimas: no se llena la caché.
+                File[] all = dir.listFiles();
+                if (all != null && all.length > 3) {
+                    java.util.Arrays.sort(all, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+                    for (int i = 3; i < all.length; i++) all[i].delete();
+                }
+                android.util.Log.i("CustomDriverManager", "crash evidence saved: " + out.getName());
+            } catch (Throwable ignored) {
+            }
+        }, "CrashEvidence").start();
+    }
+
+    /** Añade al reporte las fotos de cierre guardadas por captureCrashEvidence. */
+    private boolean appendCrashEvidence(StringBuilder into) {
+        File dir = new File(getCacheDir(), "evidencia");
+        File[] all = dir.listFiles();
+        if (all == null || all.length == 0) return false;
+        java.util.Arrays.sort(all, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+        boolean any = false;
+        for (int i = 0; i < Math.min(2, all.length); i++) {
+            into.append("\n=== EVIDENCIA GUARDADA EN EL CIERRE (").append(all[i].getName())
+                    .append(", ")
+                    .append(new java.text.SimpleDateFormat("dd/MM HH:mm:ss", java.util.Locale.ROOT)
+                            .format(new java.util.Date(all[i].lastModified())))
+                    .append(") ===\n");
+            any |= appendTailLimited(all[i], into, 600);
+        }
+        return any;
+    }
+
+    /** Últimas N líneas de un archivo, sin cargarlo entero. */
+    private boolean appendTailLimited(File f, StringBuilder into, int maxLines) {
+        Deque<String> tail = new ArrayDeque<>(maxLines);
+        try (BufferedReader r = new BufferedReader(new FileReader(f))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                tail.addLast(line);
+                while (tail.size() > maxLines) tail.removeFirst();
+            }
+        } catch (Throwable t) {
+            return false;
+        }
+        if (tail.isEmpty()) return false;
+        for (String line : tail) into.append(line).append('\n');
+        return true;
+    }
 
     /**
      * Vuelca las últimas líneas del registro del sistema que pertenecen a Cenit.
