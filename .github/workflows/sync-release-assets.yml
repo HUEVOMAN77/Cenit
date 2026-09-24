@@ -1,0 +1,76 @@
+name: Sync release assets (APK + driver together, always)
+
+# Regla pedida por el usuario (2026-09-24): toda release de Cenit debe
+# mostrar SIEMPRE los dos archivos — el APK del emulador y el último
+# driver-pack Turnip — independientemente de cuál de los dos se haya
+# publicado en ese momento. Así, desde la página que el usuario abra,
+# puede instalar el emulador e importar el driver sin buscar más.
+#
+# Es idempotente: si el asset ya existe en la release, no lo duplica.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Emparejar APK y driver en ambas releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          REPO="$GITHUB_REPOSITORY"
+
+          latest_release_with_prefix() {
+            # Tag más nuevo cuyo nombre empieza por $1 (gh lista al revés de la
+            # cronología; JSON evita depender del orden de columnas del TSV).
+            gh release list -R "$REPO" --limit 60 --json tagName --jq '.[].tagName' \
+              | grep "^$1" | head -1
+          }
+
+          has_asset() {
+            gh release view "$1" -R "$REPO" --json assets \
+              | jq -r '.assets | map(.name) | .[]' | grep -qx "$2"
+          }
+
+          if [[ "$TAG" == base-* ]]; then
+            # Release del emulador: asegurar que el último driver esté al lado.
+            DRV_TAG="$(latest_release_with_prefix cenit-turnip- || true)"
+            if [[ -n "${DRV_TAG:-}" ]]; then
+              DRV_ZIP=$(gh release view "$DRV_TAG" -R "$REPO" --json assets \
+                -q '.assets | map(.name) | map(select(startswith("Cenit-Turnip-"))) | .[0] // ""')
+              if [[ -n "$DRV_ZIP" ]] && ! has_asset "$TAG" "$DRV_ZIP"; then
+                gh release download "$DRV_TAG" -R "$REPO" -p "$DRV_ZIP" -D /tmp
+                gh release upload "$TAG" "/tmp/$DRV_ZIP" -R "$REPO" --clobber
+                echo "driver $DRV_ZIP adjuntado a $TAG"
+              else
+                echo "driver ya presente o no existe todavía"
+              fi
+            else
+              echo "aún no hay release de driver; nada que emparejar"
+            fi
+          elif [[ "$TAG" == cenit-turnip-* ]]; then
+            # Release del driver: asegurar que el último APK esté al lado.
+            APK_TAG="$(latest_release_with_prefix base- || true)"
+            if [[ -n "${APK_TAG:-}" ]]; then
+              APK=$(gh release view "$APK_TAG" -R "$REPO" --json assets \
+                -q '.assets | map(.name) | map(select(endswith(".apk"))) | .[0] // ""')
+              if [[ -n "$APK" ]] && ! has_asset "$TAG" "$APK"; then
+                gh release download "$APK_TAG" -R "$REPO" -p "$APK" -D /tmp
+                gh release upload "$TAG" "/tmp/$APK" -R "$REPO" --clobber
+                echo "APK $APK (de $APK_TAG) adjuntado a $TAG"
+              else
+                echo "APK ya presente o no existe todavía"
+              fi
+            else
+              echo "aún no hay release base-*; nada que emparejar"
+            fi
+          else
+            echo "tag $TAG no es de emulador ni de driver; salgo"
+          fi
