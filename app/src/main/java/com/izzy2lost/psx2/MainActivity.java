@@ -48,6 +48,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.documentfile.provider.DocumentFile;
 import androidx.constraintlayout.widget.ConstraintLayout;
 import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
 import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.core.view.GravityCompat;
 import androidx.activity.OnBackPressedCallback;
@@ -63,6 +64,13 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.PrintWriter;
+import java.io.Writer;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.ArrayList;
 import android.provider.OpenableColumns;
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -949,6 +957,13 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
 
                     @Override public void onOpenAbout() {
                         try { showAboutDialog(); } catch (Throwable ignored) {}
+                    }
+
+                    @Override public void onShareLogs() {
+                        try { shareEmulationLogs(); } catch (Throwable t) {
+                            Toast.makeText(getApplicationContext(),
+                                    "No se pudo preparar el registro.", Toast.LENGTH_SHORT).show();
+                        }
                     }
 
                     @Override public void onOpenControllerTest() {
@@ -1958,6 +1973,13 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                 NativeApp.defaultFrameLatencyQueue()));
         NativeApp.setTexturePreloading(prefs.getInt("texture_preload",
                 NativeApp.defaultTexturePreloading()));
+        // Cenit 0.6.7: los dos speedhacks que antes no tenían interruptor. Misma
+        // razón que los de arriba — el perfil los escribe en la capa base en cada
+        // arranque, así que la preferencia guardada se re-aplica siempre. El
+        // default de Fast CDVD es apagado (rompe juegos que leen sincronizado);
+        // el de MTVU pregunta al núcleo, no a Java, para no divergir del perfil.
+        NativeApp.setFastCDVD(prefs.getBoolean("fast_cdvd", false));
+        NativeApp.setMTVU(prefs.getBoolean("mtvu", NativeApp.defaultMTVU()));
         if (mDynRes != null) mDynRes.reset();
         AudioOutputPreference.apply(this);
     }
@@ -3545,6 +3567,163 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
     // Call this method when game starts/stops to update button visibility
     public void updateGameState() {
         updatePausePlayButton();
+    }
+
+    /**
+     * Cenit 0.6.7. Arma un único archivo de texto con cabecera del dispositivo y
+     * el final del registro de esta sesión y de la anterior, y lo abre en el
+     * selector de compartir.
+     *
+     * Por qué no se adjunta emulog.txt tal cual: vive en Android/data/, que el
+     * usuario no puede abrir; puede crecer a varios megabytes y un volcado entero
+     * no se puede ni pegar en una incidencia; y el cierre que hay que diagnosticar
+     * ocurre al arrancar el juego, así que lo que importa es el final. Se leen las
+     * últimas líneas de cada sesión, que es donde está la causa.
+     */
+    private void shareEmulationLogs() {
+        final java.util.Map<String, String> snapshot = new java.util.LinkedHashMap<>();
+        snapshot.put("modelo", android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL);
+        snapshot.put("android", android.os.Build.VERSION.RELEASE + " (API " + android.os.Build.VERSION.SDK_INT + ")");
+        snapshot.put("abi", android.os.Build.SUPPORTED_ABIS != null && android.os.Build.SUPPORTED_ABIS.length > 0
+                ? String.join(", ", android.os.Build.SUPPORTED_ABIS) : "?");
+        snapshot.put("núcleos", String.valueOf(Runtime.getRuntime().availableProcessors()));
+        snapshot.put("ram", String.valueOf(Runtime.getRuntime().maxMemory() / (1024 * 1024)) + " MB máx. por app");
+        String ver = "?";
+        try {
+            ver = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Throwable ignored) {
+        }
+        snapshot.put("cenit", ver);
+        snapshot.put("juego", safeCurrentGameLabel());
+        final String deviceHeader = formatDeviceHeader(snapshot);
+        // Captura para el lambda de abajo: `ver` se reasigna arriba, así que no es
+        // efectivamente final y Java rechazaría usarlo dentro de la Runnable.
+        final String reportVersion = ver;
+
+        // El trabajo de disco va fuera del hilo de UI: emulog.txt puede ser grande.
+        new Thread(() -> {
+            String path = null;
+            String error = null;
+            try {
+                File logDir = null;
+                final String nativeDir = NativeApp.safeGetLogDirectory();
+                if (nativeDir != null) {
+                    File d = new File(nativeDir);
+                    if (d.isDirectory()) logDir = d;
+                }
+                if (logDir == null) {
+                    File ext = getExternalFilesDir(null);
+                    if (ext != null) {
+                        File d = new File(ext, "logs");
+                        if (d.isDirectory()) logDir = d;
+                    }
+                }
+                if (logDir == null) {
+                    error = "sin";
+                } else {
+                    File cur = new File(logDir, "emulog.txt");
+                    File prev = new File(logDir, "emulog.prev.txt");
+                    StringBuilder body = new StringBuilder();
+                    boolean any = false;
+                    if (prev.isFile()) {
+                        body.append("=== SESIÓN ANTERIOR (se cerró; las últimas ")
+                                .append(LOG_TAIL_LINES).append(" líneas) ===\n");
+                        any |= appendTail(prev, body);
+                        body.append('\n');
+                    }
+                    if (cur.isFile()) {
+                        body.append("=== SESIÓN ACTUAL (últimas ")
+                                .append(LOG_TAIL_LINES).append(" líneas) ===\n");
+                        any |= appendTail(cur, body);
+                    }
+                    if (!any) {
+                        error = "vacío";
+                    } else {
+                        File outDir = new File(getCacheDir(), "logs");
+                        if (!outDir.isDirectory() && !outDir.mkdirs()) {
+                            error = "caché";
+                        } else {
+                            File out = new File(outDir, "cenit-reporte.txt");
+                            try (Writer w = new java.io.OutputStreamWriter(
+                                    new FileOutputStream(out), java.nio.charset.StandardCharsets.UTF_8);
+                                 PrintWriter pw = new PrintWriter(w)) {
+                                pw.print(deviceHeader);
+                                pw.print(body);
+                            }
+                            path = out.getAbsolutePath();
+                        }
+                    }
+                }
+            } catch (Throwable t) {
+                error = "error";
+            }
+
+            final String ready = path;
+            final String why = error;
+            runOnUiThread(() -> {
+                if (ready == null) {
+                    Toast.makeText(getApplicationContext(),
+                            "Aún no hay registro que enviar" + ("sin".equals(why) || "vacío".equals(why)
+                                    ? ": inténtalo justo después de que el juego se cierre." : "."),
+                            Toast.LENGTH_LONG).show();
+                    return;
+                }
+                try {
+                    Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", new File(ready));
+                    Intent send = new Intent(Intent.ACTION_SEND);
+                    send.setType("text/plain");
+                    send.putExtra(Intent.EXTRA_STREAM, uri);
+                    send.putExtra(Intent.EXTRA_SUBJECT, "Reporte de Cenit " + reportVersion);
+                    send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    startActivity(Intent.createChooser(send, "Enviar registro de errores"));
+                } catch (Throwable t) {
+                    Toast.makeText(getApplicationContext(),
+                            "No se pudo abrir el selector para compartir.", Toast.LENGTH_SHORT).show();
+                }
+            });
+        }).start();
+    }
+
+    /** Últimas LOG_TAIL_LINES líneas de un archivo, sin cargarlo entero en memoria. */
+    private static final int LOG_TAIL_LINES = 400;
+
+    private boolean appendTail(File f, StringBuilder into) {
+        Deque<String> tail = new ArrayDeque<>(LOG_TAIL_LINES);
+        try (BufferedReader r = new BufferedReader(new FileReader(f))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                tail.addLast(line);
+                if (tail.size() > LOG_TAIL_LINES) tail.removeFirst();
+            }
+        } catch (Throwable t) {
+            return false;
+        }
+        if (tail.isEmpty()) return false;
+        for (String line : tail) into.append(line).append('\n');
+        return true;
+    }
+
+    private static String formatDeviceHeader(java.util.Map<String, String> info) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Reporte de Cenit\n");
+        java.util.List<String> keys = new ArrayList<>(info.keySet());
+        java.util.Collections.sort(keys);
+        for (String k : keys) sb.append("  ").append(k).append(": ").append(info.get(k)).append('\n');
+        sb.append('\n');
+        return sb.toString();
+    }
+
+    /** Nombre/serial del juego en curso para la cabecera, sin exponer rutas. */
+    private String safeCurrentGameLabel() {
+        try {
+            String t = NativeApp.getPauseGameTitle();
+            if (t != null && !t.isEmpty()) {
+                String s = NativeApp.getPauseGameSerial();
+                return (s != null && !s.isEmpty()) ? t + " " + s : t;
+            }
+        } catch (Throwable ignored) {
+        }
+        return "ninguno";
     }
 
     public void showAboutDialog() {

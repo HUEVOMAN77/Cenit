@@ -47,6 +47,8 @@ public final class SettingsScreenController {
         void onOpenMemoryCards();
         void onOpenAchievements();
         void onOpenAbout();
+        /** Copia el registro de emulación a una URI compartible y abre el selector. */
+        void onShareLogs();
         void onOpenControllerTest();
         void onOpenSetupWizard();
         void onOpenGamesFolders();
@@ -257,6 +259,17 @@ public final class SettingsScreenController {
         toggle(R.id.set_sw_pinning, "thread_pinning", true,
                 checked -> NativeApp.setThreadPinningAsync(checked));
 
+        // Cenit 0.6.7: los dos speedhacks que el perfil aplicaba en silencio.
+        // Fast CDVD cambia de "forzado encendido" a "apagado por defecto con
+        // interruptor", porque era la causa más probable del cierre de Shadow of
+        // the Colossus al arrancar. MTVU conserva el default por hardware, pero
+        // ahora se puede apagar sin recompilar. Igual que el pinning: la
+        // preferencia se re-aplica en cada arranque (MainActivity).
+        toggle(R.id.set_sw_fastcdvd, "fast_cdvd", false,
+                checked -> NativeApp.setFastCDVDAsync(checked));
+        toggle(R.id.set_sw_mtvu, "mtvu", NativeApp.defaultMTVU(),
+                checked -> NativeApp.setMTVUAsync(checked));
+
         // La posición del spinner ES el valor de la clave (ver arrays.xml). Como
         // con medio píxel y cuotas: el primer disparo del adaptador se ADOPTA sin
         // escribir, para no guardar "Óptima" en el teléfono de todo el mundo.
@@ -462,6 +475,7 @@ public final class SettingsScreenController {
         click(R.id.set_btn_setup, host::onOpenSetupWizard);
         click(R.id.set_btn_achievements, host::onOpenAchievements);
         click(R.id.set_btn_about, host::onOpenAbout);
+        click(R.id.set_btn_send_log, host::onShareLogs);
 
         MaterialSwitch autoCovers = root.findViewById(R.id.set_sw_auto_covers);
         if (autoCovers != null) {
@@ -546,6 +560,8 @@ public final class SettingsScreenController {
         check(R.id.set_sw_adaptive, prefs.getBoolean("adaptive_perf", true));
         check(R.id.set_sw_autoturbo, prefs.getBoolean("auto_turbo", false));
         check(R.id.set_sw_pinning, prefs.getBoolean("thread_pinning", true));
+        check(R.id.set_sw_fastcdvd, prefs.getBoolean("fast_cdvd", false));
+        check(R.id.set_sw_mtvu, prefs.getBoolean("mtvu", NativeApp.defaultMTVU()));
         setSpinner(R.id.set_sp_framequeue,
                 prefs.getInt("frame_queue", NativeApp.defaultFrameLatencyQueue()));
         setSpinner(R.id.set_sp_preload,

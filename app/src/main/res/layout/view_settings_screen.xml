@@ -311,6 +311,24 @@
                                 style="@style/Cenit.Settings.Caption"
                                 android:text="Mantiene el motor del juego y los gráficos en los núcleos potentes del teléfono, sin que el sistema los mueva a los economizados a mitad de partida. Apágalo solo para diagnosticar: si algo iba mejor sin esto, quítalo." />
 
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/set_sw_fastcdvd"
+                                style="@style/Cenit.Settings.Switch"
+                                android:text="Lectura de disco acelerada" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Recorta la espera simulada del DVD. En un teléfono casi no se gana nada con esto (el disco ya es un archivo en memoria flash) y sí rompe juegos que leen sincronizado, como Shadow of the Colossus, que se cierra al arrancar. Apagado por defecto; enciéndelo solo si un juego concreto lo pide." />
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/set_sw_mtvu"
+                                style="@style/Cenit.Settings.Switch"
+                                android:text="VU1 en hilo aparte (MTVU)" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Reparte el trabajo del vector gráfico a un segundo núcleo. Suele dar más cuadros por segundo en teléfonos de 3 núcleos o más, pero el propio motor avisa de que algunos juegos se cuelgan con esto encendido. Si uno no arranca, pruébalo apagado." />
+
                             <TextView
                                 style="@style/Cenit.Settings.FieldLabel"
                                 android:text="Cola de cuadros" />
@@ -900,6 +918,16 @@
                                 style="@style/Cenit.Settings.ActionRow"
                                 android:text="Acerca de Cenit"
                                 app:icon="@drawable/info_24px" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/set_btn_send_log"
+                                style="@style/Cenit.Settings.ActionRow"
+                                android:text="Enviar registro de errores"
+                                app:icon="@drawable/data_table_24px" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Adjunta lo que Cenit apuntó mientras jugabas, incluido el cierre inesperado de la sesión anterior. Sirve para reportar un juego que no arranca: sin ese archivo, el diagnóstico es una suposición." />
 
                             <com.google.android.material.materialswitch.MaterialSwitch
                                 android:id="@+id/set_sw_dev_hud"

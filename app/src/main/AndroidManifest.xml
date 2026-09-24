@@ -68,6 +68,19 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Cenit 0.6.7: único fin, poder adjuntar emulog.txt a un correo o a la
+             incidencia de GitHub. Expone exclusivamente cache/logs/, la carpeta a
+             la que la propia app copia el registro para compartirlo. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>

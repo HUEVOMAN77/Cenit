@@ -229,6 +229,39 @@ public class NativeApp {
     public static int defaultTexturePreloading() {
         return safeGetDevicePerformanceTier() == 0 ? 1 : 2;
     }
+    // --- Cenit 0.6.7: los dos speedhacks que el perfil dejaba sin interruptor --
+    // Fast CDVD quita la latencia de lectura del DVD. En un teléfono el disco es
+    // un archivo en memoria flash, así que no hay búsqueda real que ahorrar:
+    // casi no gana nada y sí rompe juegos que leen sincronizado (Shadow of the
+    // Colossus muere al arrancar con esto encendido). Default APAGADO.
+    public static native void setFastCDVD(boolean enabled);
+    public static void setFastCDVDAsync(boolean enabled) {
+        runNativeSettingAsync("setFastCDVD", () -> setFastCDVD(enabled));
+    }
+    // MTVU pasa el VU1 a un hilo propio. Es una ganancia grande en 3+ núcleos,
+    // pero el propio motor avisa que "algunos juegos son incompatibles y pueden
+    // colgarse". Default encendido solo si hay 3+ núcleos, igual que el perfil.
+    public static native void setMTVU(boolean enabled);
+    public static void setMTVUAsync(boolean enabled) {
+        runNativeSettingAsync("setMTVU", () -> setMTVU(enabled));
+    }
+    public static boolean defaultMTVU() {
+        // Misma pregunta que hace el perfil en C++ (std::thread::hardware_concurrency()
+        // >= 3), respondida por el mismo sitio: si Java contara los núcleos por su
+        // cuenta, un desacuerdo escribiría un default distinto al del núcleo.
+        if (hasNoNativeBinary) return false;
+        try { return coresAllowMTVU(); } catch (Throwable t) { return false; }
+    }
+    public static native boolean coresAllowMTVU();
+    public static native String getLogDirectory();
+    /** Carpeta de logs según el núcleo, o null si el binario nativo no está. */
+    public static String safeGetLogDirectory() {
+        if (hasNoNativeBinary) return null;
+        try {
+            String d = getLogDirectory();
+            return (d == null || d.isEmpty()) ? null : d;
+        } catch (Throwable t) { return null; }
+    }
     public static int safeGetDevicePerformanceTier() {
         if (hasNoNativeBinary) return 0;
         try { return getDevicePerformanceTier(); } catch (Throwable t) { return 0; }

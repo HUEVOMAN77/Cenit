@@ -151,7 +151,18 @@ static void ApplyHardwarePerformanceProfile()
     //   IntcStat / WaitLoop  - safe on effectively every game, big EE win.
     //   vuFlagHack           - microVU flag stall skip; needs no MTVU.
     //   vu1Instant           - instant VU1 transfer when VU1 is not threaded.
-    //   fastCDVD             - removes fake disc-read latency from ISO reads.
+    //   fastCDVD             - REMOVED from the forced set in 0.6.7. It deletes
+    //                          the emulated DVD seek latency, and on a phone the
+    //                          disc is an ISO on flash storage: there is no real
+    //                          seek to win back, so the "speedup" is close to
+    //                          zero — while the latency it removes IS part of the
+    //                          pacing some games expect. Shadow of the Colossus
+    //                          streams its FMV and opening data straight off the
+    //                          DVD and dies on startup with it on (the engine
+    //                          itself warns "this may break games",
+    //                          VMManager.cpp:3633). Upstream default is off; we
+    //                          were overriding it for a gain that does not exist
+    //                          on this hardware. It stays available as a switch.
     //   vuThread (MTVU)      - the hardware-dependent defaults already enable it
     //                          for >=3-core SoCs and turn on thread pinning on
     //                          big.LITTLE (that is what keeps the EE/VU threads
@@ -160,7 +171,7 @@ static void ApplyHardwarePerformanceProfile()
     s_settings_interface.SetBoolValue("EmuCore/Speedhacks", "WaitLoop", true);
     s_settings_interface.SetBoolValue("EmuCore/Speedhacks", "vuFlagHack", true);
     s_settings_interface.SetBoolValue("EmuCore/Speedhacks", "vu1Instant", true);
-    s_settings_interface.SetBoolValue("EmuCore/Speedhacks", "fastCDVD", true);
+    s_settings_interface.SetBoolValue("EmuCore/Speedhacks", "fastCDVD", false);
     s_settings_interface.SetBoolValue("EmuCore/Speedhacks", "vuThread",
         std::thread::hardware_concurrency() >= 3);
     // Neutral cycle rate/skip: cycle skipping can break audio/video timing and
@@ -254,14 +265,18 @@ static void ApplyHardwarePerformanceProfile()
     // getDevicePerformanceTier() and Java uses it as the FIRST-RUN default for
     // upscale_multiplier instead.
 
-    // Logging: EnableSystemConsole+EnableVerbose ship on and dump every log line
-    // through a JNI call per line, which is measurable on its own at 60 fps.
-    // File logging defaults to ON as well (an emulog.txt write per line). Keep
-    // errors only; the HUD switch in the drawer still shows OSD stats.
+    // Logging: EnableSystemConsole+EnableVerbose dump every log line through a
+    // JNI call per line, which is measurable on its own at 60 fps — those stay
+    // off. File logging is ON as of 0.6.7: with it off, a game that dies during
+    // startup leaves zero evidence and every fix becomes a guess (that is
+    // exactly what happened with Shadow of the Colossus). emulog.txt is written
+    // by the core itself (VMManager.cpp:579, <dataRoot>/logs/emulog.txt) at
+    // INFO level, which is one line per notable event, not per frame — the cost
+    // is not what the console/verbose path was.
     s_settings_interface.SetBoolValue("Logging", "EnableVerbose", false);
     s_settings_interface.SetBoolValue("Logging", "EnableSystemConsole", false);
-    s_settings_interface.SetBoolValue("Logging", "EnableTimestamps", false);
-    s_settings_interface.SetBoolValue("Logging", "EnableFileLogging", false);
+    s_settings_interface.SetBoolValue("Logging", "EnableTimestamps", true);
+    s_settings_interface.SetBoolValue("Logging", "EnableFileLogging", true);
 
     // Audio: 150/40 is what the defaults use; keep the buffer but let it mix on
     // a real-time thread (Oboe already does) — nothing to write, left documented.
@@ -625,6 +640,40 @@ Java_com_izzy2lost_psx2_NativeApp_setThreadPinning(JNIEnv* env, jclass, jboolean
     if (MTGS::IsOpen()) MTGS::ApplySettings();
 }
 
+// Cenit 0.6.7: Fast CDVD y MTVU dejan de ser decisiones silenciosas del perfil.
+// Ambos se escriben en la capa base (la misma que llena ApplyHardwarePerformance-
+// Profile), así que el INI por-juego y el GameDB siguen teniendo prioridad por
+// encima. Se aplican en caliente: CheckForCPUConfigChanges (VMManager.cpp:3355)
+// detecta el cambio en la estructura de speedhacks y limpia las cachés del
+// recompiler, y el hilo de VU1 lee el bit en cada bloque recompilado
+// (microVU-arm64.cpp:729). Mismo camino que usa la propia UI de ajustes del
+// motor (FullscreenUI_Settings.cpp:2694).
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setFastCDVD(JNIEnv* env, jclass, jboolean enabled)
+{
+    s_settings_interface.SetBoolValue("EmuCore/Speedhacks", "fastCDVD", enabled == JNI_TRUE);
+    if (VMManager::HasValidVM()) VMManager::ApplySettings();
+}
+
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setMTVU(JNIEnv* env, jclass, jboolean enabled)
+{
+    s_settings_interface.SetBoolValue("EmuCore/Speedhacks", "vuThread", enabled == JNI_TRUE);
+    if (VMManager::HasValidVM()) VMManager::ApplySettings();
+}
+
+// La misma condición que usa ApplyHardwarePerformanceProfile para decidir el
+// default de MTVU, expuesta a Java para que el default de la preferencia no
+// pueda divergir del del núcleo.
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_izzy2lost_psx2_NativeApp_coresAllowMTVU(JNIEnv*, jclass)
+{
+    return std::thread::hardware_concurrency() >= 3 ? JNI_TRUE : JNI_FALSE;
+}
+
 // Nitidez CAS (Contrast Adaptive Sharpening): modo 0 apagado, 1 solo enfocar,
 // 2 enfocar + reescalar; nitidez 0..100.
 extern "C"
@@ -981,6 +1030,26 @@ Java_com_izzy2lost_psx2_NativeApp_initialize(JNIEnv *env, jclass clazz,
         EmuFolders::LoadConfig(si);
         EmuFolders::EnsureFoldersExist();
 
+        // Cenit 0.6.7: el núcleo abre emulog.txt en modo "wb" (common/Console.cpp:364),
+        // o sea que cada arranque BORRA el registro anterior. Justo el caso que no
+        // vale: si el juego se cierra durante la carga (Shadow of the Colossus), al
+        // reabrir Cenit la única evidencia ya no estaría. Se rota antes de que
+        // LoadStartupSettings -> UpdateLoggingSettings abra el archivo nuevo, así la
+        // sesión anterior queda en emulog.prev.txt y el botón "Enviar registro"
+        // puede adjuntar los dos.
+        {
+            static bool s_log_rotated = false;
+            const std::string cur = Path::Combine(EmuFolders::Logs, "emulog.txt");
+            const std::string prev = Path::Combine(EmuFolders::Logs, "emulog.prev.txt");
+            if (!s_log_rotated && FileSystem::FileExists(cur.c_str()))
+            {
+                s_log_rotated = true;
+                FileSystem::DeleteFilePath(prev.c_str());
+                if (!FileSystem::RenamePath(cur.c_str(), prev.c_str()))
+                    FileSystem::DeleteFilePath(cur.c_str());
+            }
+        }
+
         VMManager::SetDefaultSettings(si, true, true, true, true, true);
 
         // Cenit 0.6.4: "FrameLimitEnable" ya NO existe como key en este núcleo
@@ -1121,6 +1190,16 @@ JNIEXPORT jstring JNICALL
 Java_com_izzy2lost_psx2_NativeApp_getPauseGameSerial(JNIEnv *env, jclass clazz) {
     std::string ret = StringUtil::StdStringFromFormat("%s (%08X)", VMManager::GetDiscSerial().c_str(), VMManager::GetDiscCRC());
     return env->NewStringUTF(ret.c_str());
+}
+
+// Cenit 0.6.7: carpeta donde el núcleo escribe emulog.txt. Java la necesita para
+// poder adjuntar el registro al compartirlo — está dentro de Android/data/, que
+// el usuario no puede abrir con un explorador desde Android 11.
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getLogDirectory(JNIEnv* env, jclass)
+{
+    return env->NewStringUTF(EmuFolders::Logs.c_str());
 }
 
 extern "C"

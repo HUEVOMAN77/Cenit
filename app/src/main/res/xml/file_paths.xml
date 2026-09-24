@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Emulog.txt lo escribe el núcleo en <externalFilesDir>/logs/, dentro de
+  Android/data/, que en Android 11+ ningún explorador de archivos puede abrir.
+  "Enviar registro" copia ahí el log (y el de la sesión anterior) y lo expone
+  por URI desde esta carpeta de caché, sin pedir permisos de almacenamiento.
+  Solo se comparte lo que la propia app escribe en cache/logs/: nada más del
+  teléfono queda accesible por esta vía.
+-->
+<paths>
+    <cache-path
+        name="cenit_logs"
+        path="logs/" />
+</paths>
