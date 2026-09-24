@@ -809,6 +809,27 @@ bool GSDeviceVK::ProcessDeviceExtensions()
 	// query
 	vkGetPhysicalDeviceProperties2(m_physical_device, &properties2);
 
+	// Cenit 0.6.11: deja por escrito QUÉ driver Vulkan está realmente activo
+	// (sistema o personalizado vía adrenotools). Esta línea viaja por Console
+	// hacia logcat ("NDK_LOG"), así que aparece en el reporte y en la evidencia
+	// de cierre: con ella se puede probar si el Turnip del usuario estaba
+	// cargado en la sesión que falló, en vez de deducirlo.
+	if (m_optional_extensions.vk_khr_driver_properties)
+	{
+		Console.WriteLn("VK active driver: name='%s' info='%s' device='%s' api=%u.%u.%u vendorID=0x%X deviceID=0x%X",
+			m_device_driver_properties.driverName, m_device_driver_properties.driverInfo,
+			m_device_properties.deviceName, VK_VERSION_MAJOR(m_device_properties.apiVersion),
+			VK_VERSION_MINOR(m_device_properties.apiVersion), VK_VERSION_PATCH(m_device_properties.apiVersion),
+			m_device_properties.vendorID, m_device_properties.deviceID);
+	}
+	else
+	{
+		Console.WriteLn("VK active driver: device='%s' api=%u.%u.%u vendorID=0x%X deviceID=0x%X (sin VK_KHR_driver_properties)",
+			m_device_properties.deviceName, VK_VERSION_MAJOR(m_device_properties.apiVersion),
+			VK_VERSION_MINOR(m_device_properties.apiVersion), VK_VERSION_PATCH(m_device_properties.apiVersion),
+			m_device_properties.vendorID, m_device_properties.deviceID);
+	}
+
 	// confirm we actually support it
 	if (m_optional_extensions.vk_khr_push_descriptor)
 	{

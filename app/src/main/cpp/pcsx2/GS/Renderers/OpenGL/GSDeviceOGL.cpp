@@ -1599,6 +1599,12 @@ std::string GSDeviceOGL::GenGlslHeader(const std::string_view entry, GLenum type
 	if (m_is_gles)
 	{
 		header = "#version 320 es\n";
+		// Cenit 0.6.11: los .glsl comparten una sola fuente entre escritorio y ES.
+		// Este macro propio (no GL_ES: ese ya lo predefine el compilador ES y
+		// redefinirlo es terreno pantanoso) les dice dónde gl_FragDepth es un
+		// built-in pre-declarado —re-declararlo es error en Adreno y tumbaba el
+		// dispositivo OpenGL entero— y dónde hay que declararlo (desktop).
+		header += "#define CENIT_GLSL_ES 1\n";
 		if (GLAD_GL_EXT_blend_func_extended)
 			header += "#extension GL_EXT_blend_func_extended : require\n";
 		else if (GLAD_GL_ARB_blend_func_extended)

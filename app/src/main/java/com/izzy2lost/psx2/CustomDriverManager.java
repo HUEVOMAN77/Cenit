@@ -300,6 +300,15 @@ public final class CustomDriverManager {
         return bad != null && bad.contains(";" + attemptKey(driverId, gameKey) + ";");
     }
 
+    /** Cenit 0.6.11: true si el driver tiene ALGÚN fracaso registrado, sea con
+     *  el juego que sea. Lo usa el diálogo para marcarlo en la lista y para
+     *  saber si el botón "Forzar otra vez" tiene algo que limpiar. */
+    public static boolean hasAnyFailure(Context context, String driverId) {
+        if (driverId == null || driverId.isEmpty()) return false;
+        String bad = prefs(context).getString(KEY_FAILED, "");
+        return bad != null && bad.contains(";" + driverId + "|");
+    }
+
     /** Marca el intento en curso. Llamar ANTES de arrancar el VM, con el driver
      *  que realmente se va a usar. */
     public static void beginAttempt(Context context, String driverId, String gameKey) {

@@ -2523,6 +2523,15 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         final String failed = CustomDriverManager.harvestUnconfirmedAttempt(getApplicationContext());
         if (failed != null) {
             android.util.Log.w("CustomDriverManager", "previous boot attempt never confirmed: " + failed);
+            // Cenit 0.6.11: esta es la foto que de verdad vale. Cuando el driver
+            // Turnip revienta el código nativo, el proceso muere del golpe y no
+            // hay finally que valga; Android (debuggerd) deja la señal exacta
+            // (SIGSEGV/SIGABRT, dirección, y el .so culpable — por ejemplo
+            // libvulkan_freedreno.so) en el búfer "crash" de logcat. Al volver a
+            // nacer el proceso ese registro sigue ahí unos minutos: lo guardamos
+            // como evidencia para que el reporte pueda decir si el driver mató
+            // Cenit o si fue algo nuestro.
+            captureCrashEvidence("muerte-nativa-con-" + failed);
         }
 
         // Set up JNI
@@ -3853,23 +3862,22 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                 File dir = new File(getCacheDir(), "evidencia");
                 if (!dir.isDirectory() && !dir.mkdirs()) return;
                 // Poca cosa: solo lo último, que es donde está el cierre.
-                Process proc = new ProcessBuilder("logcat", "-d", "-v", "time")
-                        .redirectErrorStream(true).start();
-                java.util.List<String> lines = new ArrayList<>();
-                try (BufferedReader r = new BufferedReader(new java.io.InputStreamReader(
-                        proc.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
-                    String line;
-                    while ((line = r.readLine()) != null) lines.add(line);
-                }
-                proc.waitFor();
-                proc.destroy();
-                int from = Math.max(0, lines.size() - 1500);
+                java.util.List<String> lines = readLogcatTail(new String[]{"logcat", "-d", "-v", "time"}, 1500);
+                // Cenit 0.6.11: el búfer "crash" de Android es donde debuggerd
+                // escribe la señal nativa exacta (SIGSEGV/SIGABRT, PC, y la .so
+                // culpable). Es lo que prueba si el .so del Turnip mató al proceso.
+                java.util.List<String> crashBuf = readLogcatTail(
+                        new String[]{"logcat", "-d", "-b", "crash", "-v", "time"}, 400);
                 File out = new File(dir, "cierre-" + System.currentTimeMillis() + ".txt");
                 try (Writer w = new java.io.OutputStreamWriter(
                         new FileOutputStream(out), java.nio.charset.StandardCharsets.UTF_8);
                      PrintWriter pw = new PrintWriter(w)) {
                     pw.println("=== EVIDENCIA DEL CIERRE (" + reason + ") ===");
-                    for (int i = from; i < lines.size(); i++) pw.println(lines.get(i));
+                    for (String line : lines) pw.println(line);
+                    if (!crashBuf.isEmpty()) {
+                        pw.println("=== BÚFER CRASH (debuggerd / señales nativas) ===");
+                        for (String line : crashBuf) pw.println(line);
+                    }
                 }
                 // Solo se guardan las tres últimas: no se llena la caché.
                 File[] all = dir.listFiles();
@@ -3881,6 +3889,30 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
             } catch (Throwable ignored) {
             }
         }, "CrashEvidence").start();
+    }
+
+    /** Corre un comando de logcat no bloqueante (-d) y devuelve hasta las últimas
+     *  {@code maxLines} líneas. Silencioso ante cualquier fallo: es evidencia, no
+     *  funcionalidad. */
+    private java.util.List<String> readLogcatTail(String[] cmd, int maxLines) {
+        Deque<String> tail = new ArrayDeque<>(maxLines + 1);
+        Process proc = null;
+        try {
+            proc = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+            try (BufferedReader r = new BufferedReader(new java.io.InputStreamReader(
+                    proc.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = r.readLine()) != null) {
+                    tail.addLast(line);
+                    while (tail.size() > maxLines) tail.removeFirst();
+                }
+            }
+            proc.waitFor();
+        } catch (Throwable ignored) {
+        } finally {
+            if (proc != null) proc.destroy();
+        }
+        return new ArrayList<>(tail);
     }
 
     /** Añade al reporte las fotos de cierre guardadas por captureCrashEvidence. */

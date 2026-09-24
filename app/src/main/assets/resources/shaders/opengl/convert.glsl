@@ -51,7 +51,16 @@ layout(binding = 0) uniform sampler2D TextureSampler;
 	layout(location = 0) out uint o_col0;
 	#define OUTPUT o_col0
 #elif HAS_DEPTH_OUTPUT
+	// Cenit 0.6.11: en GLSL ES (Android) gl_FragDepth es un nombre reservado ya
+	// pre-declarado; re-declararlo ("out float gl_FragDepth;") hace que el
+	// compilador de Adreno reviente con "'gl_FragDepth' : reserved built-in
+	// name" y el dispositivo OpenGL entero no nazca ("Failed to create GS
+	// device"). CENIT_GLSL_ES lo inyecta GSDeviceOGL solo en el camino ES; en
+	// escritorio (GLSL 4.5+, donde el built-in ya no existe) se sigue
+	// declarando como siempre.
+#ifndef CENIT_GLSL_ES
 	out float gl_FragDepth;
+#endif
 	#define OUTPUT gl_FragDepth
 #elif HAS_FLOAT32_OUTPUT
 	layout(location = 0) out float o_col0;

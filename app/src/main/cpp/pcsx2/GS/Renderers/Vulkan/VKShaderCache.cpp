@@ -100,6 +100,39 @@ static void FillPipelineCacheHeader(VK_PIPELINE_CACHE_HEADER* header)
 	std::memcpy(header->uuid, GSDeviceVK::GetInstance()->GetDeviceProperties().pipelineCacheUUID, VK_UUID_SIZE);
 }
 
+// Cenit 0.6.11: los archivos de caché ("vulkan_shaders.idx/.bin",
+// "vulkan_pipelines.bin") se llaman igual para cualquier driver. Aunque el
+// cabecero valida vendorID/deviceID/pipelineCacheUUID, un driver personalizado
+// cargado mediante adrenotools se reporta ante el sistema como la MISMA GPU
+// Adreno (mismo vendorID/deviceID) y no siempre cambia el UUID: una caché de
+// SPIR-V/pipelines escrita por el driver propietario del sistema puede acabar
+// sirviéndole al Turnip y viceversa, que es justo la clase de corrupción que
+// tumba al VM a media arrancada. Metemos la identidad del driver activo en el
+// nombre del archivo para que cada driver tenga su propia caché.
+static std::string GetDriverCacheSuffix()
+{
+	const GSDeviceVK* dev = GSDeviceVK::GetInstance();
+	const VkPhysicalDeviceProperties& props = dev->GetDeviceProperties();
+
+	std::string driver;
+	if (dev->GetOptionalExtensions().vk_khr_driver_properties)
+		driver = std::string(dev->GetDeviceDriverProperties().driverName) + '-'
+			+ std::string(dev->GetDeviceDriverProperties().driverInfo);
+	else
+		driver = std::string(props.deviceName);
+
+	// Solo caracteres seguros para nombre de archivo.
+	for (char& c : driver)
+	{
+		if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')))
+			c = '_';
+	}
+	if (driver.length() > 48)
+		driver = driver.substr(0, 48);
+
+	return driver;
+}
+
 #define SHADERC_FUNCTIONS(X) \
 	X(shaderc_compiler_initialize) \
 	X(shaderc_compiler_release) \
@@ -599,6 +632,9 @@ std::string VKShaderCache::GetShaderCacheBaseFileName(bool debug)
 	if (debug)
 		base_filename += "_debug";
 
+	// Cenit 0.6.11: caché separada por driver (ver GetDriverCacheSuffix).
+	base_filename += "_" + GetDriverCacheSuffix();
+
 	return Path::Combine(EmuFolders::Cache, base_filename);
 }
 
@@ -608,6 +644,9 @@ std::string VKShaderCache::GetPipelineCacheBaseFileName(bool debug)
 
 	if (debug)
 		base_filename += "_debug";
+
+	// Cenit 0.6.11: caché separada por driver (ver GetDriverCacheSuffix).
+	base_filename += "_" + GetDriverCacheSuffix();
 
 	base_filename += ".bin";
 

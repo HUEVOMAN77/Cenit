@@ -53,6 +53,25 @@
 
         </LinearLayout>
 
+        <!-- Cenit 0.6.11: "forzar otra vez" — borra el historial de fracasos del
+             driver seleccionado para que el guardarraya lo vuelva a intentar sin
+             devolver al usuario al driver del sistema. -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_force_custom_driver"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Forzar otra vez el driver seleccionado"
+            style="@style/Widget.Material3.Button.OutlinedButton" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Si el juego se cierra otra vez con el driver forzado, Cenit guarda la señal exacta del choque en el reporte (Ajustes → Enviar registro de errores)."
+            android:textSize="12sp"
+            android:textColor="?android:attr/textColorSecondary" />
+
     </LinearLayout>
 
 </ScrollView>

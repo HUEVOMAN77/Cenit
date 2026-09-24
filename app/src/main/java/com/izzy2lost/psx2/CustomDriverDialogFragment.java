@@ -73,12 +73,38 @@ public class CustomDriverDialogFragment extends DialogFragment {
                 }
             }
         }
+        if (selected != null) {
+            // Cenit 0.6.11: el driver personalizado solo toca huesos cuando el
+            // GS renderiza por Vulkan (es una ICD de Vulkan cargada vía
+            // adrenotools). Con OpenGL o Software el driver ni se carga, y si
+            // además el arranque falla por otra cosa el guardarraya culparía al
+            // driver fantasma. Se avisa y no se abre intento.
+            final int renderer = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+                    .getInt("renderer", -1); // -1 Auto (-> Vulkan aquí), 14 Vulkan
+            if (renderer == 12 || renderer == 13) {
+                CustomDriverManager.clearAttempt(context);
+                // El aviso por juego (al arrancar) usa la notificación de una vez;
+                // en el diálogo basta con el Toast inmediato, y dejar la
+                // notificación pendiente engañaría al usuario si luego cambia a
+                // Vulkan antes de entrar a un juego.
+                if (gameKey != null) {
+                    CustomDriverManager.setFallbackNotice(context,
+                            "Cambiaste el driver «" + selected.name + "», pero el renderer está en "
+                                    + (renderer == 12 ? "OpenGL" : "Software")
+                                    + ": los drivers personalizados solo se aplican con Vulkan."
+                                    + " Pon el renderer en Vulkan o Automático para usarlo.");
+                }
+                CustomDriverManager.applyToNative(context, selected);
+                return;
+            }
+        }
         if (selected != null && gameKey != null
                 && CustomDriverManager.isKnownBadCombo(context, selected.id, gameKey)) {
             CustomDriverManager.setFallbackNotice(context,
                     "El driver «" + selected.name + "» cerró " + (gameLabel == null ? "este juego" : gameLabel)
                             + " al arrancar la última vez. Para este juego Cenit usó el driver del sistema."
-                            + " Puedes forzar el driver otra vez en «Controlador gráfico personalizado».");
+                            + " Puedes forzar el driver otra vez en «Controlador gráfico personalizado»."
+                            + " Si vuelve a cerrarse, envía el reporte: ahora queda la señal exacta del choque.");
             CustomDriverManager.clearAttempt(context);
             CustomDriverManager.applyToNative(context, null);
             return;
@@ -136,7 +162,18 @@ public class CustomDriverDialogFragment extends DialogFragment {
                     CustomDriverManager.clearFailuresForDriver(ctx, picked);
             }
             applyStoredSelection(ctx);
-            Toast.makeText(ctx, "Se aplica al iniciar el próximo juego", Toast.LENGTH_SHORT).show();
+            // Cenit 0.6.11: si el renderer no es Vulkan, el driver elegido no se
+            // va a usar aunque esté activo. Decirlo aquí, en el momento, en vez
+            // de guardarlo para un aviso que nadie leería a tiempo.
+            final int rendererNow = ctx.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+                    .getInt("renderer", -1);
+            if (position != 0 && (rendererNow == 12 || rendererNow == 13)) {
+                Toast.makeText(ctx, "Ojo: solo funciona con el renderer en Vulkan"
+                        + " (ahora está en " + (rendererNow == 12 ? "OpenGL" : "Software") + ")",
+                        Toast.LENGTH_LONG).show();
+            } else {
+                Toast.makeText(ctx, "Se aplica al iniciar el próximo juego", Toast.LENGTH_SHORT).show();
+            }
         });
 
         btnImport.setOnClickListener(v -> {
@@ -164,6 +201,34 @@ public class CustomDriverDialogFragment extends DialogFragment {
             refreshAdapter();
         });
 
+        // Cenit 0.6.11: "Forzar otra vez". El guardarraya recuerda los pares
+        // driver+juego que cerraron el arranque y la próxima vez usa el driver
+        // del sistema sin avisar a medias. Este botón borra el historial del
+        // driver elegido AHORA MISMO y lo deja activo, para que el próximo
+        // arranque sea con él pase lo que pase. Si vuelve a morir, la evidencia
+        // del choque (señal nativa + qué driver estaba cargado) ya queda en el
+        // reporte por otro camino del guardarraya.
+        MaterialButton btnForce = view.findViewById(R.id.btn_force_custom_driver);
+        if (btnForce != null) {
+            btnForce.setOnClickListener(v -> {
+                if (selectedIndex == 0) {
+                    Toast.makeText(requireContext(), "Primero selecciona un driver importado",
+                            Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                Context ctx = requireContext();
+                final CustomDriverManager.InstalledDriver target = installedDrivers.get(selectedIndex - 1);
+                CustomDriverManager.clearFailuresForDriver(ctx, target.id);
+                ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                        .putString(PREF_CUSTOM_DRIVER_ID, target.id).apply();
+                applyStoredSelection(ctx);
+                Toast.makeText(ctx, "Se fuerza «" + target.name
+                        + "» en el próximo arranque", Toast.LENGTH_LONG).show();
+                loadDrivers();
+                refreshAdapter();
+            });
+        }
+
         return new MaterialAlertDialogBuilder(requireContext())
                 .setCustomTitle(UiUtils.centeredDialogTitle(requireContext(), "CONTROLADOR GRÁFICO PERSONALIZADO"))
                 .setView(view)
@@ -180,6 +245,11 @@ public class CustomDriverDialogFragment extends DialogFragment {
         for (int i = 0; i < installedDrivers.size(); i++) {
             CustomDriverManager.InstalledDriver d = installedDrivers.get(i);
             String label = d.version.isEmpty() ? d.name : d.name + " (" + d.version + ")";
+            // Cenit 0.6.11: marcar los drivers con cierres registrados, para que
+            // el usuario entienda por qué el guardarraya lo cambió y sepa que
+            // "Forzar otra vez" existe para darle una oportunidad limpia.
+            if (CustomDriverManager.hasAnyFailure(requireContext(), d.id))
+                label += " — cerró un juego (toca Forzar para reintentar)";
             labels.add(label);
             if (d.id.equals(currentId))
                 selectedIndex = i + 1;
