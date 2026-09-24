@@ -871,7 +871,17 @@ static bool WriteGameLayerInt(const std::string& game_path, const char* section,
 
     game_settings.SetIntValue(section, key.c_str(), value);
     if (!game_settings.Save())
+    {
+        // Antes esto devolvía false en silencio y Java solo sabía que "no se
+        // pudo". El log dice la ruta exacta para distinguir "el documento no se
+        // creó" de "se creó pero el núcleo no lo ve" (el bug saf:// de 0.6.13).
+        Console.Error("Per-game settings: NO se pudo guardar %s [%s/%s=%d]",
+            path.c_str(), section, key.c_str(), value);
         return false;
+    }
+
+    Console.WriteLn("Per-game settings: written INI %s [%s/%s=%d]",
+        path.c_str(), section, key.c_str(), value);
 
     if (VMManager::HasValidVM())
     {

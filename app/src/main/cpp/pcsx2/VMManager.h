@@ -108,6 +108,24 @@ namespace VMManager
 	/// Returns the path to the ELF which is currently running. Only safe to read on the EE thread.
 	const std::string& GetCurrentELF();
 
+	/// Cenit 0.6.14: dónde quedaron REALMENTE los hilos de emulación después de
+	/// SetEmuThreadAffinities(). El log ya lo decía (0.6.13), pero para decidir
+	/// si el pinning ayuda hace falta verlo mientras se juega, sin conectar adb.
+	/// known=false / processor=-1 significa "sin fijar" (pinning apagado, cpuinfo
+	/// no disponible, o lista de procesadores corta) y el HUD lo muestra como
+	/// unknown en vez de un 0 que se leería como "está en el core 0", que son los
+	/// little cores.
+	struct ThreadPinningInfo
+	{
+		bool enabled = false;
+		bool mtvu = false;
+		int processor[3] = {-1, -1, -1}; // orden: EE, VU1, GS
+		unsigned cluster[3] = {0, 0, 0};
+		unsigned freq_khz[3] = {0, 0, 0};
+		bool known[3] = {false, false, false};
+	};
+	ThreadPinningInfo GetThreadPinningInfo();
+
 	/// Initializes all system components. May restart itself asynchronously
 	/// using the provided hardcore_disable_callback function. Will call the
 	/// done_callback function on either success or failure.

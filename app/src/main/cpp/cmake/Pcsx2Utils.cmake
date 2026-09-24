@@ -49,13 +49,43 @@ function(get_git_version_info)
 	set(PCSX2_GIT_REV "")
 	set(PCSX2_GIT_TAG "")
 	set(PCSX2_GIT_HASH "")
-	if (GIT_FOUND AND EXISTS ${PROJECT_SOURCE_DIR}/.git)
-		EXECUTE_PROCESS(WORKING_DIRECTORY ${PROJECT_SOURCE_DIR} COMMAND ${GIT_EXECUTABLE} describe --tags
+
+	# Cenit 0.6.14: el top-level de Gradle es app/src/main/cpp, así que el .git
+	# del repositorio está CUATRO niveles por encima de PROJECT_SOURCE_DIR. La
+	# guarda original (EXISTS ${PROJECT_SOURCE_DIR}/.git) nunca casaba en Android
+	# y svnrev.h se escribía con GIT_REV/GIT_HASH vacíos: el HUD y el log no
+	# podían decir qué commit estaba instalado, que es justo lo que se necesita
+	# para saber si un ajuste ya está en el binario. Se sube hasta encontrar el
+	# directorio del repo; si no aparece, se sigue dejando Unknown.
+	set(CENIT_GIT_DIR "")
+	set(CENIT_PROBE "${PROJECT_SOURCE_DIR}")
+	while(NOT CENIT_GIT_DIR AND CENIT_PROBE AND NOT CENIT_PROBE STREQUAL "/")
+		if(IS_DIRECTORY "${CENIT_PROBE}/.git")
+			set(CENIT_GIT_DIR "${CENIT_PROBE}")
+		else()
+			get_filename_component(CENIT_PROBE "${CENIT_PROBE}/.." ABSOLUTE)
+		endif()
+	endwhile()
+
+	if (CENIT_GIT_DIR)
+		message(STATUS "Git repository located at: ${CENIT_GIT_DIR}")
+	endif()
+
+	if (GIT_FOUND AND CENIT_GIT_DIR)
+		# Hash corto propio y estable. PCSX2_GIT_REV puede convertirse en un
+		# "describe" largo (base-0.6.13-5-g...), que en una línea del HUD de un
+		# teléfono ocupa demasiado. Este siempre son 7 caracteres.
+		EXECUTE_PROCESS(WORKING_DIRECTORY ${CENIT_GIT_DIR} COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+			OUTPUT_VARIABLE PCSX2_GIT_SHORT
+			OUTPUT_STRIP_TRAILING_WHITESPACE
+			ERROR_QUIET)
+
+		EXECUTE_PROCESS(WORKING_DIRECTORY ${CENIT_GIT_DIR} COMMAND ${GIT_EXECUTABLE} describe --tags
 			OUTPUT_VARIABLE PCSX2_GIT_REV
 			OUTPUT_STRIP_TRAILING_WHITESPACE
 			ERROR_QUIET)
 
-		EXECUTE_PROCESS(WORKING_DIRECTORY ${PROJECT_SOURCE_DIR} COMMAND ${GIT_EXECUTABLE} tag --points-at HEAD --sort=version:refname
+		EXECUTE_PROCESS(WORKING_DIRECTORY ${CENIT_GIT_DIR} COMMAND ${GIT_EXECUTABLE} tag --points-at HEAD --sort=version:refname
 			OUTPUT_VARIABLE PCSX2_GIT_TAG_LIST
 			RESULT_VARIABLE TAG_RESULT
 			OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -73,27 +103,33 @@ function(get_git_version_info)
 			endif()
 		endif()
 
-		EXECUTE_PROCESS(WORKING_DIRECTORY ${PROJECT_SOURCE_DIR} COMMAND ${GIT_EXECUTABLE} rev-parse HEAD
+		EXECUTE_PROCESS(WORKING_DIRECTORY ${CENIT_GIT_DIR} COMMAND ${GIT_EXECUTABLE} rev-parse HEAD
 			OUTPUT_VARIABLE PCSX2_GIT_HASH
 			OUTPUT_STRIP_TRAILING_WHITESPACE
 			ERROR_QUIET)
 
-		EXECUTE_PROCESS(WORKING_DIRECTORY ${PROJECT_SOURCE_DIR} COMMAND ${GIT_EXECUTABLE} log -1 --format=%cd --date=local
+		EXECUTE_PROCESS(WORKING_DIRECTORY ${CENIT_GIT_DIR} COMMAND ${GIT_EXECUTABLE} log -1 --format=%cd --date=local
 			OUTPUT_VARIABLE PCSX2_GIT_DATE
 			OUTPUT_STRIP_TRAILING_WHITESPACE
 			ERROR_QUIET)
 	endif()
 	if (NOT PCSX2_GIT_REV)
-		EXECUTE_PROCESS(WORKING_DIRECTORY ${PROJECT_SOURCE_DIR} COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
-			OUTPUT_VARIABLE PCSX2_GIT_REV
-			OUTPUT_STRIP_TRAILING_WHITESPACE
-			ERROR_QUIET)
-		if (NOT PCSX2_GIT_REV)
+		# Sin tags a la vista ( Actions no siempre los trae ) o sin repo. Antes se
+		# volvía a preguntar por HEAD aquí; ahora reutilizamos PCSX2_GIT_SHORT, que
+		# ya es exactamente ese valor. Evita además un EXECUTE_PROCESS con
+		# WORKING_DIRECTORY vacío cuando no se encontró ningún .git.
+		if (PCSX2_GIT_SHORT)
+			set(PCSX2_GIT_REV "${PCSX2_GIT_SHORT}")
+		else()
 			set(PCSX2_GIT_REV "Unknown")
 		endif()
 	endif()
+	if (NOT PCSX2_GIT_SHORT)
+		set(PCSX2_GIT_SHORT "${PCSX2_GIT_REV}")
+	endif()
 
 	set(PCSX2_GIT_REV "${PCSX2_GIT_REV}" PARENT_SCOPE)
+	set(PCSX2_GIT_SHORT "${PCSX2_GIT_SHORT}" PARENT_SCOPE)
 	set(PCSX2_GIT_TAG "${PCSX2_GIT_TAG}" PARENT_SCOPE)
 	set(PCSX2_GIT_HASH "${PCSX2_GIT_HASH}" PARENT_SCOPE)
 	set(PCSX2_GIT_DATE "${PCSX2_GIT_DATE}" PARENT_SCOPE)
@@ -108,6 +144,7 @@ function(write_svnrev_h)
 			"#define GIT_TAG_MID ${CMAKE_MATCH_2}\n"
 			"#define GIT_TAG_LO  ${CMAKE_MATCH_3}\n"
 			"#define GIT_REV \"${PCSX2_GIT_TAG}\"\n"
+			"#define GIT_SHORT \"${PCSX2_GIT_SHORT}\"\n"
 			"#define GIT_HASH \"${PCSX2_GIT_HASH}\"\n"
 			"#define GIT_DATE \"${PCSX2_GIT_DATE}\"\n"
 		)
@@ -119,6 +156,7 @@ function(write_svnrev_h)
 			"#define GIT_TAG_MID ${CMAKE_MATCH_2}\n"
 			"#define GIT_TAG_LO  ${CMAKE_MATCH_3}\n"
 			"#define GIT_REV \"${PCSX2_GIT_REV}\"\n"
+			"#define GIT_SHORT \"${PCSX2_GIT_SHORT}\"\n"
 			"#define GIT_HASH \"${PCSX2_GIT_HASH}\"\n"
 			"#define GIT_DATE \"${PCSX2_GIT_DATE}\"\n"
 		)
@@ -130,6 +168,7 @@ function(write_svnrev_h)
 			"#define GIT_TAG_MID 0\n"
 			"#define GIT_TAG_LO 0\n"
 			"#define GIT_REV \"${PCSX2_GIT_REV}\"\n"
+			"#define GIT_SHORT \"${PCSX2_GIT_SHORT}\"\n"
 			"#define GIT_HASH \"${PCSX2_GIT_HASH}\"\n"
 			"#define GIT_DATE \"${PCSX2_GIT_DATE}\"\n"
 		)

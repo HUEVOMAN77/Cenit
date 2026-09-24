@@ -36,6 +36,9 @@
 #include "common/FileSystem.h"
 #include "common/Path.h"
 #include "common/Timer.h"
+#ifdef __ANDROID__
+#include "AndroidDeviceDetection.h"
+#endif
 
 #include "fmt/chrono.h"
 #include "fmt/format.h"
@@ -71,6 +74,12 @@ std::vector<SmallString> s_software_thread_lines;
 SmallString s_capture_line;
 SmallString s_gpu_usage_line;
 SmallString s_mtvu_sync_line; // Cenit 0.6.13: espera EE->VU1 visible en el HUD
+// Cenit 0.6.14: build instalado, ajustes efectivos del núcleo y perfil de
+// hardware detectado. Estáticos por el mismo motivo que el resto de líneas del
+// HUD: se formatean en cada refresco y evitar allocations por frame.
+SmallString s_build_line;
+SmallString s_pinning_line;
+SmallString s_soc_line;
 SmallString s_gpu_debug_info_line;
 SmallString s_gpu_stats_line;
 SmallString s_speed_icon;
@@ -459,6 +468,35 @@ __ri void ImGuiManager::DrawPerformanceOverlay(float& position_y, float scale, f
 					gpu_suffix);
 
 				DRAW_LINE(osd_font, font_size, s_hardware_info_gpu_line.c_str(), white_color);
+
+#ifdef __ANDROID__
+				// Cenit 0.6.14: qué build está instalado y qué perfil de hardware se
+				// resolvió, con la FUENTE del número. Este bloque ya venía diciendo
+				// "GPU: Adreno 7c+ Gen 3" (lo que reporta Vulkan) y "CPU: Qualcomm
+				// SM7325" (fingerprint), pero no decía de dónde salía cada uno ni
+				// qué perfil se eligió por ello. Ante un nombre de GPU raro, eso es
+				// justo lo que falta para distinguir "etiqueta nuestra incorrecta"
+				// de "el driver reporta ese nombre": se conservan los dos datos por
+				// separado y se anota la fuente.
+				// versión + hash corto: GitRev puede ser un describe largo, así que
+				// el identificador inequívoco del build es AppVersion + GitShort.
+				s_build_line.format("Cenit build: {} ({})",
+					BuildVersion::AppVersion,
+					BuildVersion::GitShort);
+				DRAW_LINE(osd_font, font_size, s_build_line.c_str(), white_color);
+
+				const AndroidDeviceDetection::DeviceProfile prof =
+					AndroidDeviceDetection::GetCachedDeviceProfile();
+				const std::string soc_txt = prof.resolved_model != 0
+					? fmt::format("SM{:04d}", prof.resolved_model)
+					: std::string("unknown");
+				const std::string src_txt = prof.resolved_source.empty()
+					? std::string("sin fuente")
+					: prof.resolved_source;
+				s_soc_line.format("SoC={} ({}) | vendor={} | Profile={}",
+					soc_txt.c_str(), src_txt.c_str(), prof.gpu_vendor.c_str(), prof.profile);
+				DRAW_LINE(osd_font, font_size, s_soc_line.c_str(), white_color);
+#endif
 			}
 
 			if (GSConfig.OsdShowCPU)
@@ -484,13 +522,54 @@ __ri void ImGuiManager::DrawPerformanceOverlay(float& position_y, float scale, f
 					// que responde "¿el frame se perdía ESPERANDO al VU1 o el VU1
 					// estaba ocupado?". Es la métrica que faltaba para decidir si
 					// vale la pena tocar sincronía/afinidad o no.
+					//
+					// Cenit 0.6.14: antes solo se dibujaba con contadores > 0, así
+					// que "no aparece la fila" no distinguía "la build no tiene la
+					// métrica" de "la métrica está viva pero no acumula". Con MTVU
+					// encendido (THREAD_VU1, justo el if de arriba) la fila sale
+					// SIEMPRE: sin datos dice "sin datos", que es un resultado.
 					const PerformanceMetrics::MtvuSyncStats sync = PerformanceMetrics::GetMtvuSyncStats();
 					if (sync.wait_calls > 0 || sync.exec_calls > 0)
 					{
 						s_mtvu_sync_line.format("MTVU: espera {:.2f} ms ({}x) | publica {:.2f} ms ({}x)",
 							sync.wait_ms, sync.wait_calls, sync.exec_ms, sync.exec_calls);
-						DRAW_LINE(osd_font, font_size, s_mtvu_sync_line.c_str(), white_color);
 					}
+					else
+					{
+						s_mtvu_sync_line.assign("MTVU: sin datos en esta ventana");
+					}
+					DRAW_LINE(osd_font, font_size, s_mtvu_sync_line.c_str(), white_color);
+				}
+
+				// Cenit 0.6.14: dónde quedaron los hilos. Fuera del if (THREAD_VU1)
+				// a propósito: con MTVU apagado también importa saber en qué core
+				// está el EE. Es el mismo dato que contesta "¿el EE está de verdad
+				// en un core rápido?": un 65% de EE con el hilo en un A55 no es el
+				// mismo 65% que con el hilo en el A78 prime, y sin esto no hay forma
+				// de saberlo desde el sofá. unknown = sin fijar (pinning off o
+				// cpuinfo mudo), nunca un 0 que se leería como "core 0".
+				{
+					const VMManager::ThreadPinningInfo pin = VMManager::GetThreadPinningInfo();
+					auto coreTok = [&pin](int slot) -> std::string {
+						if (!pin.known[slot])
+							return "unknown";
+						return fmt::format("{}(c{}/{:.0f}MHz)", pin.processor[slot], pin.cluster[slot],
+							static_cast<double>(pin.freq_khz[slot]) / 1000.0);
+					};
+					const std::string ee_core = coreTok(0);
+					const std::string gs_core = coreTok(2);
+					if (pin.mtvu)
+					{
+						const std::string vu1_core = coreTok(1);
+						s_pinning_line.format("Pinning={} | EE={} VU1={} GS={}",
+							pin.enabled ? "ON" : "OFF", ee_core.c_str(), vu1_core.c_str(), gs_core.c_str());
+					}
+					else
+					{
+						s_pinning_line.format("Pinning={} | EE={} GS={}",
+							pin.enabled ? "ON" : "OFF", ee_core.c_str(), gs_core.c_str());
+					}
+					DRAW_LINE(osd_font, font_size, s_pinning_line.c_str(), white_color);
 				}
 
 				const u32 gs_sw_threads = PerformanceMetrics::GetGSSWThreadCount();
@@ -929,16 +1008,20 @@ __ri void ImGuiManager::DrawSettingsOverlay(float scale, float margin, float spa
 			Patch::GetActivePatchesCount(),
 			Patch::GetActiveCheatsCount());
 
-	if (EmuConfig.Speedhacks.EECycleRate != 0)
-		APPEND("CR={} ", EmuConfig.Speedhacks.EECycleRate);
-	if (EmuConfig.Speedhacks.EECycleSkip != 0)
-		APPEND("CS={} ", EmuConfig.Speedhacks.EECycleSkip);
+	// Cenit 0.6.14: CR/CS se pintan SIEMPRE, no solo cuando son distintos de
+	// cero. Era el agujero del diagnóstico: con la guarda "!= 0", "no aparece
+	// CR" significaba a la vez "no lo tocaste", "lo guardaste mal" y "lo
+	// guardaste bien pero el núcleo no lo cargó" — tres situaciones con
+	// recados opuestos. Ver CR=0 es información, no ruido.
+	APPEND("CR={} ", EmuConfig.Speedhacks.EECycleRate);
+	APPEND("CS={} ", EmuConfig.Speedhacks.EECycleSkip);
 	if (EmuConfig.Speedhacks.fastCDVD)
 		APPEND("FCDVD ");
-	if (EmuConfig.Speedhacks.vu1Instant)
-		APPEND("IVU ");
-	if (EmuConfig.Speedhacks.vuThread)
-		APPEND("MTVU ");
+	// IVU/MTVU también incondicionales y con valor explícito, por el mismo motivo
+	// que CR/CS: "no aparece MTVU" ya no puede leerse como "MTVU está apagado" si
+	// además puede ser que el HUD no lo pinte.
+	APPEND("IVU={} ", EmuConfig.Speedhacks.vu1Instant ? "ON" : "OFF");
+	APPEND("MTVU={} ", EmuConfig.Speedhacks.vuThread ? "ON" : "OFF");
 	if (EmuConfig.GS.VsyncEnable)
 		APPEND("VSYNC ");
 	if (EmuConfig.GS.AdvancedFrameDisplay)

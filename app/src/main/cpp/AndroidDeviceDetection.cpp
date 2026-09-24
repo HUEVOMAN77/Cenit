@@ -8,6 +8,7 @@
 #include <sys/system_properties.h>
 #include <cctype>
 #include <cstring>
+#include <iterator>
 
 namespace AndroidDeviceDetection
 {
@@ -159,6 +160,62 @@ namespace AndroidDeviceDetection
 
 	unsigned GetQualcommSocModel()
 	{
+		return GetQualcommSocModelTraced(nullptr);
+	}
+
+	namespace
+	{
+		const char* VendorName(GPUVendor v)
+		{
+			switch (v)
+			{
+				case GPUVendor::Qualcomm: return "Qualcomm";
+				case GPUVendor::ARM: return "ARM";
+				case GPUVendor::Imagination: return "Imagination";
+				case GPUVendor::Other: return "Other";
+				case GPUVendor::Unknown: break;
+			}
+			return "Unknown";
+		}
+
+		DeviceProfile BuildProfile()
+		{
+			DeviceProfile p;
+			p.soc_model_prop = GetSystemProperty("ro.soc.model");
+			p.hardware_prop = GetSystemProperty("ro.hardware");
+			p.board_platform = GetSystemProperty("ro.board.platform");
+			p.product_board = GetSystemProperty("ro.product.board");
+			p.resolved_model = GetQualcommSocModelTraced(&p.resolved_source);
+			p.gpu_vendor = VendorName(DetectGPUVendor());
+			// GetDeviceTier() vuelve a leer propiedades por dentro. Es una sola vez
+			// en la vida del proceso (ver GetCachedDeviceProfile), así que el coste
+			// no importa y se evita duplicar aquí su lógica de clasificación.
+			p.profile = GetDeviceTier();
+
+			Console.WriteLn("Cenit hardware: soc.model='%s' hardware='%s' platform='%s' board='%s'",
+				p.soc_model_prop.c_str(), p.hardware_prop.c_str(),
+				p.board_platform.c_str(), p.product_board.c_str());
+			Console.WriteLn("Cenit hardware: resuelto=%u fuente='%s' vendor='%s' perfil=%d",
+				p.resolved_model, p.resolved_source.empty() ? "n/d" : p.resolved_source.c_str(),
+				p.gpu_vendor.c_str(), p.profile);
+			return p;
+		}
+	} // namespace
+
+	const DeviceProfile& GetCachedDeviceProfile()
+	{
+		// Magic static: se construye en el primer uso y después queda inmutable,
+		// así que el hilo del HUD lo lee sin lock. DetectGPUVendor/GetDeviceTier
+		// escriben en el log, por eso se corre una sola vez y no en cada llamada.
+		static const DeviceProfile profile = BuildProfile();
+		return profile;
+	}
+
+	unsigned GetQualcommSocModelTraced(std::string* out_source)
+	{
+		if (out_source)
+			out_source->clear();
+
 		// Qualcomm numbers are normalized to 4 digits here, and they do NOT follow
 		// the marketing name: SM7325 is the Snapdragon 778G, SM7250 is the 765G,
 		// SM8450 is the 8 Gen 1. So the model is read from the SoC properties and
@@ -166,12 +223,19 @@ namespace AndroidDeviceDetection
 		// from OEM builds that never expose ro.soc.model). Legacy msm/apq parts are
 		// deliberately skipped: msm8998 is an 835-class chip and its number would
 		// misclassify old hardware as high-end.
+		static const char* const kKeys[] = {
+			"ro.soc.model",
+			"ro.hardware",
+			"ro.board.platform",
+			"ro.product.board",
+			"ro.soc.manufacturer",
+		};
 		std::string candidates[] = {
-			GetSystemProperty("ro.soc.model"),
-			GetSystemProperty("ro.hardware"),
-			GetSystemProperty("ro.board.platform"),
-			GetSystemProperty("ro.product.board"),
-			GetSystemProperty("ro.soc.manufacturer"),
+			GetSystemProperty(kKeys[0]),
+			GetSystemProperty(kKeys[1]),
+			GetSystemProperty(kKeys[2]),
+			GetSystemProperty(kKeys[3]),
+			GetSystemProperty(kKeys[4]),
 		};
 
 		const auto first_digit_run = [](const std::string& s) {
@@ -188,8 +252,9 @@ namespace AndroidDeviceDetection
 			return (n >= 3 && v >= 400) ? v : 0u;
 		};
 
-		for (const std::string& raw : candidates)
+		for (size_t idx = 0; idx < std::size(candidates); idx++)
 		{
+			const std::string& raw = candidates[idx];
 			std::string s = raw;
 			for (char& c : s) c = static_cast<char>(std::tolower(c));
 			if (s.empty())
@@ -210,7 +275,11 @@ namespace AndroidDeviceDetection
 
 			const unsigned v = first_digit_run(s);
 			if (v)
+			{
+				if (out_source)
+					*out_source = kKeys[idx];
 				return v;
+			}
 		}
 
 		// Some OEMs (Huawei/HarmonyOS in particular) expose only the Qualcomm
@@ -227,14 +296,18 @@ namespace AndroidDeviceDetection
 			{"parrot", 6225},    // SD 680
 			{"bengal", 6115},    // SD 662
 		};
-		for (const std::string& raw : candidates)
+		for (size_t idx = 0; idx < std::size(candidates); idx++)
 		{
-			std::string s = raw;
+			std::string s = candidates[idx];
 			for (char& c : s) c = static_cast<char>(std::tolower(c));
 			for (const auto& e : kCodenames)
 			{
 				if (s == e.codename)
+				{
+					if (out_source)
+						*out_source = std::string("codename:") + e.codename + " via " + kKeys[idx];
 					return e.model;
+				}
 			}
 		}
 		return 0;

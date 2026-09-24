@@ -68,8 +68,8 @@ android {
         applicationId = "com.izzy2lost.psx2"
         minSdk = 26
         targetSdk = 36
-        versionCode = 49
-        versionName = "0.6.13"
+        versionCode = 50
+        versionName = "0.6.14"
 
         externalNativeBuild {
             cmake {
@@ -84,7 +84,11 @@ android {
                     // archivos calientes (microVU, iR5900) para auditar si de
                     // verdad van con -O3/Release. Sin esta base no hay
                     // compile_commands.json y la auditoría es a ciegas.
-                    "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+                    "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+                    // Cenit 0.6.14: el núcleo no conocía su propia versionName, así
+                    // que el HUD no podía distinguir dos Cenit consecutivos. Se
+                    // hornea aquí y se lee en BuildVersion::AppVersion.
+                    "-DCENIT_APP_VERSION=${defaultConfig.versionName}"
                 )
             }
         }

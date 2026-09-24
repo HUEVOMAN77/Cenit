@@ -2557,6 +2557,24 @@ bool FileSystem::FileExists(const char* path)
 	if (path[0] == '\0')
 		return false;
 
+#ifdef __ANDROID__
+	// Cenit 0.6.14: este era el bug que dejaba los ajustes por-juego sin efecto
+	// cuando el usuario elige un "Data root" SAF. stat() no entiende "saf://",
+	// así que devolvía false SIEMPRE para esas rutas -> UpdateGameSettingsLayer()
+	// creía que el INI del juego no existía y no lo cargaba (y la cascada de
+	// ResolveGameSettingsPathForUri tampoco lo veía). El valor se escribía bien y
+	// sobrevivia al reinicio; nunca se leía. Se resuelve el documento SIN
+	// crearlo: URI vacío == no existe.
+	//
+	// No se memoiza a propósito: un INI por-juego se escribe y luego se recarga
+	// en la misma sesión, y cachear un "no existe" reproduciría el bug. El coste
+	// (un traverse de DocumentFile por llamada) solo se paga en rutas de carga
+	// —ini, cheats, texturas, snapshots—, nunca por frame; las rutas locales
+	// siguen saliendo por stat() sin tocar JNI.
+	if (std::strncmp(path, "saf://", 6) == 0)
+		return !ResolveSafPathUriJNI(path + 6, false).empty();
+#endif
+
 	// stat file
 	struct stat sysStatData;
 	if (stat(path, &sysStatData) < 0)

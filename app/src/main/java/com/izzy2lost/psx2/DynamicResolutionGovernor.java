@@ -124,6 +124,9 @@ final class DynamicResolutionGovernor {
     private boolean cpuBoundLogged = false;
     // 0.6.13: igual, pero para el aviso de "métrica de GPU ausente, no adivino".
     private boolean gpuMetricLogged = false;
+    // 0.6.14: tercera etiqueta de estado, para que el log diga GPU_BOUND al
+    // empezar a acumular ticks lentos y no solo cuando ya bajó la escala.
+    private boolean gpuBoundLogged = false;
 
     // ------------------------------------------------------------------
     // v3: memoria, pre-corte térmico, turbo de cargas y evidencia de cuotas
@@ -488,9 +491,13 @@ final class DynamicResolutionGovernor {
                 // ticks completos de retraso real antes de mover nada.
                 slowTicks = 0;
                 fastTicks = 0;
+                gpuBoundLogged = false; // cambio de estado: permitir la próxima etiqueta
                 if (!gpuMetricLogged) {
                     gpuMetricLogged = true;
-                    android.util.Log.i("DynRes", "behind at " + speed
+                    // "DynRes state: ..." es la etiqueta grepeable que pide la
+                    // revisión: con un console.txt se puede saber cuántos ticks
+                    // pasó en cada estado sin reconstruir la lógica a mano.
+                    android.util.Log.i("DynRes", "DynRes state: UNKNOWN_GPU — behind at " + speed
                             + "% but GPU metric unavailable (" + gpu + "): holding scale, not guessing");
                 }
                 return;
@@ -499,12 +506,13 @@ final class DynamicResolutionGovernor {
             if (gpu < bound) {
                 slowTicks = 0;
                 fastTicks = 0;
+                gpuBoundLogged = false; // cambio de estado: permitir la próxima etiqueta
                 cpuBoundTicks++;
                 if (profile != null && profile.known() && cpuBoundTicks >= 15)
                     profile.cpuBound = true; // fue consistente: que conste en el perfil
                 if (!cpuBoundLogged) {
                     cpuBoundLogged = true;
-                    android.util.Log.i("DynRes", "behind at " + speed
+                    android.util.Log.i("DynRes", "DynRes state: CPU_BOUND — behind at " + speed
                             + "% but GPU usage only " + gpu + ": CPU-bound, holding scale");
                 }
                 return;
@@ -512,6 +520,11 @@ final class DynamicResolutionGovernor {
             cpuBoundLogged = false;
             cpuBoundTicks = 0; // el retraso este vez sí era de píxeles: cuenta nueva
             fastTicks = 0;
+            if (!gpuBoundLogged) {
+                gpuBoundLogged = true;
+                android.util.Log.i("DynRes", "DynRes state: GPU_BOUND — behind at " + speed
+                        + "% with GPU usage " + gpu + ": resolution can help");
+            }
             slowTicks++;
             if (slowTicks >= SLOW_TICKS_TO_DROP) {
                 slowTicks = 0;

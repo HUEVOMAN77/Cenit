@@ -42,6 +42,16 @@ include(SearchForStuff)
 get_git_version_info()
 write_svnrev_h()
 
+# Cenit 0.6.14: la APK sabe su versionName y el núcleo no. Se pasa por aquí para
+# que el HUD pueda imprimir "qué build está instalado" sin bajar a Java. Si el
+# define no llega (build de escritorio, o cmake invocado a mano) queda "unknown"
+# en vez de romper la compilación.
+if(NOT DEFINED CENIT_APP_VERSION OR CENIT_APP_VERSION STREQUAL "")
+	set(CENIT_APP_VERSION "unknown")
+endif()
+add_compile_definitions(CENIT_APP_VERSION="${CENIT_APP_VERSION}")
+message(STATUS "Cenit app version baked into native: ${CENIT_APP_VERSION}")
+
 # make common
 add_subdirectory(common)
 

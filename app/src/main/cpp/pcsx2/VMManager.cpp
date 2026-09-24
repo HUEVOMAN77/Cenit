@@ -201,6 +201,14 @@ static u32 s_frame_advance_count = 0;
 static bool s_fast_boot_requested = false;
 static bool s_gs_open_on_initialize = false;
 static bool s_thread_affinities_set = false;
+
+// Cenit 0.6.14: espejo legible-para-el-HUD de lo que SetEmuThreadAffinities()
+// decidió. Se escribe en el hilo de settings y se lee en el hilo GS, así que va
+// bajo un mutex corto; el HUD lo pide una vez por refresco (~10/s), nunca por
+// frame. No se lee cpuinfo desde el HUD para no repetir ahí el ordenamiento de
+// procesadores.
+static std::mutex s_pinning_info_mutex;
+static VMManager::ThreadPinningInfo s_pinning_info;
 static bool s_acgame_sys246 = false;
 static bool s_acgame_sys256 = false;
 static std::string s_arcade_card1;
@@ -868,6 +876,20 @@ void VMManager::ApplySettings()
 	EmuConfig.CopyRuntimeConfig(old_config);
 	LoadSettings();
 	CheckForConfigChanges(old_config);
+
+	// Cenit 0.6.14: la pregunta que un log tiene que poder responder sin adb ni
+	// adivinar es "el valor que el usuario escribió en el INI del juego, ¿es el
+	// que el núcleo está usando AHORA?". Se imprime aquí, después de la cascada
+	// completa (base -> GameDB -> capa por-juego), no en Java: SharedPreferences
+	// ya demostró no ser la verdad operativa.
+	Console.WriteLn("Effective settings: game='%s' crc=%08X CR=%d CS=%d MTVU=%d IVU=%d pinning=%d capa='%s'",
+		GetDiscSerial().c_str(), GetDiscCRC(),
+		static_cast<int>(EmuConfig.Speedhacks.EECycleRate),
+		static_cast<int>(EmuConfig.Speedhacks.EECycleSkip),
+		static_cast<int>(EmuConfig.Speedhacks.vuThread),
+		static_cast<int>(EmuConfig.Speedhacks.vu1Instant),
+		static_cast<int>(EmuConfig.EnableThreadPinning),
+		s_game_settings_interface ? s_game_settings_interface->GetFileName().c_str() : "(ninguna)");
 }
 
 void VMManager::ApplyCoreSettings()
@@ -3004,6 +3026,12 @@ void LogGPUCapabilities()
 void VMManager::LogCPUCapabilities()
 {
 	Console.WriteLn(Color_StrongGreen, "PCSX2 %s", BuildVersion::GitRev);
+	// Cenit 0.6.14: hasta ahora el log solo decía la rev de PCSX2, nunca la
+	// versionName de la APK ni el hash completo. Con dos Cenit instalados uno
+	// detrás de otro no había forma de saber cuál escribió el log.
+	Console.WriteLn("Cenit build: versionName='%s' rev='%s' hash='%s' fecha='%s'",
+		BuildVersion::AppVersion, BuildVersion::GitRev,
+		BuildVersion::GitHash[0] ? BuildVersion::GitHash : "(vacio)", BuildVersion::GitDate);
 	Console.WriteLnFmt("Savestate version: 0x{:x}\n", g_SaveVersion);
 	Console.WriteLn();
 
@@ -4104,11 +4132,40 @@ void VMManager::SetEmuThreadAffinities()
 
 	s_thread_affinities_set = EmuConfig.EnableThreadPinning;
 
+	// Cenit 0.6.14: cada pasada vuelve a publicar el estado desde cero, para que
+	// el HUD nunca muestre cores de una configuración anterior (por ejemplo, los
+	// de antes de apagar el pinning a mitad de partida).
+	ThreadPinningInfo info;
+	info.mtvu = EmuConfig.Speedhacks.vuThread;
+	auto publish = [&info](bool pinning_applied) {
+		info.enabled = pinning_applied;
+		std::lock_guard<std::mutex> lock(s_pinning_info_mutex);
+		s_pinning_info = info;
+	};
+	// slot: 0=EE 1=VU1 2=GS. Registra y loguea en el mismo sitio, para que el
+	// log y el HUD no puedan divergir.
+	auto record = [](ThreadPinningInfo& i, int slot, u32 proc_id) {
+		static constexpr const char* s_role_names[3] = {"EE", "VU1", "GS"};
+		const cpuinfo_processor* proc = cpuinfo_get_processor(proc_id);
+		if (!proc)
+		{
+			INFO_LOG("  {} -> processor {} | desconocido para cpuinfo", s_role_names[slot], proc_id);
+			return; // known se queda false -> el HUD imprime unknown
+		}
+		i.processor[slot] = static_cast<int>(proc_id);
+		i.cluster[slot] = proc->cluster ? proc->cluster->cluster_id : 0xFFFFFFFFu;
+		i.freq_khz[slot] = proc->core ? static_cast<unsigned>(proc->core->frequency) : 0u;
+		i.known[slot] = true;
+		INFO_LOG("  {} -> processor {} | cluster {} | {:.0f} MHz", s_role_names[slot], proc_id,
+			i.cluster[slot], static_cast<double>(i.freq_khz[slot]) / 1000.0);
+	};
+
 	EnsureCPUInfoInitialized();
 
 	if (s_processor_list.empty())
 	{
 		// not supported on this platform
+		publish(false);
 		return;
 	}
 
@@ -4122,6 +4179,10 @@ void VMManager::SetEmuThreadAffinities()
 		vu1Thread.GetThreadHandle().SetAffinity(0);
 		s_vm_thread_handle.SetAffinity(0);
 		s_software_renderer_processor_list = {};
+		// Sin fijar los hilos quedan flotando. NO se registran los cores que el
+		// repartidor habría elegido: un HUD que dijera "EE core=7" con el pinning
+		// apagado se leería como si de verdad estuviera ahí. known=false -> unknown.
+		publish(false);
 		return;
 	}
 
@@ -4131,28 +4192,17 @@ void VMManager::SetEmuThreadAffinities()
 	const u32 gs_index = s_processor_list[mtvu ? 2 : 1];
 	INFO_LOG("Processor order assignment: EE={}, VU={}, GS={}", ee_index, vu_index, gs_index);
 
-	// Cenit 0.6.13 (revisión de ingeniería, prioridad 3): el índice por sí solo no
-	// prueba que sea el core rápido — el orden viene de cpuinfo y un kernel/ROM
-	// mal reportado puede engañar. Se imprime también cluster y frecuencia máxima
-	// de cada procesador elegido, para que un log del teléfono responda "¿EE cayó
-	// de verdad en el prime?" sin adivinar. Mismo acceso que el código de abajo
-	// (cpuinfo_get_processor + cluster_id); null-guard por si el índice no está.
-	auto logPinnedCore = [](const char* role, u32 proc_id) {
-		const cpuinfo_processor* proc = cpuinfo_get_processor(proc_id);
-		if (!proc)
-		{
-			INFO_LOG("  {} -> processor {} (desconocido para cpuinfo)", role, proc_id);
-			return;
-		}
-		const u32 cluster = proc->cluster ? proc->cluster->cluster_id : 0xFFFFFFFFu;
-		const u64 freq = proc->core ? proc->core->frequency : 0u; // kHz
-		INFO_LOG("  {} -> processor {} | cluster {} | {:.0f} MHz", role, proc_id, cluster,
-			static_cast<double>(freq) / 1000.0);
-	};
-	logPinnedCore("EE", ee_index);
+	// Cenit 0.6.13 (revisión de ingeniería, prioridad 3) / 0.6.14: el índice por
+	// sí solo no prueba que sea el core rápido — el orden viene de cpuinfo y un
+	// kernel/ROM mal reportado puede engañar. Se registra cluster y frecuencia
+	// máxima de cada procesador elegido: sale en el log (para quien conecte adb)
+	// y en el HUD (para decidir sin conectar nada). record() deja known=false si
+	// cpuinfo no conoce el índice, y entonces el log dice unknown en vez de 0.
+	record(info, 0, ee_index);
 	if (mtvu)
-		logPinnedCore("VU1", vu_index);
-	logPinnedCore("GS", gs_index);
+		record(info, 1, vu_index);
+	record(info, 2, gs_index);
+	publish(true);
 
 	const u64 ee_affinity = static_cast<u64>(1) << ee_index;
 	INFO_LOG("  EE thread is on processor {} (0x{:x})", ee_index, ee_affinity);
@@ -4191,6 +4241,12 @@ void VMManager::SetEmuThreadAffinities()
 
 		s_software_renderer_processor_list.push_back(proc_index);
 	}
+}
+
+VMManager::ThreadPinningInfo VMManager::GetThreadPinningInfo()
+{
+	std::lock_guard<std::mutex> lock(s_pinning_info_mutex);
+	return s_pinning_info;
 }
 
 const std::vector<u32>& VMManager::Internal::GetSoftwareRendererProcessorList()
