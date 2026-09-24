@@ -51,7 +51,8 @@ jobs:
       - name: Herramientas del sistema
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build patchelf flex bison zip unzip curl git python3-pip
+          sudo apt-get install -y ninja-build patchelf flex bison zip unzip curl git python3-pip \
+            glslang-tools libglslang-dev
           # Mesa pide meson >= 1.4/1.5; el paquete de Ubuntu es viejo. Se instala
           # por pip a ~/.local y se pone esa ruta AL FRENTE del PATH.
           python3 -m pip install --user --upgrade "meson>=1.5.0" mako
