@@ -108,5 +108,20 @@ namespace Vulkan
 	/// Pass empty strings to revert to the system loader on next load.
 	void SetCustomDriverPath(const char* driver_dir, const char* driver_name,
 		const char* redirect_dir, const char* hook_lib_dir);
+
+	/// Ajuste fino del driver personalizado, aplicado como variables de entorno ANTES
+	/// de cargarlo. Turnip lee TU_DEBUG y MESA_SHADER_CACHE_* por getenv() en el arranque
+	/// del driver (src/util/os_misc.c), asi que setenv() aqui es suficiente: no hace
+	/// falta recompilar Mesa. Pass null/empty to leave each one unset.
+	///   tu_debug    -> lista de banderas Turnip (p. ej. "nocb,noconcurrentresolves")
+	///   cache_dir   -> directorio escribible para el cache de shaders en disco; vacio
+	///                  deja el cache apagado (en Android Mesa lo trae apagado por defecto)
+	///   app_name    -> nombre de aplicacion que Cenit declara al crear la instancia
+	///                  Vulkan; es la clave con la que el driver puede reconocer el juego
+	void SetCustomDriverEnv(const char* tu_debug, const char* cache_dir, const char* app_name);
+
+	/// Nombre de aplicacion a declarar en VkApplicationInfo, o nullptr para el de siempre.
+	/// Solo se fija cuando hay driver personalizado activo.
+	const char* GetDriverApplicationName();
 #endif
 } // namespace Vulkan

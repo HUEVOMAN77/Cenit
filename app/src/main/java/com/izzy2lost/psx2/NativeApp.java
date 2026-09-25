@@ -572,6 +572,13 @@ public class NativeApp {
     // Vulkan::SetCustomDriverPath in VKLoader.cpp for why.
     public static native void setCustomVulkanDriver(String driverDir, String driverName,
                                                      String redirectDir, String hookLibDir);
+
+    // Ajuste fino del driver personalizado (Cenit 0.6.20): banderas TU_DEBUG, ruta del
+    // cache de shaders en disco y applicationName que la instancia Vulkan declara para
+    // que el driconf del driver enganche sus reglas por-juego. Cadena vacia = no aplicar.
+    // Debe ir despues de setCustomVulkanDriver y antes de runVMThread.
+    public static native void setCustomVulkanDriverTuning(String tuDebug, String shaderCacheDir,
+                                                          String appName);
     public static native String getLastVMError();
     public static native void setVerifiedBiosFiles(String usaBios, String europeBios,
                                                    String japanBios, String arcadeBios);

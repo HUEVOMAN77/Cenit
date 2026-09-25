@@ -21,16 +21,20 @@ on:
       mesa_ref:
         description: "Etiqueta o rama de Mesa (gitlab freedesktop/mesa)"
         type: string
-        default: "mesa-25.2.8"
+        default: "mesa-25.3.6"
       buildtype:
         description: "Tipo de build"
         type: choice
         options: [release, debugoptimized, plain]
         default: debugoptimized
       lto:
-        description: "ThinLTO (más lento de compilar, ~mismo rendimiento)"
+        description: "ThinLTO (más lento de compilar, mejores llamadas cruzadas)"
         type: boolean
-        default: false
+        default: true
+      cenit_driconf:
+        description: "Hornear configs/cenit-driconf/00-cenit.conf dentro del driver (reglas por juego)"
+        type: boolean
+        default: true
       make_release:
         description: "Publicar el pack como Release (cenit-turnip-*)"
         type: boolean
@@ -48,6 +52,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
+      # Necesario para tener configs/cenit-driconf/ en el runner (el resto del
+      # workflow trabaja contra la fuente de Mesa clonada, no contra este repo).
+      - name: Checkout Cenit
+        uses: actions/checkout@v4
+
       - name: Herramientas del sistema
         run: |
           sudo apt-get update
@@ -96,6 +105,36 @@ jobs:
           cpu = 'x86_64'
           endian = 'little'
           EOF
+
+      - name: Reglas por juego de Cenit (driconf horneado)
+        # Android no tiene expat y Mesa lo bloquea a propósito (meson.build: "xmlconfig
+        # not available on Android"), así que aquí el driconf NO se lee de un archivo en
+        # tiempo de ejecución: se COMPILA. src/util/meson.build acumula los .conf de
+        # files_drirc, driconf_static.py los convierte en driconf_static.h y se quedan
+        # dentro de vulkan.cenit.so. Cenit declara el serial del juego como
+        # applicationName de la instancia Vulkan (GSDeviceVK.cpp) y xmlconfig.c lo
+        # empareja contra application_name_match, que es una regex.
+        #
+        # El archivo vive en el repo (configs/cenit-driconf/) y se puede reemplazar con
+        # el que Cenit exporta desde Ajustes → Controlador gráfico personalizado, así las
+        # reglas del usuario entran al driver sin tocar código de Mesa.
+        if: inputs.cenit_driconf
+        run: |
+          set -euo pipefail
+          CONF="configs/cenit-driconf/00-cenit.conf"
+          test -f "$CONF"
+          cp "$CONF" mesa/src/util/00-cenit.conf
+          python3 - <<'PY'
+          import io
+          p = 'mesa/src/util/meson.build'
+          s = io.open(p, encoding='utf-8').read()
+          old = "files_drirc = files('00-mesa-defaults.conf')"
+          new = "files_drirc = files('00-mesa-defaults.conf', '00-cenit.conf')"
+          assert s.count(old) == 1, 'ancla de files_drirc no encontrada (¿cambió Mesa?)'
+          io.open(p, 'w', encoding='utf-8').write(s.replace(old, new))
+          print('00-cenit.conf añadido a files_drirc')
+          PY
+          python3 -c "import xml.etree.ElementTree as ET; ET.parse('mesa/src/util/00-cenit.conf'); print('00-cenit.conf XML válido')"
 
       - name: Configurar (solo Vulkan freedreno, KMD kgsl)
         working-directory: mesa
@@ -175,4 +214,4 @@ jobs:
           TAG="cenit-turnip-$(date -u +%Y%m%d-%H%M)"
           gh release create "$TAG" "$PACK" \
             --title "Cenit Turnip (${{ inputs.mesa_ref }})" \
-            --notes "Driver-pack Turnip compilado por Cenit desde Mesa ${{ inputs.mesa_ref }} (buildtype ${{ inputs.buildtype }}, LTO ${{ inputs.lto }}). Importar este .zip en Cenit → Ajustes → Controlador gráfico personalizado, y tocar «Forzar otra vez el driver seleccionado». Los símbolos (.dbg) quedan en el artefacto del workflow para traducir direcciones de backtrace reales; este pack no los incluye a propósito."
+            --notes "Driver-pack Turnip compilado por Cenit desde Mesa ${{ inputs.mesa_ref }} (buildtype ${{ inputs.buildtype }}, ThinLTO ${{ inputs.lto }}, reglas por juego ${{ inputs.cenit_driconf }}). Importar este .zip en Cenit → Ajustes → Controlador gráfico personalizado, y tocar «Forzar otra vez el driver seleccionado». Los símbolos (.dbg) quedan en el artefacto del workflow para traducir direcciones de backtrace reales; este pack no los incluye a propósito."

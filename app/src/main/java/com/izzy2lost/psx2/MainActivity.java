@@ -91,6 +91,19 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
             java.util.concurrent.Executors.newSingleThreadExecutor();
 
     private String m_szGamefile = "";
+    // Cenit 0.6.20: ultimo juego arrancado, visible para el dialogo de driver cuando se
+    // abre desde Ajustes (sin juego delante). Lo usa para etiquetar medidas y reglas.
+    private static volatile String sLastBootedGameUri = "";
+
+    /** URI del juego que tiene la Activity ahora mismo. */
+    public String getSelectedGameUri() {
+        return m_szGamefile == null ? "" : m_szGamefile;
+    }
+
+    public static String lastBootedGameUri() {
+        final String v = sLastBootedGameUri;
+        return v == null ? "" : v;
+    }
     private boolean mRaLoginPromptScheduled = false;
     private boolean mAddingGamesFolder = false;
 
@@ -151,6 +164,43 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
     // marca, cerrar la app durante la ventana de gracia culparía al driver.
     private volatile boolean mIntentionalExit = false;
     private final android.os.Handler mHomeHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    // Cenit 0.6.20: muestreador del ajuste fino del driver. Toma el FPS que el propio
+    // HUD muestra y lo acumula por (driver, juego, perfil), para que el dialogo de
+    // driver pueda decir "con este perfil este juego sostuvo X fps en ESTE telefono"
+    // en lugar de prometer mejoras sin evidencia. Solo corre con juego delante y con
+    // un driver personalizado activo; con el driver del sistema no hay nada que medir.
+    private final Runnable mDriverStatSampler = new Runnable() {
+        @Override
+        public void run() {
+            if (isFinishing() || isDestroyed()) return;
+            if (!isThread()) return;
+            try {
+                final String driverId = CustomDriverDialogFragment.getSelectedDriverId(
+                        getApplicationContext());
+                if (driverId != null && !driverId.isEmpty() && !mFastForwardEnabled) {
+                    final int tier = NativeApp.getDevicePerformanceTier();
+                    final String serial = TurnipTuning.serialForGame(
+                            getApplicationContext(), m_szGamefile);
+                    final boolean suspended = CustomDriverManager.isTuningSuspended(
+                            getApplicationContext(), driverId, m_szGamefile);
+                    final boolean cacheOff = getSharedPreferences("app_prefs", MODE_PRIVATE)
+                            .getBoolean(TurnipTuning.KEY_CACHE_OFF, false);
+                    // La muestra se etiqueta con lo que DE VERDAD está puesto (regla del
+                    // juego, perfil de gama, cache on/off). Etiquetar por el nombre del
+                    // perfil mentiría cuando manda una regla o cuando el guardarraya ya
+                    // retiró las banderas.
+                    final String bucket = TurnipTuning.appliedBucket(getApplicationContext(), tier,
+                            serial, suspended, cacheOff);
+                    DriverStats.sample(getApplicationContext(), driverId, serial, bucket,
+                            NativeApp.safeGetFPS());
+                }
+            } catch (Throwable ignored) {
+                // Medir nunca puede tumbar el juego.
+            }
+            mHomeHandler.postDelayed(this, 1200);
+        }
+    };
+
     private final Runnable mVmEndWatcher = new Runnable() {
         @Override
         public void run() {
@@ -1177,6 +1227,11 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         mHomeHandler.removeCallbacks(mVmEndWatcher);
         if (playing) mHomeHandler.postDelayed(mVmEndWatcher, 600);
 
+        // Muestreador del ajuste fino del driver (0.6.20).
+        mHomeHandler.removeCallbacks(mDriverStatSampler);
+        if (playing) mHomeHandler.postDelayed(mDriverStatSampler, 3000);
+        else DriverStats.flush(getApplicationContext());
+
         // El regidor de resolución solo mide con un juego delante.
         if (mDynRes == null) {
             mDynRes = new DynamicResolutionGovernor(this, new DynamicResolutionGovernor.Host() {
@@ -1271,6 +1326,8 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         mEmulationRestarting = true;
         mIntentionalExit = true;
         mHomeHandler.removeCallbacks(mVmEndWatcher);
+        mHomeHandler.removeCallbacks(mDriverStatSampler);
+        DriverStats.flush(getApplicationContext());
         // Cenit 0.6.8: salida deliberada. Si el guardarraya de drivers tenía un
         // intento pendiente, aquí se limpia: el usuario se fue, el driver no falló.
         // Sin esto, salir de un juego dentro de la ventana de gracia culparía al
@@ -2580,6 +2637,7 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
             }
 
             final String gameFile = m_szGamefile;
+            sLastBootedGameUri = gameFile == null ? "" : gameFile;
             // Reapply on every boot, including surface-triggered starts and game switches.
             // This also clears graphics overrides left in the base layer by the last game.
             applySavedSettings();

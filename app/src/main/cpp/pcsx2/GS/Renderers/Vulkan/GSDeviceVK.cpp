@@ -119,6 +119,15 @@ VkInstance GSDeviceVK::CreateVulkanInstance(const WindowInfo& wi, OptionalExtens
 		BuildVersion::GitTagHi, BuildVersion::GitTagMid, BuildVersion::GitTagLo);
 	app_info.apiVersion = VK_API_VERSION_1_1;
 
+#if defined(__ANDROID__)
+	// Con driver Turnip activo, Cenit declara aqui el serial del juego en curso. Mesa
+	// usa applicationName para emparejar reglas de driconf (xmlconfig.c
+	// application_name_match), asi que el driver puede comportarse distinto por juego
+	// sin recompilar nada. Sin driver personalizado, o sin serial, se queda "PCSX2".
+	if (const char* driver_app = Vulkan::GetDriverApplicationName())
+		app_info.pApplicationName = driver_app;
+#endif
+
 	VkInstanceCreateInfo instance_create_info = {};
 	instance_create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 	instance_create_info.pNext = nullptr;

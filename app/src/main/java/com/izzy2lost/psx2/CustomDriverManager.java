@@ -282,6 +282,12 @@ public final class CustomDriverManager {
     private static final String KEY_PENDING = "cdv_pending";
     private static final String KEY_FAILED = "cdv_failed";
     private static final String KEY_NOTICE = "cdv_notice";
+    // Cenit 0.6.20: el ajuste fino (perfil TU_DEBUG + cache de shaders) es nuestro, no
+    // del driver. Si un juego revienta JUSTO con él puesto, lo primero que se retira es
+    // NUESTRO ajuste, no el driver: sería injusto condenar un controlador que iba bien
+    // porque nosotros le metimos una bandera que ese juego no tolera.
+    private static final String KEY_PENDING_TUNED = "cdv_pending_tuned";
+    private static final String KEY_TUNE_SUSPENDED = "cdv_tune_off";
 
     private static android.content.SharedPreferences prefs(Context c) {
         return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
@@ -312,8 +318,19 @@ public final class CustomDriverManager {
     /** Marca el intento en curso. Llamar ANTES de arrancar el VM, con el driver
      *  que realmente se va a usar. */
     public static void beginAttempt(Context context, String driverId, String gameKey) {
+        beginAttempt(context, driverId, gameKey, false);
+    }
+
+    /** tuned = a este intento se le está aplicando ajuste fino de Cenit. Si el intento
+     *  muere, la primera reacción es quitar EL ajuste fino (y avisar), no culpar al
+     *  driver: culpar al driver queda para la segunda muerte, ya sin nuestro grano de
+     *  arena encima. */
+    public static void beginAttempt(Context context, String driverId, String gameKey, boolean tuned) {
         if (driverId == null || driverId.isEmpty() || gameKey == null || gameKey.isEmpty()) return;
-        prefs(context).edit().putString(KEY_PENDING, attemptKey(driverId, gameKey)).apply();
+        prefs(context).edit()
+                .putString(KEY_PENDING, attemptKey(driverId, gameKey))
+                .putBoolean(KEY_PENDING_TUNED, tuned)
+                .apply();
     }
 
     /** true si hay un intento de arranque sin confirmar en este momento. */
@@ -331,8 +348,35 @@ public final class CustomDriverManager {
     /** Descarta un intento en curso sin marcar nada (p. ej. el driver ya fue
      *  excluido para este juego, o no hay driver activo). */
     public static void clearAttempt(Context context) {
-        if (prefs(context).getString(KEY_PENDING, null) == null) return;
-        prefs(context).edit().remove(KEY_PENDING).apply();
+        final android.content.SharedPreferences p = prefs(context);
+        if (p.getString(KEY_PENDING, null) == null) return;
+        p.edit().remove(KEY_PENDING).remove(KEY_PENDING_TUNED).apply();
+    }
+
+    /** true si a ese par driver+juego se le suspendió el ajuste fino tras un cierre. */
+    public static boolean isTuningSuspended(Context context, String driverId, String gameKey) {
+        if (driverId == null || driverId.isEmpty() || gameKey == null || gameKey.isEmpty()) return false;
+        return isSuspendedKey(context, attemptKey(driverId, gameKey));
+    }
+
+    private static boolean isSuspendedKey(Context context, String key) {
+        final String off = prefs(context).getString(KEY_TUNE_SUSPENDED, "");
+        return off != null && off.contains(";" + key + ";");
+    }
+
+    /** "Forzar otra vez" también le devuelve la oportunidad al ajuste fino: la suspensión
+     *  existe justamente porque el usuario no la pidió. */
+    public static void clearTuningSuspensionForDriver(Context context, String driverId) {
+        if (driverId == null || driverId.isEmpty()) return;
+        final android.content.SharedPreferences p = prefs(context);
+        final String off = p.getString(KEY_TUNE_SUSPENDED, "");
+        if (off == null || off.isEmpty()) return;
+        final StringBuilder kept = new StringBuilder(";");
+        for (String entry : off.split(";")) {
+            if (entry.isEmpty() || entry.startsWith(driverId + "|")) continue;
+            kept.append(entry).append(';');
+        }
+        p.edit().putString(KEY_TUNE_SUSPENDED, kept.length() == 1 ? "" : kept.toString()).apply();
     }
 
     /** Quita todos los fracasos atribuidos a un driver: el usuario volvió a
@@ -371,7 +415,23 @@ public final class CustomDriverManager {
         final android.content.SharedPreferences p = prefs(context);
         final String pending = p.getString(KEY_PENDING, null);
         if (pending == null || pending.isEmpty()) return;
-        p.edit().remove(KEY_PENDING).apply();
+        final boolean wasTuned = p.getBoolean(KEY_PENDING_TUNED, false);
+        p.edit().remove(KEY_PENDING).remove(KEY_PENDING_TUNED).apply();
+
+        if (wasTuned && !isSuspendedKey(context, pending)) {
+            // Murió CON nuestro ajuste fino puesto, y todavía no se lo quitamos: lo
+            // primero que se va es el ajuste fino, no el driver.
+            final String off = p.getString(KEY_TUNE_SUSPENDED, "");
+            final String base = off == null ? "" : off;
+            p.edit().putString(KEY_TUNE_SUSPENDED, ";" + base.replaceFirst("^;", "") + pending + ";").apply();
+            Log.i(TAG, "attempt " + pending + " failed WITH tuning -> tuning suspended, driver kept");
+            setFallbackNotice(context, "El juego se cerró con el ajuste fino de Cenit activado. "
+                    + "Se retiró el ajuste fino para este juego y el driver se deja como viene de fábrica. "
+                    + "Si así va bien, la bandera era nuestra: prueba otro perfil en Ajustes → "
+                    + "Controlador gráfico personalizado.");
+            return;
+        }
+
         String bad = p.getString(KEY_FAILED, "");
         if (bad == null) bad = "";
         if (!bad.contains(";" + pending + ";")) {
@@ -402,8 +462,17 @@ public final class CustomDriverManager {
      *  Vulkan::LoadVulkanLibrary call (first MTGS::Open), so this must be
      *  called BEFORE runVMThread. */
     public static void applyToNative(Context context, InstalledDriver installed) {
+        applyToNative(context, installed, null);
+    }
+
+    /** Variante con el juego en curso (URI): es la clave para el ajuste fino del
+     *  driver — el perfil TU_DEBUG va detras de la gama del telefono, y el nombre que
+     *  Cenit declara a la instancia Vulkan es la serial del juego, que es justamente
+     *  como el driconf compilado dentro del driver empareja sus reglas por-juego. */
+    public static void applyToNative(Context context, InstalledDriver installed, String gameUri) {
         if (installed == null) {
             NativeApp.setCustomVulkanDriver("", "", "", "");
+            NativeApp.setCustomVulkanDriverTuning("", "", "");
             return;
         }        // adrenotools' path resolution wants the driver dir to end with a
         // slash. The redirect dir doesn't strictly require it but we pass
@@ -414,6 +483,56 @@ public final class CustomDriverManager {
         String redirectDirPath = redirect.getAbsolutePath() + "/";
         String hookLibDir = context.getApplicationInfo().nativeLibraryDir;
         NativeApp.setCustomVulkanDriver(driverDirPath, installed.libraryName, redirectDirPath, hookLibDir);
+
+        final String tuDebug = tuningTuDebug(context, installed, gameUri);
+        final String cacheDir = tuningCacheDir(context, installed, gameUri);
+        final String appName = tuningAppName(context, installed, gameUri);
+        NativeApp.setCustomVulkanDriverTuning(
+                tuDebug == null ? "" : tuDebug,
+                cacheDir == null ? "" : cacheDir,
+                appName == null ? "" : appName);
+        Log.i(TAG, "tuning: " + TurnipTuning.describe(context, deviceTier(context))
+                + " cache=" + (cacheDir == null ? "off" : cacheDir)
+                + " app=" + (appName == null ? "<sin serial>" : appName)
+                + " reglas=" + TurnipTuning.activeRuleCount(context));
+    }
+
+    /** Gama del telefono, o -1 si el nativo no la puede resolver. */
+    private static int deviceTier(Context context) {
+        try {
+            return NativeApp.getDevicePerformanceTier();
+        } catch (Throwable t) {
+            android.util.Log.w(TAG, "tier lookup failed", t);
+            return -1;
+        }
+    }
+
+    /** Banderas TU_DEBUG efectivas, o null si no se aplica ajuste fino a este par. */
+    static String tuningTuDebug(Context context, InstalledDriver installed, String gameUri) {
+        if (installed == null || isTuningSuspended(context, installed.id, gameUri)) return null;
+        final int tier = deviceTier(context);
+        if (tier < 0) return null;
+        return TurnipTuning.tuDebugFor(context, tier, TurnipTuning.serialForGame(context, gameUri));
+    }
+
+    static String tuningCacheDir(Context context, InstalledDriver installed, String gameUri) {
+        // El cache forma parte del ajuste fino: si el par quedó suspendido, tampoco se
+        // escribe (el cache cambia caminos de código del driver: índice mmap, flock, E/S).
+        if (installed == null || isTuningSuspended(context, installed.id, gameUri)) return null;
+        return TurnipTuning.shaderCacheDir(context, installed);
+    }
+
+    static String tuningAppName(Context context, InstalledDriver installed, String gameUri) {
+        if (installed == null || isTuningSuspended(context, installed.id, gameUri)) return null;
+        return TurnipTuning.appNameForGame(context, gameUri);
+    }
+
+    /** true si el próximo arranque llevará ajuste fino de Cenit puesto. Lo usa el
+     *  guardarraya para saber qué retirar primero si el juego revienta. */
+    public static boolean willApplyTuning(Context context, InstalledDriver installed, String gameUri) {
+        return tuningTuDebug(context, installed, gameUri) != null
+                || tuningCacheDir(context, installed, gameUri) != null
+                || tuningAppName(context, installed, gameUri) != null;
     }
 
     // ---- helpers --------------------------------------------------------

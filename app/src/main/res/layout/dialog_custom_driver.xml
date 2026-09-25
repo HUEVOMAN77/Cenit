@@ -72,6 +72,90 @@
             android:textSize="12sp"
             android:textColor="?android:attr/textColorSecondary" />
 
+        <!-- Cenit 0.6.20: ajuste fino del driver Turnip. Perfil TU_DEBUG por gama,
+             cache de shaders en disco y reglas por juego. -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:layout_marginBottom="6dp"
+            android:text="AJUSTE FINO DEL DRIVER"
+            android:textStyle="bold"
+            android:textSize="14sp"
+            android:textColor="@color/brand_primary" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Solo afecta al driver personalizado importado, y únicamente con el renderer en Vulkan. Se aplica al iniciar el próximo juego."
+            android:textSize="12sp"
+            android:layout_marginBottom="10dp"
+            android:textColor="?android:attr/textColorSecondary" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Perfil de render"
+            android:textSize="14sp"
+            android:textColor="@color/brand_primary"
+            android:paddingBottom="4dp" />
+
+        <Spinner
+            android:id="@+id/sp_turnip_profile"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:id="@+id/tv_turnip_profile_note"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="12sp"
+            android:layout_marginBottom="10dp"
+            android:textColor="?android:attr/textColorSecondary" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/sw_turnip_cache"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Guardar shaders compilados (menos tirones al volver a un juego)"
+            android:textSize="14sp"
+            android:checked="true" />
+
+        <TextView
+            android:id="@+id/tv_turnip_stats"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:textSize="12sp"
+            android:textColor="?android:attr/textColorSecondary" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_turnip_rule"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="Reglas de este juego"
+            android:textAllCaps="false" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_turnip_export"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="Exportar reglas para hornearlas en el driver"
+            android:textAllCaps="false" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="El perfil y las banderas por juego se aplican con cualquier driver Turnip. Las reglas de corrección (driconf) requieren recompilar el driver con el archivo exportado; sin eso, Cenit igualmente aplica sus banderas por juego."
+            android:textSize="12sp"
+            android:textColor="?android:attr/textColorSecondary" />
+
     </LinearLayout>
 
 </ScrollView>

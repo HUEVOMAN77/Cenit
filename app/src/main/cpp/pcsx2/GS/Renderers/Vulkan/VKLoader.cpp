@@ -52,6 +52,41 @@ namespace
 	std::string s_custom_driver_name;
 	std::string s_custom_redirect_dir;
 	std::string s_custom_hook_lib_dir;
+	std::string s_driver_tu_debug;
+	std::string s_driver_cache_dir;
+	std::string s_driver_app_name;
+
+	// Turnip/Mesa consumen estos ajustes por getenv() al inicializarse (en Android
+	// os_get_option() cae a getenv primero; ver src/util/os_misc.c). Se aplican justo
+	// antes de adrenotools_open_libvulkan(), con el driver aun sin cargar. setenv()
+	// duplica la cadena en bionic, asi que no hace falta retener las nuestras.
+	void ApplyDriverEnvLocked()
+	{
+		// Cache de shaders en disco: en Android Mesa lo trae APAGADO por defecto
+		// (disk_cache_enabled() -> disable_by_default = true), por eso hay que
+		// pedirlo explicitamente con MESA_SHADER_CACHE_DISABLE=false ademas de la ruta.
+		if (!s_driver_cache_dir.empty())
+		{
+			setenv("MESA_SHADER_CACHE_DIR", s_driver_cache_dir.c_str(), 1);
+			setenv("MESA_SHADER_CACHE_DISABLE", "false", 1);
+			setenv("MESA_SHADER_CACHE_MAX_SIZE", "512M", 1);
+		}
+		else
+		{
+			unsetenv("MESA_SHADER_CACHE_DIR");
+			unsetenv("MESA_SHADER_CACHE_DISABLE");
+			unsetenv("MESA_SHADER_CACHE_MAX_SIZE");
+		}
+
+		if (!s_driver_tu_debug.empty())
+			setenv("TU_DEBUG", s_driver_tu_debug.c_str(), 1);
+		else
+			unsetenv("TU_DEBUG");
+
+		Console.WriteLn("VKLoader: driver env TU_DEBUG='%s' cache='%s'",
+			s_driver_tu_debug.empty() ? "<sin>" : s_driver_tu_debug.c_str(),
+			s_driver_cache_dir.empty() ? "<desactivado>" : s_driver_cache_dir.c_str());
+	}
 } // namespace
 
 void Vulkan::SetCustomDriverPath(const char* driver_dir, const char* driver_name,
@@ -62,6 +97,31 @@ void Vulkan::SetCustomDriverPath(const char* driver_dir, const char* driver_name
 	s_custom_driver_name  = driver_name  ? driver_name  : "";
 	s_custom_redirect_dir = redirect_dir ? redirect_dir : "";
 	s_custom_hook_lib_dir = hook_lib_dir ? hook_lib_dir : "";
+	if (s_custom_driver_name.empty())
+	{
+		// Sin driver no hay a quien aplicar el ajuste: se limpia todo y se retiran las
+		// variables del entorno YA, para que el driver del sistema de este proceso no
+		// herede las banderas del intento anterior (TryOpenAdrenotoolsDriver no se
+		// llama en este caso, asi que aqui es la unica oportunidad de limpiarlas).
+		s_driver_tu_debug.clear();
+		s_driver_cache_dir.clear();
+		s_driver_app_name.clear();
+		ApplyDriverEnvLocked();
+	}
+}
+
+void Vulkan::SetCustomDriverEnv(const char* tu_debug, const char* cache_dir, const char* app_name)
+{
+	std::lock_guard lock(s_custom_driver_mutex);
+	s_driver_tu_debug   = tu_debug  ? tu_debug  : "";
+	s_driver_cache_dir  = cache_dir ? cache_dir : "";
+	s_driver_app_name   = app_name  ? app_name  : "";
+}
+
+const char* Vulkan::GetDriverApplicationName()
+{
+	std::lock_guard lock(s_custom_driver_mutex);
+	return s_driver_app_name.empty() ? nullptr : s_driver_app_name.c_str();
 }
 
 static bool TryOpenAdrenotoolsDriver(DynamicLibrary& library, Error* error)
@@ -86,6 +146,10 @@ static bool TryOpenAdrenotoolsDriver(DynamicLibrary& library, Error* error)
 		driver_dir.c_str(), driver_name.c_str(),
 		redirect_dir.empty() ? "<none>" : redirect_dir.c_str(),
 		hook_lib_dir.c_str());
+
+	// El ajuste fino se aplica con el mutex tomado aun, antes de cargar el driver:
+	// Turnip lee TU_DEBUG una sola vez en su init, tarde ya no sirve.
+	ApplyDriverEnvLocked();
 
 	// adrenotools_open_libvulkan takes tmpLibDir for API < 29 fallback; pass null to
 	// use memfd which is fine on every modern device. The trailing slash in driver_dir /

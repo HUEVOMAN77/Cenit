@@ -2452,6 +2452,20 @@ Java_com_izzy2lost_psx2_NativeApp_setCustomVulkanDriver(
 #endif
 }
 
+// Ajuste fino del driver personalizado (Cenit 0.6.20). Vacios = sin ajuste.
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setCustomVulkanDriverTuning(
+    JNIEnv* env, jclass clazz,
+    jstring tuDebug, jstring shaderCacheDir, jstring appName) {
+#if defined(__ANDROID__)
+    const std::string flags = GetJavaString(env, tuDebug);
+    const std::string cache = GetJavaString(env, shaderCacheDir);
+    const std::string app   = GetJavaString(env, appName);
+    Vulkan::SetCustomDriverEnv(flags.c_str(), cache.c_str(), app.c_str());
+#endif
+}
+
 extern "C"
 JNIEXPORT jstring JNICALL
 Java_com_izzy2lost_psx2_NativeApp_getLastVMError(JNIEnv *env, jclass clazz) {
