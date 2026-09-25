@@ -309,6 +309,14 @@ void mVUsetupBranch(mV, microFlagCycles& mFC)
 
 void normBranchCompile(microVU& mVU, u32 branchPC)
 {
+	// Fase 1.6 (sonda ON): arista estatica A->B del bloque que se esta
+	// compilando (mVUstartPC, en bytes) al objetivo conocido branchPC
+	// (bytes). Se captura ANTES de cualquier recursion: mVUcompile del
+	// objetivo pisaria mVUstartPC. Un registro por bloque compilado — coste
+	// cero por ejecucion.
+	if (mVUTraceProbe::IsEnabled() && mVU.index == 1)
+		mVUTraceProbe::RecordStaticEdge(1, mVUstartPC, branchPC);
+
 	microBlock* pBlock;
 	blockCreate(branchPC / 8);
 	pBlock = mVUblocks[branchPC / 8]->search(mVU, (microRegInfo*)&mVUregs);

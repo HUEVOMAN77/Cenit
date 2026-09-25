@@ -28,6 +28,7 @@ namespace mVUTraceProbe
 	std::atomic<bool> g_enabled{false};
 	VuFlow g_flow[2];
 	BlockShape g_shape[2][kBlkPcs];
+	BlockEdge g_edges[2][kBlkPcs];
 	TransitionEntry g_transitions[2][kTransitionCap];
 	ProgramEntry g_programs[2][kProgramCap];
 	std::atomic<u32> g_usedTransitions[2];
@@ -155,6 +156,7 @@ namespace mVUTraceProbe
 		std::memset(slots0, 0, kProbeSlots * sizeof(u64));
 		std::memset(slots1, 0, kProbeSlots * sizeof(u64));
 		std::memset(g_shape, 0, sizeof(g_shape)); // Fase 1.5: formas viejas fuera
+		std::memset(g_edges, 0, sizeof(g_edges)); // Fase 1.6: idem aristas
 		g_enabled.store(true, std::memory_order_relaxed);
 		Console.WriteLn(Color_StrongGreen, "VUprobe: sonda ACTIVADA — midiendo dispatcher/bloques/secuencias "
 			"(cache en disco en pausa; el informe sale al apagar la sonda, al parar el juego o a peticion)");
@@ -267,6 +269,22 @@ namespace mVUTraceProbe
 		s.cycles = cycles;
 		s.reason = reason;
 		s.pad = 0;
+	}
+
+	void RecordStaticEdge(int vu, u32 srcPC_bytes, u32 dstPC_bytes)
+	{
+		// Llamado desde normBranchCompile (hilo compilador del bloque src,
+		// sonda ON). Un bloque puede enlazar a un solo objetivo estatico por
+		// compilacion; si se recompila con otro, ultimo gana (coherente con
+		// la forma). dst fuera del rango de 2048 PCs de entrada no puede
+		// pasar: microMemSize <= 0x4000 y el indice enmascara igual que los
+		// slots de ejecucion.
+		const u32 si = (srcPC_bytes >> 3) & kProbeSlotMask;
+		const u32 di = (dstPC_bytes >> 3) & kProbeSlotMask;
+		BlockEdge& e = g_edges[vu][si];
+		e.succIdx = static_cast<u16>(di);
+		e.kind = 1; // rama estatica enlazada
+		e.pad = 0;
 	}
 
 	// ------------------------------------------------------------------
@@ -410,6 +428,40 @@ namespace mVUTraceProbe
 			}
 		}
 
+		// Fase 1.6: candidatos de fusion A->B por arista estatica.
+		struct FusionCand { u32 src, dst; u64 execsSrc, execsDst, benefit; u16 opsSrc, opsDst; u8 self; };
+		FusionCand cands[40];
+		u32 nCands = 0;
+		u64 benefitTotal = 0;
+		{
+			const u64* slots1 = SlotArray(1);
+			for (u32 i = 0; i < kBlkPcs; i++)
+			{
+				const BlockEdge& e = g_edges[1][i];
+				const u64 vs = slots1[i];
+				if (!e.kind || !vs || g_shape[1][i].reason == 0)
+					continue;
+				const u32 j = e.succIdx;
+				const u64 vd = slots1[j];
+				if (!vd || g_shape[1][j].reason == 0)
+					continue; // sucesor sin forma/ejecuciones: nada que rankear
+				const u64 ben = (vs < vd) ? vs : vd;
+				benefitTotal += ben;
+				FusionCand c{i * 8u, j * 8u, vs, vd, ben,
+					g_shape[1][i].ops, g_shape[1][j].ops,
+					static_cast<u8>((i == j) ? 1 : 0)};
+				const u32 k = 40;
+				if (nCands == k && ben <= cands[k - 1].benefit)
+					continue;
+				u32 p = (nCands == k) ? k - 1 : nCands;
+				for (; p > 0 && ben > cands[p - 1].benefit; p--)
+					cands[p] = cands[p - 1];
+				cands[p] = c;
+				if (nCands < k)
+					nCands++;
+			}
+		}
+
 		const std::string path = Path::Combine(EmuFolders::Logs, "vu_probe.txt");
 		// Rotación simple: los vuelcos INTERMEDIOS (cierre de VM o petición
 		// manual con la sonda aun encendida) son instantaneas parciales y se
@@ -493,6 +545,23 @@ namespace mVUTraceProbe
 					static_cast<unsigned long long>(workByReason[vu][r]),
 					workTotal[vu] ? 100.0 * static_cast<double>(workByReason[vu][r]) / static_cast<double>(workTotal[vu]) : 0.0);
 
+			// Fase 1.6 — la lista accionable: pares A->B unidos por rama
+			// estatica, rankeados por beneficio (entradas de bloque que
+			// desaparecerian al fusionar = min(execsA, execsB)). self=1 es
+			// bucle propio (A->A): la fusion mas limpia que hay.
+			if (vu == 1)
+			{
+				P("candidatos de fusion A->B por arista estatica (top %u; beneficio total=%llu):\n",
+					nCands, static_cast<unsigned long long>(benefitTotal));
+				for (u32 i = 0; i < nCands; i++)
+					P("  0x%04x -> 0x%04x : ben=%llu (A x%llu %uops, B x%llu %uops)%s\n",
+						cands[i].src, cands[i].dst,
+						static_cast<unsigned long long>(cands[i].benefit),
+						static_cast<unsigned long long>(cands[i].execsSrc), cands[i].opsSrc,
+						static_cast<unsigned long long>(cands[i].execsDst), cands[i].opsDst,
+						cands[i].self ? " [PROPIO]" : "");
+			}
+
 			P("secuencias repetidas A->B (entre despachos; top %u):\n", nTrans[vu]);
 			for (u32 i = 0; i < nTrans[vu]; i++)
 				P("  0x%04x -> 0x%04x : x%u\n", topTrans[vu][i].pcs >> 16,
@@ -555,6 +624,18 @@ namespace mVUTraceProbe
 			{
 				Console.WriteLn("VUprobe VU%d seq%u 0x%04x->0x%04x x%u", vu, i + 1,
 					topTrans[vu][i].pcs >> 16, topTrans[vu][i].pcs & 0xffffu, topTrans[vu][i].count);
+			}
+			// Fase 1.6: las cinco mejores aristas estaticas tambien viajan al
+			// resumen; son la lista de compras directa de la Fase 2.
+			if (vu == 1)
+			{
+				for (u32 i = 0; i < nCands && i < 5; i++)
+				{
+					Console.WriteLn("VUprobe ftop%u 0x%04x->0x%04x ben=%llu ops=%u+%u%s", i + 1,
+						cands[i].src, cands[i].dst,
+						static_cast<unsigned long long>(cands[i].benefit),
+						cands[i].opsSrc, cands[i].opsDst, cands[i].self ? " [PROPIO]" : "");
+				}
 			}
 		}
 	}

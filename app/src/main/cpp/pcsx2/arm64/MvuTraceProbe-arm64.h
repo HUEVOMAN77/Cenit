@@ -122,6 +122,32 @@ namespace mVUTraceProbe
 	void RecordBlockShape(int vu, u32 startPC_bytes, u16 ops, u16 cycles, u16 reason);
 
 	// ------------------------------------------------------------------
+	// Fase 1.6 — aristas ESTÁTICAS. La malla de secuencias (ObserveDispatch)
+	// solo ve despachos resueltos por el dispatcher; pero ~97% de las
+	// entradas de bloque VU1 son ramas internas ya enlazadas en compilacion
+	// (normBranchCompile -> armEmitJmp), invisibles para esa malla. Sin saber
+	// "A cae estaticamente sobre B", el ranking por trabajo de la 1.5 no
+	// puede emparejar fusiones. La arista se registra en C++ durante la
+	// compilacion del bloque A (una escritura por bloque compilado, coste
+	// cero por ejecucion): succ = PC de destino de la rama estatica conocida
+	// (incluida la continuacion post-M-bit). kind: 0 = sin arista, 1 = rama
+	// estatica enlazada. Ultima compilacion gana, como la forma.
+	//
+	// El informe cruza: para cada A caliente con arista, estima el beneficio
+	// de fusionar A+B como min(execs(A), execs(B)) — entradas+salidas que
+	// desaparecerian — y el tamano resultante ops(A)+ops(B).
+	// ------------------------------------------------------------------
+	struct BlockEdge
+	{
+		u16 succIdx; // (dst_bytes >> 3) & mask — indice del sucesor
+		u8  kind;    // 0 = ninguna, 1 = rama estatica (normBranchCompile)
+		u8  pad;
+	};
+	static_assert(sizeof(BlockEdge) == 4, "edge stays a small side table");
+	extern BlockEdge g_edges[2][kBlkPcs];
+	void RecordStaticEdge(int vu, u32 srcPC_bytes, u32 dstPC_bytes);
+
+	// ------------------------------------------------------------------
 	// Activación — espejo del config bool
 	// EmuCore/CPU/Recompiler/EnableVUTraceProbe.
 	//
