@@ -27,6 +27,7 @@ namespace mVUTraceProbe
 {
 	std::atomic<bool> g_enabled{false};
 	VuFlow g_flow[2];
+	BlockShape g_shape[2][kBlkPcs];
 	TransitionEntry g_transitions[2][kTransitionCap];
 	ProgramEntry g_programs[2][kProgramCap];
 	std::atomic<u32> g_usedTransitions[2];
@@ -153,6 +154,7 @@ namespace mVUTraceProbe
 		ResetAllState();
 		std::memset(slots0, 0, kProbeSlots * sizeof(u64));
 		std::memset(slots1, 0, kProbeSlots * sizeof(u64));
+		std::memset(g_shape, 0, sizeof(g_shape)); // Fase 1.5: formas viejas fuera
 		g_enabled.store(true, std::memory_order_relaxed);
 		Console.WriteLn(Color_StrongGreen, "VUprobe: sonda ACTIVADA — midiendo dispatcher/bloques/secuencias "
 			"(cache en disco en pausa; el informe sale al apagar la sonda, al parar el juego o a peticion)");
@@ -253,6 +255,20 @@ namespace mVUTraceProbe
 		return total;
 	}
 
+	void RecordBlockShape(int vu, u32 startPC_bytes, u16 ops, u16 cycles, u16 reason)
+	{
+		// Llamado desde mVUcompile (hilo compilador de ese VU, sonda ON). El
+		// slot es el MISMO indice que el contador de ejecuciones JIT, asi que
+		// shape[i] describe el bloque cuyas entradas cuenta slots[i]. Ultima
+		// compilacion gana: es la forma con la que el bloque se ejecuta ahora.
+		const u32 i = (startPC_bytes >> 3) & kProbeSlotMask;
+		BlockShape& s = g_shape[vu][i];
+		s.ops = ops;
+		s.cycles = cycles;
+		s.reason = reason;
+		s.pad = 0;
+	}
+
 	// ------------------------------------------------------------------
 	// Informe.
 	// ------------------------------------------------------------------
@@ -265,6 +281,11 @@ namespace mVUTraceProbe
 		struct SlotHit { u32 pcBytes; u64 execs; };
 		struct TransHit { u32 pcs; u32 count; };
 		struct ProgHit { u64 hashLo; u32 execs; u32 lastPC; };
+		// Fase 1.5: bloque ponderado por TRABAJO = ejecuciones x instrucciones
+		// de microcodigo. Es la metrica de seleccion de candidatos de fusion:
+		// un PC con muchas entradas pero 3 ops no paga una fusion; uno con
+		// 20M entradas x 30 ops, si.
+		struct WorkHit { u32 pcBytes; u64 execs; u64 work; u16 ops; u16 cycles; u16 reason; };
 	}
 
 	void DumpReport(const char* reason)
@@ -281,6 +302,10 @@ namespace mVUTraceProbe
 		SlotHit topSlots[2][kTopSlots];
 		u32 nSlots[2] = {};
 		u64 grand[2] = {};
+		WorkHit topWork[2][kTopSlots];
+		u32 nWork[2] = {};
+		u64 workTotal[2] = {};
+		u64 workShown[2] = {};
 		for (int vu = 0; vu < 2; vu++)
 		{
 			const u64* slots = SlotArray(vu);
@@ -303,6 +328,30 @@ namespace mVUTraceProbe
 				if (nSlots[vu] < k)
 					nSlots[vu]++;
 			}
+			// Fase 1.5 — ranking por trabajo (ejecuciones x ops). workTotal
+			// suma sobre todos los PCs con forma registrada; es la cifra que
+			// la Fase 2 intenta bajar al fusionar entradas de bloque.
+			for (u32 i = 0; i < kBlkPcs; i++)
+			{
+				const u64 v = slots[i];
+				const BlockShape& s = g_shape[vu][i];
+				if (!v || s.reason == 0)
+					continue; // sin forma (PC compilado con sonda OFF)
+				const u64 w = v * static_cast<u64>(s.ops);
+				workTotal[vu] += w;
+				WorkHit c{i * 8u, v, w, s.ops, s.cycles, s.reason};
+				const u32 k = kTopSlots;
+				if (nWork[vu] == k && w <= topWork[vu][k - 1].work)
+					continue;
+				u32 j = (nWork[vu] == k) ? k - 1 : nWork[vu];
+				for (; j > 0 && w > topWork[vu][j - 1].work; j--)
+					topWork[vu][j] = topWork[vu][j - 1];
+				topWork[vu][j] = c;
+				if (nWork[vu] < k)
+					nWork[vu]++;
+			}
+			for (u32 i = 0; i < nWork[vu]; i++)
+				workShown[vu] += topWork[vu][i].work;
 		}
 
 		TransHit topTrans[2][kTopTrans];
@@ -407,6 +456,22 @@ namespace mVUTraceProbe
 				P("  (resto: %llu ejecuciones en PCs fuera del top)\n",
 					static_cast<unsigned long long>(grand[vu] - shown));
 
+			// Fase 1.5 — el ranking que elige candidatos de fusion: trabajo =
+			// ejecuciones x instrucciones del bloque. reason: 1 rama, 2 M-bit,
+			// 3 fin-microMem, 4 presupuesto-ciclos, 5 otro.
+			P("bloques por TRABAJO (ejecuciones x ops; total=%llu; top %u = %llu):\n",
+				static_cast<unsigned long long>(workTotal[vu]), nWork[vu],
+				static_cast<unsigned long long>(workShown[vu]));
+			for (u32 i = 0; i < nWork[vu]; i++)
+				P("  PC=0x%04x  x%llu  ops=%u  ciclos=%u  r=%u  trabajo=%llu\n",
+					topWork[vu][i].pcBytes,
+					static_cast<unsigned long long>(topWork[vu][i].execs),
+					topWork[vu][i].ops, topWork[vu][i].cycles, topWork[vu][i].reason,
+					static_cast<unsigned long long>(topWork[vu][i].work));
+			if (workTotal[vu] > workShown[vu])
+				P("  (resto: %llu de trabajo fuera del top; PCs sin forma registrada quedan excluidos)\n",
+					static_cast<unsigned long long>(workTotal[vu] - workShown[vu]));
+
 			P("secuencias repetidas A->B (entre despachos; top %u):\n", nTrans[vu]);
 			for (u32 i = 0; i < nTrans[vu]; i++)
 				P("  0x%04x -> 0x%04x : x%u\n", topTrans[vu][i].pcs >> 16,
@@ -452,6 +517,17 @@ namespace mVUTraceProbe
 			{
 				Console.WriteLn("VUprobe VU%d top%u PC=0x%04x x%llu", vu, i + 1,
 					topSlots[vu][i].pcBytes, static_cast<unsigned long long>(topSlots[vu][i].execs));
+			}
+			// Fase 1.5: el top por trabajo es lo que decide la Fase 2, asi que
+			// tambien viaja en el resumen (el boton "Enviar registro" no lleva
+			// el vu_probe.txt completo).
+			for (u32 i = 0; i < nWork[vu] && i < 10; i++)
+			{
+				Console.WriteLn("VUprobe VU%d wtop%u PC=0x%04x x%llu ops=%u ciclos=%u r=%u trab=%llu",
+					vu, i + 1, topWork[vu][i].pcBytes,
+					static_cast<unsigned long long>(topWork[vu][i].execs),
+					topWork[vu][i].ops, topWork[vu][i].cycles, topWork[vu][i].reason,
+					static_cast<unsigned long long>(topWork[vu][i].work));
 			}
 			for (u32 i = 0; i < nTrans[vu] && i < 10; i++)
 			{

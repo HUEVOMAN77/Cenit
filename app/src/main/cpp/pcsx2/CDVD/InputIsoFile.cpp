@@ -37,6 +37,30 @@ static const char* nameFromType(int type)
 	}
 }
 
+// Cenit 0.6.16: un archivo con 0 bloques (copia truncada, descarga a medias)
+// hacia que CADA lectura de CDVD cayera fuera de rango y el ERROR_LOG de
+// abajo se repitiera miles de veces por segundo: el reporte del usuario
+// registro 1122258->1122473 en 20 segundos, llenando emulog y el logcat.
+// Ojo: el lsn CAMBIA en cada lectura (avanza por el disco), asi que "una
+// linea por lsn" no cortaria nada — el criterio es una linea por archivo;
+// se re-arma solo cuando cambia el archivo abierto.
+__fi static void LogPastEndOfFileOnce(const std::string& file, uint lsn, u32 blocks)
+{
+	static std::string s_last_file;
+	static bool s_reported = false;
+
+	if (file != s_last_file)
+	{
+		s_last_file = file;
+		s_reported = false;
+	}
+	if (!s_reported)
+	{
+		s_reported = true;
+		ERROR_LOG("isoFile error: Block index is past the end of file! ({} >= {}) — repeticiones enmudecidas para este archivo.", lsn, blocks);
+	}
+}
+
 static std::unique_ptr<ThreadedFileReader> GetFileReader(const std::string& path)
 {
 	const std::string_view extension = Path::GetExtension(path);
@@ -60,7 +84,7 @@ int InputIsoFile::ReadSync(u8* dst, uint lsn)
 {
 	if (lsn >= m_blocks)
 	{
-		ERROR_LOG("isoFile error: Block index is past the end of file! ({} >= {}).", lsn, m_blocks);
+		LogPastEndOfFileOnce(m_filename, lsn, m_blocks);
 		return -1;
 	}
 
@@ -75,7 +99,7 @@ void InputIsoFile::BeginRead2(uint lsn)
 	{
 		// While this usually indicates that the ISO is corrupted, some games do attempt
 		// to read past the end of the disc, so don't error here.
-		ERROR_LOG("isoFile error: Block index is past the end of file! ({} >= {}).", lsn, m_blocks);
+		LogPastEndOfFileOnce(m_filename, lsn, m_blocks);
 		return;
 	}
 

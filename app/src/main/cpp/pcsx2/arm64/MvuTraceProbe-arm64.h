@@ -89,6 +89,39 @@ namespace mVUTraceProbe
 	const u64* SlotArray(int vu);
 
 	// ------------------------------------------------------------------
+	// Fase 1.5 — forma del bloque. El contador Fase 1 dice CUANTAS veces se
+	// entró a un bloque; para elegir candidatos de fusión falta el peso:
+	// fusionar dos bloques de 3 instrucciones no paga, fusionar un bucle de
+	// 40 sí. La forma se registra en C++ DURANTE la compilación (mVUcompile
+	// conoce mVUcount/mVUcycles/mVUinfo del primer paso): coste cero por
+	// ejecución, ninguna instrucción emitida, misma puerta IsEnabled() &&
+	// isVU1 que la sonda de bloques. Índice = (pc>>3)&2047 como los slots de
+	// ejecución, así que execs[i] y shape[i] siempre describen el mismo PC
+	// de entrada. Re-compilación del mismo PC pisa la forma (última gana) —
+	// aceptable para rankear; el contador de ejecuciones sigue acumulando.
+	//
+	// reason (motivo por el que el primer paso termino el bloque donde termi-
+	// no — dice si la fusion Fase 2 esta limitada por la estructura del
+	// microcodigo o por el tamano del programa):
+	//   1 rama/eBit (corte en delay slot)   2 M-bit (sincronia con EE)
+	//   3 EOB (opcode ilegal / fin de bloque)   4 fin del programa (endCount)
+	//   5 otro
+	// (el presupuesto de ciclos corta en runtime, dentro de mVUtestCycles, y
+	// NO cambia la forma del bloque: no es un motivo de corte de compilacion)
+	// ------------------------------------------------------------------
+	static constexpr u32 kBlkPcs = kProbeSlots; // un registro por PC de entrada
+	struct BlockShape
+	{
+		u16 ops;    // instrucciones de microcódigo analizadas (mVUcount)
+		u16 cycles; // ciclos que cobra el bloque (mVUcycles, post-clamp)
+		u16 reason; // código de corte arriba; 0 = PC nunca compilado con sonda ON
+		u16 pad;
+	};
+	static_assert(sizeof(BlockShape) == 8, "shape slot must stay 8-byte for clean scan");
+	extern BlockShape g_shape[2][kBlkPcs];
+	void RecordBlockShape(int vu, u32 startPC_bytes, u16 ops, u16 cycles, u16 reason);
+
+	// ------------------------------------------------------------------
 	// Activación — espejo del config bool
 	// EmuCore/CPU/Recompiler/EnableVUTraceProbe.
 	//

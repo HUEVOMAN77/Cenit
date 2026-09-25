@@ -851,6 +851,13 @@ void* mVUcompile(microVU& mVU, u32 startPC, uptr pState)
 	mVUinitFirstPass(mVU, pState, thisPtr);
 	mVUbranch = 0;
 
+	// Fase 1.5 (sonda ON): motivo por el que el primer paso corta el bloque.
+	// 4 = cayo del for por endCount (fin del programa); los breaks lo pisan
+	// con 1/2/3. Coste: un par de stores a una local por COMPILACION de
+	// bloque (no por ejecucion) — el unico lector esta tras el guard de la
+	// sonda, y con OFF el compilador se queda solo con los stores muertos.
+	u16 probeCut = 4;
+
 	for (int branch = 0; mVUcount < endCount;)
 	{
 		incPC(1);
@@ -953,6 +960,7 @@ void* mVUcompile(microVU& mVU, u32 startPC, uptr pState)
 			if (branch == 3)
 				mVUinfo.isBdelay = true;
 			branchWarning(mVU);
+			probeCut = 1; // rama/eBit: el bloque corta en delay slot
 			if (mVUregs.xgkickcycles)
 			{
 				mVUlow.kickcycles = mVUregs.xgkickcycles;
@@ -970,6 +978,7 @@ void* mVUcompile(microVU& mVU, u32 startPC, uptr pState)
 		if (mVUup.mBit && !branch && !mVUup.eBit)
 		{
 			mVUregs.needExactMatch |= 7;
+			probeCut = 2; // M-bit: punto de sincronia con el EE
 			if (mVUregs.xgkickcycles)
 			{
 				mVUlow.kickcycles = mVUregs.xgkickcycles;
@@ -980,6 +989,7 @@ void* mVUcompile(microVU& mVU, u32 startPC, uptr pState)
 
 		if (mVUinfo.isEOB)
 		{
+			probeCut = 3; // EOB (opcode ilegal u otra senal de fin de bloque)
 			if (mVUregs.xgkickcycles)
 			{
 				mVUlow.kickcycles = mVUregs.xgkickcycles;
@@ -1010,6 +1020,14 @@ void* mVUcompile(microVU& mVU, u32 startPC, uptr pState)
 	// medición, y OFF reconstruye todo vía ClearCPUExecutionCaches).
 	if (mVUTraceProbe::IsEnabled() && isVU1)
 	{
+		// Fase 1.5: forma del bloque (tabla C++, cero instrucciones emitidas).
+		// mVUcount/mVUcycles salen del primer paso tal cual; probeCut es el
+		// motivo de corte. Va aqui, y no junto al ldr/add/str, para no mezclar
+		// datos de compilacion con la secuencia emitida.
+		mVUTraceProbe::RecordBlockShape(1, startPC,
+			static_cast<u16>(std::min<u32>(mVUcount, 0xffffu)),
+			static_cast<u16>(std::min<u32>(mVUcycles, 0xffffu)),
+			probeCut);
 		const u32 off = mVUTraceProbe::SlotMemOffset(startPC);
 		armAsm->Ldr(a64::x8, a64::MemOperand(gprMVUFlag, off));
 		armAsm->Add(a64::x8, a64::x8, 1);

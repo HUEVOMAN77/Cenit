@@ -561,6 +561,11 @@ __ri void ImGuiManager::DrawPerformanceOverlay(float& position_y, float scale, f
 					auto coreTok = [&pin](int slot) -> std::string {
 						if (!pin.known[slot])
 							return "unknown";
+						// 0.6.16: Huawei/EMUI no expone scaling_cur_freq para
+						// apps normales -> freq 0 se leia "0MHz" como si el
+						// core estuviera muerto. Con 0 se omite la frecuencia.
+						if (pin.freq_khz[slot] == 0)
+							return fmt::format("{}(c{})", pin.processor[slot], pin.cluster[slot]);
 						return fmt::format("{}(c{}/{:.0f}MHz)", pin.processor[slot], pin.cluster[slot],
 							static_cast<double>(pin.freq_khz[slot]) / 1000.0);
 					};
@@ -598,7 +603,6 @@ __ri void ImGuiManager::DrawPerformanceOverlay(float& position_y, float scale, f
 					const auto& f1 = mVUTraceProbe::g_flow[1];
 					const u64 sc = f1.stubCalls.load(std::memory_order_relaxed);
 					const u64 sh = f1.stubHits.load(std::memory_order_relaxed);
-					const u64 sm = f1.slowMiss.load(std::memory_order_relaxed);
 
 					const u64 db = (blocks >= s_last_probe_blocks) ? (blocks - s_last_probe_blocks) : 0;
 					const u64 ds = (sc >= s_last_probe_stub) ? (sc - s_last_probe_stub) : 0;
@@ -608,11 +612,13 @@ __ri void ImGuiManager::DrawPerformanceOverlay(float& position_y, float scale, f
 					const std::string hitp = sc
 						? fmt::format("{:.0f}%", 100.0 * static_cast<double>(sh) / static_cast<double>(sc))
 						: std::string("-");
-					s_vu_probe_line.format("VUprobe VU1: blk/seg {} | stub/seg {} hit {} | acum bloques={} stub={}+rap{}+lento{}",
-						static_cast<unsigned long long>(db * 10u), static_cast<unsigned long long>(ds * 10u), hitp.c_str(),
-						static_cast<unsigned long long>(blocks), static_cast<unsigned long long>(sh),
-						static_cast<unsigned long long>(f1.fastHits.load(std::memory_order_relaxed)),
-						static_cast<unsigned long long>(sm));
+					// 0.6.16: linea mas corta — la version anterior se salia del
+					// borde izquierdo en 720p (el HUD se dibuja alineado a la
+					// derecha). Se cae el acumulado de rap/lento (casi siempre
+					// 0 en vivo; el informe los tiene completos).
+					s_vu_probe_line.format("VUprobe: blk/s {} stub/s {} hit {}",
+						static_cast<unsigned long long>(db * 10u),
+						static_cast<unsigned long long>(ds * 10u), hitp.c_str());
 					DRAW_LINE(osd_font, font_size, s_vu_probe_line.c_str(), white_color);
 				}
 #endif

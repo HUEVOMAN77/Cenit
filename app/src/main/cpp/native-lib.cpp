@@ -1111,6 +1111,15 @@ Java_com_izzy2lost_psx2_NativeApp_initialize(JNIEnv *env, jclass clazz,
         // LoadStartupSettings -> UpdateLoggingSettings abra el archivo nuevo, así la
         // sesión anterior queda en emulog.prev.txt y el botón "Enviar registro"
         // puede adjuntar los dos.
+        //
+        // Cenit 0.6.16: el fallback anterior hacìa DeleteFilePath(cur) cuando el
+        // rename fallaba — en el FUSE de Huawei (EMUI, Android 12) el rename entre
+        // los archivos de la app falla con frecuencia, así que cada arranque BORRABA
+        // el log de la sesión anterior en vez de rotarlo (emulog.prev.txt en 0 bytes
+        // en el reporte del usuario). Ahora: rename -> si falla, COPY y deja cur
+        // intacto (el "wb" del núcleo lo truncará, pero la copia ya existe); si la
+        // copia también falla, no toca nada — perder la rotación es mejor que
+        // perder la evidencia.
         {
             static bool s_log_rotated = false;
             const std::string cur = Path::Combine(EmuFolders::Logs, "emulog.txt");
@@ -1118,9 +1127,8 @@ Java_com_izzy2lost_psx2_NativeApp_initialize(JNIEnv *env, jclass clazz,
             if (!s_log_rotated && FileSystem::FileExists(cur.c_str()))
             {
                 s_log_rotated = true;
-                FileSystem::DeleteFilePath(prev.c_str());
                 if (!FileSystem::RenamePath(cur.c_str(), prev.c_str()))
-                    FileSystem::DeleteFilePath(cur.c_str());
+                    FileSystem::CopyFilePath(cur.c_str(), prev.c_str(), true);
             }
         }
 
