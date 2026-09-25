@@ -131,7 +131,11 @@ namespace mVUTraceProbe
 	// compilacion del bloque A (una escritura por bloque compilado, coste
 	// cero por ejecucion): succ = PC de destino de la rama estatica conocida
 	// (incluida la continuacion post-M-bit). kind: 0 = sin arista, 1 = rama
-	// estatica enlazada. Ultima compilacion gana, como la forma.
+	// estatica INCONDICIONAL (normBranch / salto const / continuacion M-bit:
+	// A SIEMPRE cae en B), 2 = rama CONDICIONAL (el taken de condBranch:
+	// solo se toma cuando la condicion se cumple, asi que min(execsA,execsB)
+	// SOBREESTIMA su beneficio; se reporta pero no sube al resumen ftop).
+	// Ultima compilacion gana, como la forma.
 	//
 	// El informe cruza: para cada A caliente con arista, estima el beneficio
 	// de fusionar A+B como min(execs(A), execs(B)) — entradas+salidas que
@@ -140,12 +144,12 @@ namespace mVUTraceProbe
 	struct BlockEdge
 	{
 		u16 succIdx; // (dst_bytes >> 3) & mask — indice del sucesor
-		u8  kind;    // 0 = ninguna, 1 = rama estatica (normBranchCompile)
+		u8  kind;    // 0 = ninguna, 1 = incondicional, 2 = condicional
 		u8  pad;
 	};
 	static_assert(sizeof(BlockEdge) == 4, "edge stays a small side table");
 	extern BlockEdge g_edges[2][kBlkPcs];
-	void RecordStaticEdge(int vu, u32 srcPC_bytes, u32 dstPC_bytes);
+	void RecordStaticEdge(int vu, u32 srcPC_bytes, u32 dstPC_bytes, u8 kind);
 
 	// ------------------------------------------------------------------
 	// Activación — espejo del config bool

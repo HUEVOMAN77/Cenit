@@ -271,19 +271,24 @@ namespace mVUTraceProbe
 		s.pad = 0;
 	}
 
-	void RecordStaticEdge(int vu, u32 srcPC_bytes, u32 dstPC_bytes)
+	void RecordStaticEdge(int vu, u32 srcPC_bytes, u32 dstPC_bytes, u8 kind)
 	{
 		// Llamado desde normBranchCompile (hilo compilador del bloque src,
 		// sonda ON). Un bloque puede enlazar a un solo objetivo estatico por
 		// compilacion; si se recompila con otro, ultimo gana (coherente con
-		// la forma). dst fuera del rango de 2048 PCs de entrada no puede
-		// pasar: microMemSize <= 0x4000 y el indice enmascara igual que los
-		// slots de ejecucion.
+		// la forma), PERO una arista incondicional (kind 1) nunca es pisada
+		// por una condicional (kind 2): el beneficio de la condicional esta
+		// sobreestimado y perder una incondicional caliente seria ceguera.
+		// dst fuera del rango de 2048 PCs de entrada no puede pasar:
+		// microMemSize <= 0x4000 y el indice enmascara igual que los slots de
+		// ejecucion.
 		const u32 si = (srcPC_bytes >> 3) & kProbeSlotMask;
 		const u32 di = (dstPC_bytes >> 3) & kProbeSlotMask;
 		BlockEdge& e = g_edges[vu][si];
+		if (e.kind == 1 && kind == 2)
+			return;
 		e.succIdx = static_cast<u16>(di);
-		e.kind = 1; // rama estatica enlazada
+		e.kind = kind;
 		e.pad = 0;
 	}
 
@@ -429,7 +434,7 @@ namespace mVUTraceProbe
 		}
 
 		// Fase 1.6: candidatos de fusion A->B por arista estatica.
-		struct FusionCand { u32 src, dst; u64 execsSrc, execsDst, benefit; u16 opsSrc, opsDst; u8 self; };
+		struct FusionCand { u32 src, dst; u64 execsSrc, execsDst, benefit; u16 opsSrc, opsDst; u8 self; u8 cond; };
 		FusionCand cands[40];
 		u32 nCands = 0;
 		u64 benefitTotal = 0;
@@ -446,13 +451,33 @@ namespace mVUTraceProbe
 				if (!vd || g_shape[1][j].reason == 0)
 					continue; // sucesor sin forma/ejecuciones: nada que rankear
 				const u64 ben = (vs < vd) ? vs : vd;
-				benefitTotal += ben;
+				const bool cond = (e.kind == 2);
+				// benefitTotal es la apuesta de la Fase 2: solo cuentan las
+				// incondicionales. Una condicional [COND] se muestra para
+				// contexto pero su min() esta inflado (B tambien recibe el
+				// not-taken y fusionar no elimina nada ahi).
+				if (!cond)
+					benefitTotal += ben;
 				FusionCand c{i * 8u, j * 8u, vs, vd, ben,
 					g_shape[1][i].ops, g_shape[1][j].ops,
-					static_cast<u8>((i == j) ? 1 : 0)};
+					static_cast<u8>((i == j) ? 1 : 0), static_cast<u8>(cond ? 1 : 0)};
 				const u32 k = 40;
-				if (nCands == k && ben <= cands[k - 1].benefit)
-					continue;
+				// Prioridad de lista: una condicional jamas desplaza a una
+				// incondicional del top-40 (la lista de compras de la Fase 2 no
+				// debe quedarse ciega por ruido cond).
+				if (nCands == k)
+				{
+					// Peor hueco ocupado por incondicional: una condicional no
+					// entra; una incondicional solo si gana por beneficio.
+					if (!cands[k - 1].cond)
+					{
+						if (cond || ben <= cands[k - 1].benefit)
+							continue;
+					}
+					// Peor hueco condicional: la incondicional entra y la desplaza
+					// (si pierde por beneficio, entra detras: la insercion ordenada
+					// la deja fuera del array al desplazarse k-1 -> k).
+				}
 				u32 p = (nCands == k) ? k - 1 : nCands;
 				for (; p > 0 && ben > cands[p - 1].benefit; p--)
 					cands[p] = cands[p - 1];
@@ -548,18 +573,20 @@ namespace mVUTraceProbe
 			// Fase 1.6 — la lista accionable: pares A->B unidos por rama
 			// estatica, rankeados por beneficio (entradas de bloque que
 			// desaparecerian al fusionar = min(execsA, execsB)). self=1 es
-			// bucle propio (A->A): la fusion mas limpia que hay.
+			// bucle propio (A->A): la fusion mas limpia que hay. [COND] =
+			// arista condicional (taken de condBranch): beneficio inflado,
+			// no cuenta en el total ni sube al resumen ftop.
 			if (vu == 1)
 			{
-				P("candidatos de fusion A->B por arista estatica (top %u; beneficio total=%llu):\n",
+				P("candidatos de fusion A->B por arista estatica (top %u; beneficio total incondicional=%llu):\n",
 					nCands, static_cast<unsigned long long>(benefitTotal));
 				for (u32 i = 0; i < nCands; i++)
-					P("  0x%04x -> 0x%04x : ben=%llu (A x%llu %uops, B x%llu %uops)%s\n",
+					P("  0x%04x -> 0x%04x : ben=%llu (A x%llu %uops, B x%llu %uops)%s%s\n",
 						cands[i].src, cands[i].dst,
 						static_cast<unsigned long long>(cands[i].benefit),
 						static_cast<unsigned long long>(cands[i].execsSrc), cands[i].opsSrc,
 						static_cast<unsigned long long>(cands[i].execsDst), cands[i].opsDst,
-						cands[i].self ? " [PROPIO]" : "");
+						cands[i].self ? " [PROPIO]" : "", cands[i].cond ? " [COND]" : "");
 			}
 
 			P("secuencias repetidas A->B (entre despachos; top %u):\n", nTrans[vu]);
@@ -625,16 +652,21 @@ namespace mVUTraceProbe
 				Console.WriteLn("VUprobe VU%d seq%u 0x%04x->0x%04x x%u", vu, i + 1,
 					topTrans[vu][i].pcs >> 16, topTrans[vu][i].pcs & 0xffffu, topTrans[vu][i].count);
 			}
-			// Fase 1.6: las cinco mejores aristas estaticas tambien viajan al
-			// resumen; son la lista de compras directa de la Fase 2.
+			// Fase 1.6: las cinco mejores aristas ESTATICAS INCONDICIONALES
+			// tambien viajan al resumen; son la lista de compras directa de la
+			// Fase 2. Las [COND] quedan fuera (beneficio inflado por diseno).
 			if (vu == 1)
 			{
-				for (u32 i = 0; i < nCands && i < 5; i++)
+				u32 shown = 0;
+				for (u32 i = 0; i < nCands && shown < 5; i++)
 				{
-					Console.WriteLn("VUprobe ftop%u 0x%04x->0x%04x ben=%llu ops=%u+%u%s", i + 1,
+					if (cands[i].cond)
+						continue;
+					Console.WriteLn("VUprobe ftop%u 0x%04x->0x%04x ben=%llu ops=%u+%u%s", shown + 1,
 						cands[i].src, cands[i].dst,
 						static_cast<unsigned long long>(cands[i].benefit),
 						cands[i].opsSrc, cands[i].opsDst, cands[i].self ? " [PROPIO]" : "");
+					shown++;
 				}
 			}
 		}

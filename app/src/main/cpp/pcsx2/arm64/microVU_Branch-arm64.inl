@@ -307,15 +307,17 @@ void mVUsetupBranch(mV, microFlagCycles& mFC)
 // normBranchCompile — Compile/link to a block at known PC
 //------------------------------------------------------------------
 
-void normBranchCompile(microVU& mVU, u32 branchPC)
+void normBranchCompile(microVU& mVU, u32 branchPC, bool condEdge = false)
 {
 	// Fase 1.6 (sonda ON): arista estatica A->B del bloque que se esta
 	// compilando (mVUstartPC, en bytes) al objetivo conocido branchPC
 	// (bytes). Se captura ANTES de cualquier recursion: mVUcompile del
 	// objetivo pisaria mVUstartPC. Un registro por bloque compilado — coste
-	// cero por ejecucion.
+	// cero por ejecucion. condEdge=true solo en el taken de condBranch: la
+	// fusion de una rama condicional NO elimina la entrada de B cuando la
+	// condicion falla, y min(execsA,execsB) sobreestima su beneficio.
 	if (mVUTraceProbe::IsEnabled() && mVU.index == 1)
-		mVUTraceProbe::RecordStaticEdge(1, mVUstartPC, branchPC);
+		mVUTraceProbe::RecordStaticEdge(1, mVUstartPC, branchPC, condEdge ? 2 : 1);
 
 	microBlock* pBlock;
 	blockCreate(branchPC / 8);
@@ -869,7 +871,7 @@ void condBranch(mV, microFlagCycles& mFC, a64::Condition cond)
 		a64::Condition invCond = a64::InvertCondition(cond);
 		armEmitCondBranch(invCond, bBlock->hostEntry);
 		incPC(-3);
-		normBranchCompile(mVU, branchAddr(mVU));
+		normBranchCompile(mVU, branchAddr(mVU), true); // arista condicional
 	}
 	else
 	{
