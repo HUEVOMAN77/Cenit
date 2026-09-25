@@ -40,6 +40,33 @@
 alignas(16) microVU microVU0;
 alignas(16) microVU microVU1;
 
+// ------------------------------------------------------------------
+// Cenit VU Superblock Engine — Fase 1: pin del layout de la sonda.
+//
+// El JIT incrementa microVU::vuBlkExecCnt con ldr/add/str sobre el pin
+// x24 = &mVU.macFlag[0] (dispatcher). Eso SOLO es valido si el array cae
+// en la ventana que el header del probe calcula; si alguien reordena el
+// struct, esto deja de compilar antes de que el JIT escriba fuera.
+// ------------------------------------------------------------------
+static_assert(offsetof(microVU, vuBlkExecCnt) - offsetof(microVU, macFlag) ==
+		mVUTraceProbe::kProbeSlotBaseOff,
+	"probe slots moved out of the [x24 (macFlag), #imm] window — remap or relocate the array");
+static_assert(offsetof(microVU, vuBlkExecCnt) - offsetof(microVU, macFlag) +
+		mVUTraceProbe::kProbeSlots * 8 <= 4095u * 8u,
+		"probe slots exceed scaled 64-bit immediate reach (imm12*8) from the x24 pin");
+static_assert(alignof(microVU::vuBlkExecCnt) >= 8, "probe counters need 8-byte alignment");
+
+// SlotArray() — la vista publica del array de slots (declarada en el header
+// del probe para lectores sin acceso al struct).
+namespace mVUTraceProbe
+{
+	const u64* SlotArray(int vu)
+	{
+		return (vu == 1) ? microVU1.vuBlkExecCnt : microVU0.vuBlkExecCnt;
+	}
+}
+
+
 //------------------------------------------------------------------
 // Micro VU - Observed-entry-PC tracking on microProgram. Single-
 // threaded per VU; the dispatcher records each `startPC` it hands
@@ -457,11 +484,22 @@ void mVUinit(microVU& mVU, uint vuIndex)
 
 	mVU.regAlloc.reset(new microRegAlloc(mVU.index));
 
+	// Cenit VU Superblock Engine — Fase 1: espejar el config bool de la sonda
+	// ANTES de sincronizar la grabacion de persistencia, para que el corte
+	// (sonda ON => NO grabar, NO tocar el disco) quede establecido antes de
+	// que el sentinel y el Init vean el estado.
+	mVUTraceProbe::SyncFromConfig(EmuConfig.Cpu.Recompiler.EnableVUTraceProbe,
+		microVU0.vuBlkExecCnt, microVU1.vuBlkExecCnt);
+
 	// Persisted-JIT recording follows the config bool — established before the
 	// sentinel (which bakes the recording byte). At boot this runs before
 	// settings finish loading, so it typically latches off and the first
 	// mVUreset corrects it. No-op under the test-manual override. See mVUreset.
-	mVUPersist::SyncRecordingFromConfig(EmuConfig.Cpu.Recompiler.EnableVUProgramCache);
+	// With the trace probe ON the recording is force-OFF: blocks compiled in
+	// a probe session carry the instrumented prologue and must never be
+	// persisted or rehydrated (the sentinel is deliberately NOT re-keyed, so
+	// the disk cache cannot tell instrumented code from clean by itself).
+	mVUPersist::SyncRecordingFromConfig(EmuConfig.Cpu.Recompiler.EnableVUProgramCache && !mVUTraceProbe::IsEnabled());
 
 	// Seed options sentinel from current config snapshot. Reset will rebuild it
 	// in case the user toggled clamp / FPCR / speedhack settings since init.
@@ -940,6 +978,12 @@ void mVUreset(microVU& mVU, bool resetReserve)
 	++g_mVUCacheTrace[mVU.index & 1].reset_calls;
 #endif
 
+	// Cenit VU Superblock Engine — Fase 1: espejo del config de la sonda, con
+	// el corte de flanco (ON: limpia todo; OFF: vuelca el informe). Va ANTES
+	// de SyncRecordingFromConfig por el mismo motivo que en mVUinit.
+	mVUTraceProbe::SyncFromConfig(EmuConfig.Cpu.Recompiler.EnableVUTraceProbe,
+		microVU0.vuBlkExecCnt, microVU1.vuBlkExecCnt);
+
 	// Persisted-JIT recording follows the EnableVUProgramCache config bool, and
 	// MUST be established here — before mVUbuildOptionsSentinel bakes the
 	// recording byte and before any gameplay program compiles. This is the
@@ -949,7 +993,12 @@ void mVUreset(microVU& mVU, bool resetReserve)
 	// with no payloads. The disk Init below is re-synced on the same reset, so
 	// recording and the cache move in lockstep. No-op under the test-manual
 	// override (the recompiler-test harness drives recording itself).
-	mVUPersist::SyncRecordingFromConfig(EmuConfig.Cpu.Recompiler.EnableVUProgramCache);
+	// With the trace probe ON, recording is force-OFF: blocks compiled during
+	// a probe session carry the instrumented prologue and must never reach the
+	// disk cache or be rehydrated from it (the sentinel is deliberately NOT
+	// re-keyed — instrumented and clean code share the contentHash space, so
+	// isolation has to be absolute while measuring).
+	mVUPersist::SyncRecordingFromConfig(EmuConfig.Cpu.Recompiler.EnableVUProgramCache && !mVUTraceProbe::IsEnabled());
 
 	// Rebuild options sentinel before any program rebuilds — config may have
 	// changed since the last init/reset (clamp flips, FPCR edits, speedhack
@@ -1070,6 +1119,13 @@ void mVUclose(microVU& mVU)
 	mVUCacheTraceDump(mVU, "shutdown");
 #endif
 
+	// Sonda ON: vuelca el informe antes de que el VM se desmonte (es el último
+	// punto con datos válidos si el usuario cierra el juego sin apagar la
+	// sonda). Idempotente por etiqueta de razón; DumpReport serializa con
+	// mutex y solo se llama con la sonda ON.
+	if (mVUTraceProbe::IsEnabled() && mVU.index == 1)
+		mVUTraceProbe::DumpReport("VM apagado (mVUclose VU1)");
+
 	// Final checkpoint of live programs to the on-disk cache before we let
 	// the contentMap go. Mirrors the mVUreset path; harmless if nothing
 	// new has been added since the last reset.
@@ -1103,6 +1159,11 @@ __fi void mVUclear(mV, u32 addr, u32 size)
 	// against their writeGenAtAnchor so mVUcacheProg knows whether the live
 	// image can still match their anchored contentHash (drift check).
 	mVU.microMemWriteGen++;
+
+	// Fase 1 (sonda ON): escrituras a la imagen micro (cada mVUclear = un
+	// evento de invalidación potencial). Solo telemetría.
+	if (mVUTraceProbe::IsEnabled())
+		mVUTraceProbe::g_flow[mVU.index & 1].microWrites.fetch_add(1, std::memory_order_relaxed);
 
 #ifdef mVUcacheTrace
 	mVUCacheTraceObserveClear(mVU, addr, size, /*wasRealClear=*/!mVU.prog.cleared);
@@ -1193,6 +1254,12 @@ __ri microProgram* mVUcreateProg(microVU& mVU, int startPC, const XXH128_hash_t&
 #ifdef mVUcacheTrace
 	++g_mVUCacheTrace[mVU.index & 1].programs_created;
 #endif
+	// Fase 1 (sonda ON): programas compilados from-scratch. Los hidratados
+	// desde disco no pasan por aquí; con la sonda ON la caché en disco está
+	// pausada, así que este contador es el total de compilaciones del
+	// despacho lento.
+	if (mVUTraceProbe::IsEnabled())
+		mVUTraceProbe::g_flow[mVU.index & 1].compiles.fetch_add(1, std::memory_order_relaxed);
 
 	microProgram* prog = (microProgram*)_aligned_malloc(sizeof(microProgram), 64);
 	memset(prog, 0, sizeof(microProgram));
@@ -1554,12 +1621,43 @@ _mVUt void* mVUexecute(u32 startPC, u32 cycles)
 	const uptr pState = (uptr)&mVU.prog.lpState;
 
 	void* result = mVUlookupProg<vuIndex>(maskedPC, pState);
-	if (!result)
+	// Fase 1 (sonda ON): contadores de entradas al dispatcher. Un despacho
+	// JIT normal ya golpeo el stub emitido (stubCalls++) y fallo, o vino de
+	// una subida de PC directa; aqui fastHits = RESOLUCION en la re-intento
+	// de mVUlookupProg dentro de mVUexecute (sin abrir el code cache) y
+	// slowMiss = caida a mVUsearchProg. La suma dispatcher-entradas =
+	// stubCalls + las llegadas directas (COP2/mtspawn), y el informe
+	// imprime ambas cosas por separado — no se duplica ningun evento.
+	// Escritas por el unico hilo del dispatcher de este VU (VU0: EE; VU1:
+	// MTVU con THREAD_VU1) — relaxed basta porque nadie las usa como
+	// entrada de simulacion.
+	if (result)
 	{
+		if (mVUTraceProbe::IsEnabled())
+			mVUTraceProbe::g_flow[vuIndex].fastHits.fetch_add(1, std::memory_order_relaxed);
+	}
+	else
+	{
+		if (mVUTraceProbe::IsEnabled())
+			mVUTraceProbe::g_flow[vuIndex].slowMiss.fetch_add(1, std::memory_order_relaxed);
 		mVUopenCodeCache(mVU);
 		result = mVUsearchProg<vuIndex>(maskedPC, pState);
 		mVUcloseCodeCache(mVU);
 	}
+
+	// Secuencias repetidas (Fase 1): un despacho resuelto = (programa, PC).
+	// ObserveDispatch enlaza la transicion con el despacho anterior del
+	// mismo VU. Cubre las salidas C++ del dispatcher (este camino y el de
+	// mVUcompileJIT); los despachos resueltos por el stub emitido sin salir
+	// a C++ NO pasan por aqui y no aportan aristas a la malla (limitacion
+	// documentada del prototipo: la malla ve las transiciones que implican
+	// resolucion lenta, que son las que Fase 2 querra fusionar de todos
+	// modos). prog.cur es el programa resuelto en TODAS las rutas;
+	// contentHash.low64 queda anclado en createProg y se conserva tras una
+	// expulsion del contentMap (solo marca identity-dirty), asi que es una
+	// clave estable aunque el programa haya perdido validez de hash.
+	if (mVUTraceProbe::IsEnabled() && result && mVU.prog.cur)
+		mVUTraceProbe::ObserveDispatch(vuIndex, maskedPC, mVU.prog.cur->contentHash.low64);
 
 	if (!result)
 	{
@@ -1640,6 +1738,21 @@ void* mVUlookupProg_VU0(u32 startPC, u32 cycles)
 	microVU0.cycles      = cycles;
 	microVU0.totalCycles = cycles;
 	const u32 maskedPC = startPC & 0xff8;
+	// Fase 1 (sonda ON): este stub es el objetivo del BL del dispatcher
+	// emitido — cada despacho pasa por aquí ANTES de ninguna salida a
+	// mVUexecuteVUx. Un hit aquí es un despacho resuelto sin abrir el code
+	// cache del que NO hay ninguna otra evidencia C++ (la ejecución del
+	// bloque solo deja huella en los slots de bloques), así que stubCalls/
+	// stubHits son la única medida de esa ruta. Se cuentan en el lado EE
+	// (VU0), que es quien llama a este stub.
+	if (mVUTraceProbe::IsEnabled())
+	{
+		mVUTraceProbe::g_flow[0].stubCalls.fetch_add(1, std::memory_order_relaxed);
+		void* r = mVUlookupProg<0>(maskedPC, (uptr)&microVU0.prog.lpState);
+		if (r)
+			mVUTraceProbe::g_flow[0].stubHits.fetch_add(1, std::memory_order_relaxed);
+		return r;
+	}
 	return mVUlookupProg<0>(maskedPC, (uptr)&microVU0.prog.lpState);
 }
 void* mVUlookupProg_VU1(u32 startPC, u32 cycles)
@@ -1647,6 +1760,14 @@ void* mVUlookupProg_VU1(u32 startPC, u32 cycles)
 	microVU1.cycles      = cycles;
 	microVU1.totalCycles = cycles;
 	const u32 maskedPC = startPC & 0x3ff8;
+	if (mVUTraceProbe::IsEnabled())
+	{
+		mVUTraceProbe::g_flow[1].stubCalls.fetch_add(1, std::memory_order_relaxed);
+		void* r = mVUlookupProg<1>(maskedPC, (uptr)&microVU1.prog.lpState);
+		if (r)
+			mVUTraceProbe::g_flow[1].stubHits.fetch_add(1, std::memory_order_relaxed);
+		return r;
+	}
 	return mVUlookupProg<1>(maskedPC, (uptr)&microVU1.prog.lpState);
 }
 

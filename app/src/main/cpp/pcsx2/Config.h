@@ -676,6 +676,15 @@ struct Pcsx2Config
 		// no-op on x86.
 		bool
 			EnableVUProgramCache : 1;
+
+		// Cenit VU Superblock Engine — Fase 1 (medicion, sin optimizacion):
+		// contadores de entradas al dispatcher, ejecuciones de bloques VU1
+		// y secuencias repetidas, con informe en logs/vu_probe.txt + emulog.
+		// Mientras esta activa, la caché de programas en disco se pausa (ni
+		// graba ni hidrata) para que el codigo instrumentado no la contamine.
+		// arm64-only; apaga por defecto y no cambia nada cuando esta apagada.
+		bool
+			EnableVUTraceProbe : 1;
 		BITFIELD_END
 
 		RecompilerOptions();

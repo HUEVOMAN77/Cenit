@@ -882,13 +882,14 @@ void VMManager::ApplySettings()
 	// que el núcleo está usando AHORA?". Se imprime aquí, después de la cascada
 	// completa (base -> GameDB -> capa por-juego), no en Java: SharedPreferences
 	// ya demostró no ser la verdad operativa.
-	Console.WriteLn("Effective settings: game='%s' crc=%08X CR=%d CS=%d MTVU=%d IVU=%d pinning=%d capa='%s'",
+	Console.WriteLn("Effective settings: game='%s' crc=%08X CR=%d CS=%d MTVU=%d IVU=%d pinning=%d vuProbe=%d capa='%s'",
 		GetDiscSerial().c_str(), GetDiscCRC(),
 		static_cast<int>(EmuConfig.Speedhacks.EECycleRate),
 		static_cast<int>(EmuConfig.Speedhacks.EECycleSkip),
 		static_cast<int>(EmuConfig.Speedhacks.vuThread),
 		static_cast<int>(EmuConfig.Speedhacks.vu1Instant),
 		static_cast<int>(EmuConfig.EnableThreadPinning),
+		static_cast<int>(EmuConfig.Cpu.Recompiler.EnableVUTraceProbe),
 		s_game_settings_interface ? s_game_settings_interface->GetFileName().c_str() : "(ninguna)");
 }
 

@@ -329,6 +329,15 @@
                                 style="@style/Cenit.Settings.Caption"
                                 android:text="Reparte el trabajo del vector gráfico a un segundo núcleo. Suele dar más cuadros por segundo en teléfonos de 3 núcleos o más, pero el propio motor avisa de que algunos juegos se cuelgan con esto encendido. Si uno no arranca, pruébalo apagado." />
 
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/set_sw_vu_probe"
+                                style="@style/Cenit.Settings.Switch"
+                                android:text="Sonda de trazas VU (diagnóstico)" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Mide cuánto trabaja el VU1: ejecuciones por bloque, entradas al despachador y secuencias de microcódigo que se repiten. No cambia la emulación, pero mientras está encendida el juego va un poco más cargado y la caché de programas VU en disco queda en pausa. El informe se escribe al apagarla (o al parar el juego) en logs/vu_probe.txt, y el resumen viaja en el registro. Apagada por defecto." />
+
                             <TextView
                                 style="@style/Cenit.Settings.FieldLabel"
                                 android:text="Cola de cuadros" />

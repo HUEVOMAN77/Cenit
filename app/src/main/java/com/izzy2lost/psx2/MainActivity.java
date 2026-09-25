@@ -2041,6 +2041,9 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         // el de MTVU pregunta al núcleo, no a Java, para no divergir del perfil.
         NativeApp.setFastCDVD(prefs.getBoolean("fast_cdvd", false));
         NativeApp.setMTVU(prefs.getBoolean("mtvu", NativeApp.defaultMTVU()));
+        // Cenit 0.6.15: sonda de trazas VU (Fase 1). Default apagado y sin
+        // perfil que la encienda: es un ajuste de diagnóstico explícito.
+        NativeApp.setVUTraceProbe(prefs.getBoolean("vu_trace_probe", false));
         if (mDynRes != null) mDynRes.reset();
         AudioOutputPreference.apply(this);
     }

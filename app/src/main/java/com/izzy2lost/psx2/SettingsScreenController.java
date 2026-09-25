@@ -273,6 +273,14 @@ public final class SettingsScreenController {
         toggle(R.id.set_sw_mtvu, "mtvu", NativeApp.defaultMTVU(),
                 checked -> NativeApp.setMTVUAsync(checked));
 
+        // Cenit 0.6.15 (Fase 1): sonda de trazas VU. Es medición pura, pero
+        // NO es gratis: encenderla recompila todo instrumentado y pausa la
+        // caché de programas VU en disco. Por eso el default es apagado y no
+        // la toca ningún perfil; el informe se vuelca solo al apagarla o al
+        // parar el juego (logs/vu_probe.txt + resumen en el registro).
+        toggle(R.id.set_sw_vu_probe, "vu_trace_probe", false,
+                checked -> NativeApp.setVUTraceProbeAsync(checked));
+
         // La posición del spinner ES el valor de la clave (ver arrays.xml). Como
         // con medio píxel y cuotas: el primer disparo del adaptador se ADOPTA sin
         // escribir, para no guardar "Óptima" en el teléfono de todo el mundo.
@@ -582,6 +590,7 @@ public final class SettingsScreenController {
         check(R.id.set_sw_pinning, prefs.getBoolean("thread_pinning", true));
         check(R.id.set_sw_fastcdvd, prefs.getBoolean("fast_cdvd", false));
         check(R.id.set_sw_mtvu, prefs.getBoolean("mtvu", NativeApp.defaultMTVU()));
+        check(R.id.set_sw_vu_probe, prefs.getBoolean("vu_trace_probe", false));
         setSpinner(R.id.set_sp_framequeue,
                 prefs.getInt("frame_queue", NativeApp.defaultFrameLatencyQueue()));
         setSpinner(R.id.set_sp_preload,

@@ -23,6 +23,7 @@
 
 #include "microVU_Misc-arm64.h"
 #include "MvuObservedEntries.h"
+#include "MvuTraceProbe-arm64.h"
 #include "microVU_Persist-arm64.h"
 
 #ifndef XXH_versionNumber
@@ -412,6 +413,22 @@ struct microVU
 	alignas(16) u32 clipFlag[4];
 	alignas(16) u32 neonCTemp[4];      // Backup used in mVUclamp2()
 	alignas(16) u32 neonBackup[32][4]; // Backup for q0~q31
+
+	// Cenit VU Superblock Engine — Fase 1: contadores de ejecucion por PC de
+	// entrada de bloque, indexados (pc>>3)&2047. El JIT los incrementa con
+	// ldr/add/str sobre el pin x24 (&mVU.macFlag[0]): este array DEBE caer
+	// exactamente en pin + kProbeSlotBaseOff (560) — los static_asserts de
+	// microVU-arm64.cpp lo pinnean contra offsetof reales. Por eso la
+	// alineacion es alignas(8) y NO 64: con all preceding members alignas(16)
+	// (statFlag/macFlag/clipFlag/neonCTemp/neonBackup), 8 es el maximo común
+	// divisor del offset 560 y el layout queda garantizado; un alignas(64)
+	// aqui dependeria de la alineacion del objeto microVU (hoy 16) y podria
+	// desplazar el offset. 8 bytes por slot es todo lo que LDR/STR x64 exige;
+	// un slot por linea de cache no importa en medicion.
+	// Escrito solo por bloques compilados con la sonda ON; limpiado por
+	// mVUTraceProbe::SyncFromConfig en el corte de flanco. Con la sonda
+	// OFF queda intacto en cero y nunca se toca.
+	alignas(8) u64 vuBlkExecCnt[mVUTraceProbe::kProbeSlots];
 
 	u32 index;
 	u32 cop2;

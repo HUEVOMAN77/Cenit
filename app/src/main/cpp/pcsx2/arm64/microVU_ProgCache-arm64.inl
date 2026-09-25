@@ -538,6 +538,13 @@ void Init(microVU& mVU)
 	// InitWithSentinel / TestReinitFromLiveSentinel.
 	if (!EmuConfig.Cpu.Recompiler.EnableVUProgramCache)
 		return;
+	// Fase 1 (sonda ON): con la sonda de trazas activada el código host
+	// recién compilado lleva instrumentación; nada de eso debe llegar al
+	// disco ni hidratarse desde él. El recording ya se fuerza OFF en
+	// mVUinit/mVUreset; este guard (y los de Save/TryLoad) es el cinturón:
+	// el disco queda intocado mientras la sonda mide.
+	if (mVUTraceProbe::IsEnabled())
+		return;
 	InitImpl(mVU.index & 1u, mVU.optionsSentinel);
 }
 
@@ -748,6 +755,8 @@ bool TestAppendIndexEntry(u32 vu_index, const XXH128_hash_t& hash,
 
 void SaveAllPrograms(microVU& mVU)
 {
+	if (mVUTraceProbe::IsEnabled())
+		return; // sonda ON: nunca persistir código instrumentado
 	State& s = g_state[mVU.index & 1];
 	if (!s.initialized || !s.enabled)
 		return;
@@ -760,6 +769,8 @@ void SaveAllPrograms(microVU& mVU)
 
 microProgram* TryLoadProgram(microVU& mVU, const XXH128_hash_t& contentHash)
 {
+	if (mVUTraceProbe::IsEnabled())
+		return nullptr; // sonda ON: nada hidratado del disco (ver guard en Init)
 	State& s = g_state[mVU.index & 1];
 	if (!s.initialized || !s.enabled)
 	{

@@ -459,6 +459,7 @@ Pcsx2Config::RecompilerOptions::RecompilerOptions()
 	EnableFastmem = true;
 	PauseOnTLBMiss = false;
 	EnableVUProgramCache = false; // default off; opt-in until the on-disk cache is validated on the target hardware
+	EnableVUTraceProbe = false;   // Fase 1 measurement only; off = zero overhead, zero codegen change
 
 	// vu and fpu clamping default to standard overflow.
 	vu0Overflow = true;
@@ -538,6 +539,7 @@ void Pcsx2Config::RecompilerOptions::LoadSave(SettingsWrapper& wrap)
 	SettingsWrapBitBool(EnableFastmem);
 	SettingsWrapBitBool(PauseOnTLBMiss);
 	SettingsWrapBitBool(EnableVUProgramCache);
+	SettingsWrapBitBool(EnableVUTraceProbe);
 
 	SettingsWrapBitBool(vu0Overflow);
 	SettingsWrapBitBool(vu0ExtraOverflow);

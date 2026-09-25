@@ -35,6 +35,10 @@
 #include "MTGS.h"
 #include "GS/Renderers/Vulkan/VKLoader.h"
 #include "SDL3/SDL.h"
+#ifdef __aarch64__
+// Cenit 0.6.15 (Fase 1): sonda de trazas VU — header puro C++, sin vixl.
+#include "pcsx2/arm64/MvuTraceProbe-arm64.h"
+#endif
 #include <atomic>
 #include <algorithm>
 #include <cctype>
@@ -662,6 +666,66 @@ Java_com_izzy2lost_psx2_NativeApp_setMTVU(JNIEnv* env, jclass, jboolean enabled)
 {
     s_settings_interface.SetBoolValue("EmuCore/Speedhacks", "vuThread", enabled == JNI_TRUE);
     if (VMManager::HasValidVM()) VMManager::ApplySettings();
+}
+
+// Cenit 0.6.15 — Fase 1 del motor de superbloques VU: sonda de trazas.
+// Medición pura (entradas al dispatcher, bloques VU1, secuencias repetidas);
+// apagada por defecto y SIN forcer en la capa base (a diferencia de
+// EnableVUProgramCache, arriba): es un ajuste de diagnóstico opt-in.
+//
+// El cambio de config cae en RecompilerOptions, así que CheckForCPUConfig-
+// Changes detecta el toggle y limpia las cachés del recompiler: con la sonda
+// ON se recompila todo instrumentado, y al apagarla se reconstruye el cache
+// limpio ANTES de cualquier despacho (el volcado del informe ocurre en
+// mVUreset, vía SyncFromConfig, dentro de esa cascada). El disco queda
+// intocado en ambos flancos: Init/Save/Hydrate están guardados mientras la
+// sonda está ON.
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setVUTraceProbe(JNIEnv* env, jclass, jboolean enabled)
+{
+#ifdef __aarch64__
+    s_settings_interface.SetBoolValue("EmuCore/CPU/Recompiler", "EnableVUTraceProbe", enabled == JNI_TRUE);
+    if (VMManager::HasValidVM()) VMManager::ApplySettings();
+#else
+    (void)env; (void)enabled; // la sonda solo existe en el JIT arm64
+#endif
+}
+
+// Lecturas para la UI: qué pide el usuario (INI) vs qué está midiendo el
+// núcleo ahora mismo (efectiva). Divergen entre el toggle y el siguiente
+// reset del recompiler, o si un cambio de settings se descartó sin VM.
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getVUTraceProbeEnabled(JNIEnv*, jclass)
+{
+    return s_settings_interface.GetBoolValue("EmuCore/CPU/Recompiler", "EnableVUTraceProbe", false)
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getVUTraceProbeEffective(JNIEnv*, jclass)
+{
+#ifdef __aarch64__
+    return (EmuConfig.Cpu.Recompiler.EnableVUTraceProbe && VMManager::HasValidVM()) ? JNI_TRUE : JNI_FALSE;
+#else
+    return JNI_FALSE;
+#endif
+}
+
+// Vuelca el informe bajo demanda (botón de la UI / depuración): escribe
+// logs/vu_probe.txt con el detalle y el resumen al emulog. No cambia nada.
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_dumpVUTraceReport(JNIEnv* env, jclass, jstring reason)
+{
+#ifdef __aarch64__
+    const std::string r = reason ? GetJavaString(env, reason) : std::string("peticion");
+    mVUTraceProbe::DumpReport(r.c_str());
+#else
+    (void)env; (void)reason;
+#endif
 }
 
 // La misma condición que usa ApplyHardwarePerformanceProfile para decidir el

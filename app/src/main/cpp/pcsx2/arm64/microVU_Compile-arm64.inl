@@ -995,6 +995,27 @@ void* mVUcompile(microVU& mVU, u32 startPC, uptr pState)
 	mVUregs.vi15v = 0;
 	mVUsetFlags(mVU, mFC);
 	mVUoptimizePipeState(mVU);
+
+	// === Fase 1 VU block probe (VU1 only, sonda ON) ===
+	// Tres instrucciones como PRIMERAS del bloque: ldr/add/str sobre el slot
+	// (pc>>3)&2047 del array vuBlkExecCnt, direccionado SOLO con
+	// [x24, #inm] (el pin macFlag del dispatcher; x8 = RXSCRATCH, fuera del
+	// pool del allocator). No materializa ninguna dirección absoluta, así
+	// que el recorder de persistencia no ve nada nuevo; solo se emite con la
+	// sonda ON, que a la vez pausa la caché en disco (guards en
+	// microVU_ProgCache-arm64.inl + recording forzado OFF en mVUinit/
+	// mVUreset). ANTES de mVUtestCycles para que también cuenten las
+	// entradas por salida de presupuesto (Remove() del BaseblockEx pisa la
+	// primera palabra de 4 bytes del bloque: aquí es aceptable — Fase 1 es
+	// medición, y OFF reconstruye todo vía ClearCPUExecutionCaches).
+	if (mVUTraceProbe::IsEnabled() && isVU1)
+	{
+		const u32 off = mVUTraceProbe::SlotMemOffset(startPC);
+		armAsm->Ldr(a64::x8, a64::MemOperand(gprMVUFlag, off));
+		armAsm->Add(a64::x8, a64::x8, 1);
+		armAsm->Str(a64::x8, a64::MemOperand(gprMVUFlag, off));
+	}
+
 	mVUtestCycles(mVU, mFC);
 
 	// === Second Pass (Codegen) ===

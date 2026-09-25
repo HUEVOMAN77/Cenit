@@ -270,6 +270,25 @@ public class NativeApp {
         try { return coresAllowMTVU(); } catch (Throwable t) { return false; }
     }
     public static native boolean coresAllowMTVU();
+    // --- Cenit 0.6.15: Fase 1 del motor de superbloques VU (sonda de trazas) --
+    // Medición pura: entradas al dispatcher, ejecuciones de bloques VU1 y
+    // secuencias repetidas. Apagada por defecto; encenderla pausa la caché de
+    // programas VU en disco (nada instrumentado toca el disco) y vuelve a
+    // compilar todo instrumentado. El informe sale al apagarla, al parar el
+    // juego, o a petición (dumpVUTraceReport): logs/vu_probe.txt + resumen en
+    // emulog.txt. Solo existe en el JIT arm64; en otros SO la llamada es no-op.
+    public static native void setVUTraceProbe(boolean enabled);
+    public static void setVUTraceProbeAsync(boolean enabled) {
+        runNativeSettingAsync("setVUTraceProbe", () -> setVUTraceProbe(enabled));
+    }
+    public static native boolean getVUTraceProbeEnabled();
+    public static native boolean getVUTraceProbeEffective();
+    public static native void dumpVUTraceReport(String reason);
+    /** True si la sonda está midiendo ahora mismo (el HUD la pinta). */
+    public static boolean safeVUTraceProbeEffective() {
+        if (hasNoNativeBinary) return false;
+        try { return getVUTraceProbeEffective(); } catch (Throwable t) { return false; }
+    }
     public static native String getLogDirectory();
     /** Carpeta de logs según el núcleo, o null si el binario nativo no está. */
     public static String safeGetLogDirectory() {

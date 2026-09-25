@@ -39,6 +39,12 @@
 #ifdef __ANDROID__
 #include "AndroidDeviceDetection.h"
 #endif
+#if defined(ARCH_ARM64)
+// Cenit 0.6.15 (Fase 1): fila de telemetría de la sonda de trazas VU. El
+// header de la sonda es puro C++ (sin vixl) y solo está en el árbol arm64.
+#include "arm64/MvuTraceProbe-arm64.h"
+#include <string>
+#endif
 
 #include "fmt/chrono.h"
 #include "fmt/format.h"
@@ -74,6 +80,8 @@ std::vector<SmallString> s_software_thread_lines;
 SmallString s_capture_line;
 SmallString s_gpu_usage_line;
 SmallString s_mtvu_sync_line; // Cenit 0.6.13: espera EE->VU1 visible en el HUD
+// Cenit 0.6.15 (Fase 1 sonda de trazas VU): solo se dibuja con la sonda ON.
+SmallString s_vu_probe_line;
 // Cenit 0.6.14: build instalado, ajustes efectivos del núcleo y perfil de
 // hardware detectado. Estáticos por el mismo motivo que el resto de líneas del
 // HUD: se formatean en cada refresco y evitar allocations por frame.
@@ -571,6 +579,43 @@ __ri void ImGuiManager::DrawPerformanceOverlay(float& position_y, float scale, f
 					}
 					DRAW_LINE(osd_font, font_size, s_pinning_line.c_str(), white_color);
 				}
+
+#if defined(ARCH_ARM64)
+				// Cenit 0.6.15 (Fase 1 del motor de superbloques VU): telemetría
+				// en vivo de la sonda de trazas. Solo con la sonda ON (ajuste
+				// EnableVUTraceProbe); apagada no se dibuja nada y no se toca
+				// ninguna estructura. VU1 es el que tiene los contadores de
+				// bloques; el escaneo del array (16 KB) a 10 Hz es trivial y lo
+				// hace el hilo GS, nunca el emulador. Los deltas se siemblan
+				// solos: BlockExecTotal lee los slots que la sonda pone a cero
+				// en el flanco OFF->ON, así que tras re-activar la primera
+				// ventana sale 0 en vez de un pico falso.
+				if (mVUTraceProbe::IsEnabled())
+				{
+					static u64 s_last_probe_blocks = 0;
+					static u64 s_last_probe_stub = 0;
+					const u64 blocks = mVUTraceProbe::BlockExecTotal(1);
+					const auto& f1 = mVUTraceProbe::g_flow[1];
+					const u64 sc = f1.stubCalls.load(std::memory_order_relaxed);
+					const u64 sh = f1.stubHits.load(std::memory_order_relaxed);
+					const u64 sm = f1.slowMiss.load(std::memory_order_relaxed);
+
+					const u64 db = (blocks >= s_last_probe_blocks) ? (blocks - s_last_probe_blocks) : 0;
+					const u64 ds = (sc >= s_last_probe_stub) ? (sc - s_last_probe_stub) : 0;
+					s_last_probe_blocks = blocks;
+					s_last_probe_stub = sc;
+
+					const std::string hitp = sc
+						? fmt::format("{:.0f}%", 100.0 * static_cast<double>(sh) / static_cast<double>(sc))
+						: std::string("-");
+					s_vu_probe_line.format("VUprobe VU1: blk/seg {} | stub/seg {} hit {} | acum bloques={} stub={}+rap{}+lento{}",
+						static_cast<unsigned long long>(db * 10u), static_cast<unsigned long long>(ds * 10u), hitp.c_str(),
+						static_cast<unsigned long long>(blocks), static_cast<unsigned long long>(sh),
+						static_cast<unsigned long long>(f1.fastHits.load(std::memory_order_relaxed)),
+						static_cast<unsigned long long>(sm));
+					DRAW_LINE(osd_font, font_size, s_vu_probe_line.c_str(), white_color);
+				}
+#endif
 
 				const u32 gs_sw_threads = PerformanceMetrics::GetGSSWThreadCount();
 				for (u32 thread = 0; thread < gs_sw_threads; thread++)

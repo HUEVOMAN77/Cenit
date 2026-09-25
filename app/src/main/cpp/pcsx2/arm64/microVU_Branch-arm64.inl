@@ -457,6 +457,17 @@ _mVUt void* mVUcompileJIT(u32 startPC, uptr ptr)
 {
 	microVU& mVU = mVUx;
 
+	// Fase 1 (sonda ON): entrada dinámica JR/JALR. Este es el único punto de
+	// resolución fuera de mVUexecute — las ramas estáticas ya vienen desde el
+	// bloque compilado. jumpEntries cuenta TODAS las llamadas (vía C++ desde
+	// el stub mVUblockFetchJIT del dispatcher); jumpCacheHits son las
+	// resueltas por el jumpCache del bloque, sin abrir el code cache. Las
+	// rutas no-cached también se observan como despacho (mismo programa en
+	// blockFetch, o programa resuelto por searchProg).
+	const bool sonda = mVUTraceProbe::IsEnabled();
+	if (sonda)
+		mVUTraceProbe::g_flow[vuIndex].jumpEntries.fetch_add(1, std::memory_order_relaxed);
+
 	if (doJumpAsSameProgram)
 	{
 		if (doJumpCaching)
@@ -464,7 +475,15 @@ _mVUt void* mVUcompileJIT(u32 startPC, uptr ptr)
 			microBlock* pBlock = (microBlock*)ptr;
 			microJumpCache& jc = pBlock->jumpCache[startPC / 8];
 			if (jc.prog && jc.prog == mVU.prog.quick[startPC / 8].prog)
+			{
+				if (sonda)
+				{
+					mVUTraceProbe::g_flow[vuIndex].jumpCacheHits.fetch_add(1, std::memory_order_relaxed);
+					if (mVU.prog.cur)
+						mVUTraceProbe::ObserveDispatch(vuIndex, startPC, mVU.prog.cur->contentHash.low64);
+				}
 				return jc.hostEntry;
+			}
 
 			mVUopenCodeCache(mVU);
 			void* v = mVUblockFetch(mVU, startPC, (uptr)&pBlock->pStateEnd);
@@ -473,12 +492,18 @@ _mVUt void* mVUcompileJIT(u32 startPC, uptr ptr)
 			jc.prog = mVU.prog.quick[startPC / 8].prog;
 			jc.x86ptrStart = v;
 			jc.hostEntry = v;
+			// Bloque nuevo dentro del MISMO programa (no hubo searchProg,
+			// pero sí es un despacho dinámico resuelto) — observar.
+			if (sonda && v && mVU.prog.cur)
+				mVUTraceProbe::ObserveDispatch(vuIndex, startPC, mVU.prog.cur->contentHash.low64);
 			return v;
 		}
 
 		mVUopenCodeCache(mVU);
 		void* v = mVUblockFetch(mVU, startPC, ptr);
 		mVUcloseCodeCache(mVU);
+		if (sonda && v && mVU.prog.cur)
+			mVUTraceProbe::ObserveDispatch(vuIndex, startPC, mVU.prog.cur->contentHash.low64);
 		return v;
 	}
 
@@ -488,7 +513,15 @@ _mVUt void* mVUcompileJIT(u32 startPC, uptr ptr)
 		microBlock* pBlock = (microBlock*)ptr;
 		microJumpCache& jc = pBlock->jumpCache[startPC / 8];
 		if (jc.prog && jc.prog == mVU.prog.quick[startPC / 8].prog)
+		{
+			if (sonda)
+			{
+				mVUTraceProbe::g_flow[vuIndex].jumpCacheHits.fetch_add(1, std::memory_order_relaxed);
+				if (mVU.prog.cur)
+					mVUTraceProbe::ObserveDispatch(vuIndex, startPC, mVU.prog.cur->contentHash.low64);
+			}
 			return jc.hostEntry;
+		}
 
 		mVUopenCodeCache(mVU);
 		void* v = mVUsearchProg<vuIndex>(startPC, (uptr)&pBlock->pStateEnd);
@@ -497,6 +530,10 @@ _mVUt void* mVUcompileJIT(u32 startPC, uptr ptr)
 		jc.prog = mVU.prog.quick[startPC / 8].prog;
 		jc.x86ptrStart = v;
 		jc.hostEntry = v;
+		// searchProg no observa despachos (eso lo hace mVUexecute); la ruta
+		// JR/JALR también es un despacho resuelto — observar aquí.
+		if (sonda && v && mVU.prog.cur)
+			mVUTraceProbe::ObserveDispatch(vuIndex, startPC, mVU.prog.cur->contentHash.low64);
 		return v;
 	}
 	else
@@ -504,6 +541,8 @@ _mVUt void* mVUcompileJIT(u32 startPC, uptr ptr)
 		mVUopenCodeCache(mVU);
 		void* v = mVUsearchProg<vuIndex>(startPC, ptr);
 		mVUcloseCodeCache(mVU);
+		if (sonda && v && mVU.prog.cur)
+			mVUTraceProbe::ObserveDispatch(vuIndex, startPC, mVU.prog.cur->contentHash.low64);
 		return v;
 	}
 }
