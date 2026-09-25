@@ -3786,6 +3786,18 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                                 .append(LOG_TAIL_LINES).append(" líneas) ===\n");
                         any |= appendTail(cur, body);
                     }
+                    // Cenit 0.6.16: el informe de la sonda VU (Fase 1/1.5) vive en
+                    // su propio archivo y es lo que decide la Fase 2 — que viaje en
+                    // el reporte sin pedirle al usuario que lo busque. Es pequeño
+                    // (KBs) y el tail lo deja acotado igual que los logs.
+                    File probe = new File(logDir, "vu_probe.txt");
+                    body.append("vu_probe.txt: ")
+                            .append(probe.isFile() ? (probe.length() + " bytes") : "no existe").append('\n');
+                    if (probe.isFile()) {
+                        body.append("\n=== SONDA VU (vu_probe.txt, últimas ")
+                                .append(LOG_TAIL_LINES).append(" líneas) ===\n");
+                        any |= appendTail(probe, body);
+                    }
                 }
 
                 // El canal que sí sobrevive a un cierre nativo: el registro del sistema.
