@@ -306,6 +306,14 @@ namespace mVUTraceProbe
 		u32 nWork[2] = {};
 		u64 workTotal[2] = {};
 		u64 workShown[2] = {};
+		// workByReason: donde se va el trabajo segun el motivo de corte — es
+		// el dato que decide QUÉ tipo de fusion sirve en Fase 2. Razon 1
+		// (rama) = bloques cortados por una bifurcacion ya enlazada con
+		// normBranchCompile: ahi fusionar significa inlinar el objetivo, no
+		// "enlazar mejor". Razon 4 (fin de programa) = el bloque ya es largo
+		// todo lo que deja el microcodigo: la ganancia esta fuera de la
+		// fusion intra-bloque.
+		u64 workByReason[2][6] = {};
 		for (int vu = 0; vu < 2; vu++)
 		{
 			const u64* slots = SlotArray(vu);
@@ -331,6 +339,13 @@ namespace mVUTraceProbe
 			// Fase 1.5 — ranking por trabajo (ejecuciones x ops). workTotal
 			// suma sobre todos los PCs con forma registrada; es la cifra que
 			// la Fase 2 intenta bajar al fusionar entradas de bloque.
+			// workByReason: donde se va el trabajo segun el motivo de corte —
+			// es el dato que decide QUÉ tipo de fusion sirve. Razon 1 (rama) =
+			// bloques cortados por una bifurcacion ya enlazada con
+			// normBranchCompile: ahi fusionar significa inlinar el objetivo,
+			// no "enlazar mejor". Razon 4 (fin de programa) = el bloque ya es
+			// largo todo lo que deja el microcodigo: la ganancia esta fuera de
+			// la fusion intra-bloque.
 			for (u32 i = 0; i < kBlkPcs; i++)
 			{
 				const u64 v = slots[i];
@@ -339,6 +354,7 @@ namespace mVUTraceProbe
 					continue; // sin forma (PC compilado con sonda OFF)
 				const u64 w = v * static_cast<u64>(s.ops);
 				workTotal[vu] += w;
+				workByReason[vu][s.reason < 6 ? s.reason : 5] += w;
 				WorkHit c{i * 8u, v, w, s.ops, s.cycles, s.reason};
 				const u32 k = kTopSlots;
 				if (nWork[vu] == k && w <= topWork[vu][k - 1].work)
@@ -471,6 +487,11 @@ namespace mVUTraceProbe
 			if (workTotal[vu] > workShown[vu])
 				P("  (resto: %llu de trabajo fuera del top; PCs sin forma registrada quedan excluidos)\n",
 					static_cast<unsigned long long>(workTotal[vu] - workShown[vu]));
+			P("trabajo por motivo de corte (1 rama, 2 M-bit, 3 EOB, 4 fin-prog, 5 otro):\n");
+			for (u32 r = 1; r <= 5; r++)
+				P("  r=%u : %llu (%.1f%%)\n", r,
+					static_cast<unsigned long long>(workByReason[vu][r]),
+					workTotal[vu] ? 100.0 * static_cast<double>(workByReason[vu][r]) / static_cast<double>(workTotal[vu]) : 0.0);
 
 			P("secuencias repetidas A->B (entre despachos; top %u):\n", nTrans[vu]);
 			for (u32 i = 0; i < nTrans[vu]; i++)
