@@ -18,7 +18,7 @@ import java.io.File;
 
 public class CoversAdapter extends RecyclerView.Adapter<CoversAdapter.VH> {
     private static final String NO_COVER_ASSET_URI =
-            "file:///android_asset/resources/no-cover.png";
+            "file:///android_asset/resources/no-cover.webp";
 
     public interface OnItemClick {
         void onClick(int position);

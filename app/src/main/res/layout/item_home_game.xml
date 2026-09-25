@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Tarjeta de juego de la pantalla de inicio. Antes era solo la carátula suelta;
-  ahora es una tarjeta con la imagen a sangre (proporción PS2 fija), un velo
-  oscuro abajo para que el título se lea siempre, y el nombre del juego debajo.
+  Tarjeta de juego de la pantalla de inicio. La carátula ocupa la tarjeta
+  completa y el titulo va SOBRREPUESTO abajo con un velo oscuro (estilo
+  streaming moderno): sin banda de texto, la imagen manda. El borde cambia a
+  cian con el foco del mando y la tarjeta se micro-hunde al presionar.
 -->
 <com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -11,10 +12,11 @@
     android:layout_margin="6dp"
     android:clickable="true"
     android:focusable="true"
+    android:stateListAnimator="@animator/home_card_press"
     app:cardBackgroundColor="#0B1018"
-    app:cardCornerRadius="14dp"
-    app:cardElevation="6dp"
-    app:strokeColor="#2EFFFFFF"
+    app:cardCornerRadius="16dp"
+    app:cardElevation="5dp"
+    app:strokeColor="@color/home_card_stroke"
     app:strokeWidth="1dp">
 
     <androidx.constraintlayout.widget.ConstraintLayout
@@ -31,11 +33,11 @@
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent"
-            app:shapeAppearanceOverlay="@style/ShapeAppearance.Cenit.CoverTop" />
+            app:shapeAppearanceOverlay="@style/ShapeAppearance.Cenit.CoverFull" />
 
         <View
             android:layout_width="0dp"
-            android:layout_height="40dp"
+            android:layout_height="72dp"
             android:background="@drawable/home_cover_scrim"
             app:layout_constraintBottom_toBottomOf="@id/image_cover"
             app:layout_constraintEnd_toEndOf="@id/image_cover"
@@ -45,22 +47,24 @@
             android:id="@+id/game_title"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:layout_marginBottom="10dp"
+            android:layout_marginStart="8dp"
+            android:layout_marginEnd="8dp"
+            android:layout_marginBottom="9dp"
             android:ellipsize="end"
             android:gravity="center"
             android:includeFontPadding="false"
             android:letterSpacing="0.01"
             android:maxLines="2"
-            android:paddingStart="7dp"
-            android:paddingEnd="7dp"
+            android:shadowColor="#B3000000"
+            android:shadowDx="0"
+            android:shadowDy="1"
+            android:shadowRadius="4"
             android:text="Shadow of the Colossus"
-            android:textColor="#EDF1F6"
+            android:textColor="#F4F7FB"
             android:textSize="12sp"
             android:textStyle="bold"
-            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintBottom_toBottomOf="@id/image_cover"
             app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@id/image_cover" />
+            app:layout_constraintStart_toStartOf="parent" />
     </androidx.constraintlayout.widget.ConstraintLayout>
 </com.google.android.material.card.MaterialCardView>

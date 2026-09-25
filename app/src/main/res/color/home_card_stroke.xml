@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Borde de las tarjetas de la biblioteca: neutro en reposo, cian al enfocar
+     (mando/D-pad), blanco suave al presionar. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true" android:color="#FF5BC8" />
+    <item android:state_pressed="true" android:color="#66FFFFFF" />
+    <item android:color="#22FFFFFF" />
+</selector>

@@ -70,7 +70,7 @@ public class HomeRecentAdapter extends RecyclerView.Adapter<HomeRecentAdapter.VH
     private void loadImage(@Nullable String localPath, @Nullable String remoteUrl,
                            ShapeableImageView target) {
         RequestBuilder<Drawable> placeholder = Glide.with(context)
-                .load("file:///android_asset/resources/no-cover.png")
+                .load("file:///android_asset/resources/no-cover.webp")
                 .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
                 .fitCenter();
 

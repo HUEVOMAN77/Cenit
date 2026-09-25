@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Tarjeta de "Jugados recientemente": imagen a sangre con velo y nombre. -->
+<!-- Tarjeta de "Jugados recientemente": misma estetica que la grilla —
+     caratula completa, titulo sobrepuesto con velo, borde cian con foco. -->
 <com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="116dp"
@@ -10,10 +11,11 @@
     android:layout_marginBottom="8dp"
     android:clickable="true"
     android:focusable="true"
+    android:stateListAnimator="@animator/home_card_press"
     app:cardBackgroundColor="#0B1018"
-    app:cardCornerRadius="14dp"
-    app:cardElevation="6dp"
-    app:strokeColor="#2EFFFFFF"
+    app:cardCornerRadius="16dp"
+    app:cardElevation="5dp"
+    app:strokeColor="@color/home_card_stroke"
     app:strokeWidth="1dp">
 
     <androidx.constraintlayout.widget.ConstraintLayout
@@ -30,11 +32,11 @@
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent"
-            app:shapeAppearanceOverlay="@style/ShapeAppearance.Cenit.CoverTop" />
+            app:shapeAppearanceOverlay="@style/ShapeAppearance.Cenit.CoverFull" />
 
         <View
             android:layout_width="0dp"
-            android:layout_height="46dp"
+            android:layout_height="58dp"
             android:background="@drawable/home_cover_scrim"
             app:layout_constraintBottom_toBottomOf="@id/recent_cover"
             app:layout_constraintEnd_toEndOf="@id/recent_cover"
@@ -46,12 +48,17 @@
             android:layout_height="wrap_content"
             android:layout_marginStart="6dp"
             android:layout_marginEnd="6dp"
-            android:layout_marginBottom="6dp"
+            android:layout_marginBottom="7dp"
             android:ellipsize="end"
+            android:gravity="center"
             android:includeFontPadding="false"
             android:maxLines="2"
+            android:shadowColor="#B3000000"
+            android:shadowDx="0"
+            android:shadowDy="1"
+            android:shadowRadius="4"
             android:text="Shadow of the Colossus"
-            android:textColor="#F2F5F9"
+            android:textColor="#F4F7FB"
             android:textSize="11sp"
             android:textStyle="bold"
             app:layout_constraintBottom_toBottomOf="@id/recent_cover"

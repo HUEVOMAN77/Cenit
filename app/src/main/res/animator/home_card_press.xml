@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Micro-hundido al presionar y leve agrandado al enfocar: la tarjeta
+     "respira" con el mando sin animaciones ruidosas. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_pressed="true">
+        <set>
+            <objectAnimator android:propertyName="scaleX" android:valueTo="0.955f"
+                android:valueType="floatType" android:duration="90" />
+            <objectAnimator android:propertyName="scaleY" android:valueTo="0.955f"
+                android:valueType="floatType" android:duration="90" />
+            <objectAnimator android:propertyName="translationZ" android:valueTo="1dp"
+                android:valueType="floatType" android:duration="90" />
+        </set>
+    </item>
+    <item android:state_focused="true">
+        <set>
+            <objectAnimator android:propertyName="scaleX" android:valueTo="1.035f"
+                android:valueType="floatType" android:duration="140" />
+            <objectAnimator android:propertyName="scaleY" android:valueTo="1.035f"
+                android:valueType="floatType" android:duration="140" />
+            <objectAnimator android:propertyName="translationZ" android:valueTo="6dp"
+                android:valueType="floatType" android:duration="140" />
+        </set>
+    </item>
+    <item>
+        <set>
+            <objectAnimator android:propertyName="scaleX" android:valueTo="1.0f"
+                android:valueType="floatType" android:duration="140" />
+            <objectAnimator android:propertyName="scaleY" android:valueTo="1.0f"
+                android:valueType="floatType" android:duration="140" />
+            <objectAnimator android:propertyName="translationZ" android:valueTo="0dp"
+                android:valueType="floatType" android:duration="140" />
+        </set>
+    </item>
+</selector>
