@@ -524,7 +524,7 @@ namespace mVUTraceProbe
 		for (int vu = 0; vu < 2; vu++)
 		{
 			const auto& f = g_flow[vu];
-			Console.WriteLn("VUprobe VU%d: stub=%llu(hit %llu) rap=%llu lento=%llu bloques=%llu prog=%llu JR=%llu perd=%llu",
+			Console.WriteLn("VUprobe VU%d: stub=%llu(hit %llu) rap=%llu lento=%llu bloques=%llu prog=%llu JR=%llu(jc %llu) perd=%llu",
 				vu,
 				static_cast<unsigned long long>(f.stubCalls.load(std::memory_order_relaxed)),
 				static_cast<unsigned long long>(f.stubHits.load(std::memory_order_relaxed)),
@@ -533,6 +533,7 @@ namespace mVUTraceProbe
 				static_cast<unsigned long long>(grand[vu]),
 				static_cast<unsigned long long>(f.compiles.load(std::memory_order_relaxed)),
 				static_cast<unsigned long long>(f.jumpEntries.load(std::memory_order_relaxed)),
+				static_cast<unsigned long long>(f.jumpCacheHits.load(std::memory_order_relaxed)),
 				static_cast<unsigned long long>(g_dropped[vu].load(std::memory_order_relaxed)));
 			for (u32 i = 0; i < nSlots[vu] && i < 10; i++)
 			{
