@@ -77,7 +77,9 @@ namespace mVUTraceProbe
 		"probe slot array out of [x24, #imm] scaled-x64 reach (imm12*8)");
 
 	// Offset (desde el pin x24) del slot del PC de entrada, en bytes.
-	__fi u32 SlotMemOffset(u32 startPC_bytes)
+	// ODR: este header lo incluyen varios TUs de libemucore.so, así que van
+	// inline de verdad (__forceinline_odr), no solo __fi.
+	__forceinline_odr u32 SlotMemOffset(u32 startPC_bytes)
 	{
 		return kProbeSlotBaseOff + ((startPC_bytes >> 3) & kProbeSlotMask) * 8;
 	}
@@ -102,7 +104,7 @@ namespace mVUTraceProbe
 	//             el próximo encendido; el HUD etiqueta "sonda apagada").
 	// ------------------------------------------------------------------
 	extern std::atomic<bool> g_enabled;
-	__fi bool IsEnabled() { return g_enabled.load(std::memory_order_relaxed); }
+	__forceinline_odr bool IsEnabled() { return g_enabled.load(std::memory_order_relaxed); }
 	void SyncFromConfig(bool enabled, u64* slots0, u64* slots1);
 
 	// ------------------------------------------------------------------
