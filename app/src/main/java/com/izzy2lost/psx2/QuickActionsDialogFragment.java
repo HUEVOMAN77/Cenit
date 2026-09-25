@@ -56,7 +56,7 @@ public class QuickActionsDialogFragment extends DialogFragment {
             btnPower.setOnClickListener(v -> new MaterialAlertDialogBuilder(requireContext(),
                     com.google.android.material.R.style.ThemeOverlay_Material3_MaterialAlertDialog)
                     .setCustomTitle(UiUtils.centeredDialogTitle(requireContext(), "Power Off"))
-                    .setMessage("Quit PSX2?")
+                    .setMessage("¿Salir de Cenit?")
                     .setNegativeButton("Cancel", null)
                     .setPositiveButton("Quit", (d, w) -> { quitApp(); dismissAllowingStateLoss(); })
                     .show());

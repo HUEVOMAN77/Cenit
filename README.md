@@ -3,13 +3,13 @@
 [![Licencia: GPL v3](https://img.shields.io/badge/Licencia-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.en.html)
 [![Android](https://img.shields.io/badge/Android-8.0%20o%20superior-green.svg)](https://developer.android.com/)
 [![ARM64](https://img.shields.io/badge/Procesador-arm64--v8a-orange.svg)](https://developer.arm.com/)
-[![Última versión](https://img.shields.io/badge/versión%20actual-0.6.6-informational)](https://github.com/HUEVOMAN77/Cenit/releases/tag/base-0.6.6)
+[![Última versión](https://img.shields.io/badge/versión%20actual-0.6.18-informational)](https://github.com/HUEVOMAN77/Cenit/releases/tag/base-0.6.18)
 
-**Cenit** es un emulador de PlayStation 2 para celulares Android, hecho como proyecto independiente a partir de [PSX2](https://github.com/izzy2lost/PSX2) (el adaptador Android de PCSX2 2.7). Lo desarrolla una sola persona, pieza por pieza y en público, con una meta muy concreta: **que los juegos de PS2 se muevan fluidos en celulares de gama baja y media, que es donde ningún otro proyecto mira.**
+**Cenit** es un emulador de PlayStation 2 para celulares Android, **creado y mantenido por una sola persona: [HUEVOMAN77](https://github.com/HUEVOMAN77).** Nace como proyecto independiente sobre la base de [PSX2](https://github.com/izzy2lost/PSX2) (el adaptador Android de PCSX2 2.7), pero todo lo que define a Cenit —el motor de rendimiento adaptativo, los perfiles de hardware, los ajustes por juego, el driver Turnip propio, la interfaz, la instrumentación del compilador VU— es trabajo original de su autor, pieza por pieza y en público. La meta es muy concreta: **que los juegos de PS2 se muevan fluidos en celulares de gama baja y media, que es donde ningún otro proyecto mira.**
 
 No es una copia con otro logo. Cada versión suma mejoras de rendimiento y de uso que no existen ni en PSX2 ni en PCSX2, medidas sobre celulares reales.
 
-**Cenit 0.6.6 es la primera versión pública de este proyecto.** Es una base que funciona y se nota, pero el camino recién empieza: poco a poco, versión tras versión, el foco va a seguir siendo el mismo —que los celulares de gama baja y media mejoren— y van a sumarse soporte fino para más marcas de procesador, más ajustes inteligentes y una tabla de rendimiento construida entre todos los que lo usen.
+**La versión actual es la 0.6.18.** El proyecto viene de una línea pública y continua de versiones (0.6.x), cada una con su release, su verificación en hardware real y su registro de qué cambió y qué no. El foco no se mueve: gama baja y media mejorando versión tras versión, con soporte fino para más marcas de procesador y una tabla de rendimiento construida entre todos los que lo usen.
 
 ---
 
@@ -33,8 +33,8 @@ La regla del proyecto: si tu procesador no está catalogado, se asume el perfil 
 
 | | |
 |---|---|
-| **Versión actual** | 0.6.6 |
-| **Descarga** | [Lanzamientos](https://github.com/HUEVOMAN77/Cenit/releases) — busca `Cenit-0.6.6.apk` |
+| **Versión actual** | 0.6.18 |
+| **Descarga** | [Lanzamientos](https://github.com/HUEVOMAN77/Cenit/releases) — busca `Cenit-0.6.18.apk` |
 | **Requiere** | Android 8 o superior, procesador de 64 bits y tu propia BIOS de PS2 |
 | **No incluye** | BIOS, juegos ni ningún archivo con derechos de autor |
 | **Firma** | Clave de prueba (es un proyecto personal, no una tienda) |
@@ -107,7 +107,7 @@ Lo decimos claro: ningún truco hace correr *God of War* a 60 cuadros en un tel�
 
 ## Cómo empezar
 
-1. Descarga `Cenit-0.6.6.apk` desde [Lanzamientos](https://github.com/HUEVOMAN77/Cenit/releases) e instálala (Android pedirá permitir apps de esta fuente la primera vez).
+1. Descarga `Cenit-0.6.18.apk` desde [Lanzamientos](https://github.com/HUEVOMAN77/Cenit/releases) e instálala (Android pedirá permitir apps de esta fuente la primera vez).
 2. Abre la app y sigue el asistente: coloca la **BIOS extraída de tu propia PS2** y elige la carpeta de tus juegos.
 3. Toca un juego de la biblioteca y listo. Con una partida abierta, el panel **Ajustes → Rendimiento** muestra todos los mandos de Cenit.
 4. Consejo: la primera semana activa el "HUD de rendimiento" en Ajustes y verás qué está haciendo el motor por ti.
@@ -136,7 +136,7 @@ Cenit es un proyecto personal, sin cuenta de desarrollador ni intención de tien
 
 ## Lo que viene
 
-Cenit es un **proyecto a largo plazo**. No se terminó con la 0.6.6: recién empieza. Optimizar un emulador de PS2 para celulares exige mucho conocimiento y mucho tiempo, y todo esto se construye poco a poco, versión a versión, midiendo sobre hardware real. Lo que sigue es el plan honesto — parte es ingeniería difícil, parte es directamente ambiciosa, y nada de esto se anuncia como "ya funciona":
+Cenit es un **proyecto a largo plazo**. No se terminó con la 0.6.18: recién empieza. Optimizar un emulador de PS2 para celulares exige mucho conocimiento y mucho tiempo, y todo esto se construye poco a poco, versión a versión, midiendo sobre hardware real. Lo que sigue es el plan honesto — parte es ingeniería difícil, parte es directamente ambiciosa, y nada de esto se anuncia como "ya funciona":
 
 ### Plan inmediato
 
@@ -172,13 +172,21 @@ Es la meta más ambiciosa del proyecto y la que más tiempo va a llevar. Tambié
 
 **Mejoras de estabilidad continua:** cada versión pasa por compilación y pruebas automatizadas antes de publicarse.
 
-## Créditos y ascendencia
+## Autoría
 
-- **[PCSX2](https://github.com/PCSX2/pcsx2)** — el emulador; todo el mérito del motor es de sus autores.
+**Cenit es obra de una sola persona: [HUEVOMAN77](https://github.com/HUEVOMAN77)** — diseño, código, ingeniería de rendimiento, drivers, interfaz, documentación y soporte. Todas las versiones, cada línea propia del proyecto y todas las decisiones de este repositorio son del autor.
+
+## Créditos de terceros (ascendencia técnica)
+
+Cenit se construye sobre software libre preexistente, y la licencia GPL-3.0 exige (y este proyecto hace con gusto) reconocer de dónde viene esa base:
+
+- **[PCSX2](https://github.com/PCSX2/pcsx2)** — el emulador del que desciende el motor.
 - **[PCSX2_ARM64](https://github.com/pontos2024/PCSX2_ARM64)** — la compilación nativa para ARM64 sobre la que se apoya el adaptador Android.
 - **[PSX2 (izzy2lost)](https://github.com/izzy2lost/PSX2)** — el proyecto Android del que este repositorio es bifurcación directa.
+- **Mesa/Turnip (freedreno, MIT)** — base del driver Vulkan propio `Cenit Turnip`.
+- Y las bibliotecas de terceros de `app/src/main/cpp/3rdparty/`, cada una con su licencia original intacta.
 
-Cenit es una capa propia (identidad, interfaz, motor de rendimiento adaptativo, ajustes por juego y perfiles de hardware) sobre esa base, publicada bajo la misma licencia GPL-3.0 y mantenida por una sola persona, poco a poco. Los problemas del motor son del motor; las ideas de este proyecto, de este fork.
+Todo lo demás —la identidad, la interfaz, el motor de rendimiento adaptativo, los ajustes por juego, los perfiles de hardware, la sonda y el futuro motor de superbloques VU— es de Cenit y de su autor.
 
 ## Aviso legal
 

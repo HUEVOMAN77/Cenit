@@ -4051,18 +4051,20 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
 
     public void showAboutDialog() {
         String aboutMessage = "Cenit · Emulador de PlayStation 2 para Android\n\n" +
-                "Port para Android de PCSX2, el emulador de PS2 de referencia.\n\n" +
-                "Basado en:\n" +
-                "• PCSX2: https://github.com/PCSX2/pcsx2\n" +
-                "• PCSX2_ARM64: https://github.com/pontos2024/PCSX2_ARM64\n\n" +
+                "Proyecto independiente creado y mantenido por HUEVOMAN77.\n" +
+                "Rendimiento adaptativo, drivers propios y ajustes por juego:\n" +
+                "todo el trabajo de esta versión es del autor de este repositorio.\n\n" +
                 "Cenit es libre y gratuito, distribuido sin fines de lucro.\n\n" +
                 "Importante:\n" +
                 "• No incluye juegos ni BIOS\n" +
                 "• Debes ser dueño de tu consola y de tus juegos originales\n" +
                 "• Uso educativo y de preservación\n\n" +
                 "Licencia GNU GPL v3.0\n" +
-                "Código de Cenit: https://github.com/HUEVOMAN77/Cenit\n" +
-                "Base PSX2: https://github.com/izzy2lost/PSX2";
+                "Código de Cenit: https://github.com/HUEVOMAN77/Cenit\n\n" +
+                "Base de terceros (créditos de ascendencia, requeridos por GPL):\n" +
+                "• PCSX2: https://github.com/PCSX2/pcsx2\n" +
+                "• PCSX2_ARM64: https://github.com/pontos2024/PCSX2_ARM64\n" +
+                "• PSX2: https://github.com/izzy2lost/PSX2";
 
         new MaterialAlertDialogBuilder(this,
                 com.google.android.material.R.style.ThemeOverlay_Material3_MaterialAlertDialog)
@@ -4072,7 +4074,7 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                 .setNeutralButton("Política de privacidad", (dialog, which) -> {
                     // Open Privacy Policy on GitHub Pages
                     Intent intent = new Intent(Intent.ACTION_VIEW);
-                    intent.setData(Uri.parse("https://izzy2lost.github.io/PSX2/privacy-policy.html"));
+                    intent.setData(Uri.parse("https://github.com/HUEVOMAN77/Cenit/blob/master/PRIVACY_POLICY.md"));
                     try {
                         startActivity(intent);
                     } catch (Exception e) {

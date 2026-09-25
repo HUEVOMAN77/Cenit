@@ -399,7 +399,7 @@ public final class TexturePackDownloadWorker extends Worker {
                 connection.setUseCaches(false);
                 connection.setRequestProperty("Accept", "application/octet-stream");
                 connection.setRequestProperty("Accept-Encoding", "identity");
-                connection.setRequestProperty("User-Agent", "PSX2-Android-TextureDownloader/1");
+                connection.setRequestProperty("User-Agent", "Cenit-Android-TextureDownloader/1");
                 if (start > 0) {
                     connection.setRequestProperty("Range", "bytes=" + start + "-");
                 }

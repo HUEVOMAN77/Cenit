@@ -1939,30 +1939,27 @@ public class GamesCoverDialogFragment extends DialogFragment {
     }
 
     private void showAboutDialog() {
-        String aboutMessage = "PSX2 - PlayStation 2 Emulator for Android\n\n" +
-                "This is an Android port of PCSX2, the renowned PlayStation 2 emulator.\n\n" +
-                "Based on:\n" +
-                "• PCSX2: https://github.com/PCSX2/pcsx2\n" +
-                "• PCSX2_ARM64: https://github.com/pontos2024/PCSX2_ARM64\n\n" +
-                "Free Version: Follow the build instructions in the repository to compile from source.\n" +
-                "Paid Version: Get convenient automatic updates through the Play Store.\n\n" +
+        String aboutMessage = "Cenit - PlayStation 2 Emulator for Android\n\n" +
+                "Independent project created and maintained by HUEVOMAN77.\n\n" +
+                "Free and open source, distributed without profit.\n\n" +
                 "Important:\n" +
                 "• No games or BIOS files are included\n" +
                 "• You must own original PlayStation 2 games and console\n" +
                 "• This emulator is for educational and preservation purposes\n\n" +
                 "Licensed under GNU General Public License v3.0\n" +
-                "Source code: https://github.com/izzy2lost/PSX2\n" +
-                "View full license: https://github.com/izzy2lost/PSX2/blob/master/LICENSE";
+                "Source code: https://github.com/HUEVOMAN77/Cenit\n" +
+                "View full license: https://github.com/HUEVOMAN77/Cenit/blob/master/LICENSE\n\n" +
+                "Third-party base (GPL attribution): PCSX2, PCSX2_ARM64, PSX2.";
 
         new MaterialAlertDialogBuilder(requireContext(),
                 com.google.android.material.R.style.ThemeOverlay_Material3_MaterialAlertDialog)
-                .setTitle("About PSX2")
+                .setTitle("Acerca de Cenit")
                 .setMessage(aboutMessage)
                 .setPositiveButton("OK", null)
                 .setNeutralButton("View License", (dialog, which) -> {
                     // Open LICENSE file or GitHub link
                     android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_VIEW);
-                    intent.setData(android.net.Uri.parse("https://github.com/izzy2lost/PSX2/blob/master/LICENSE"));
+                    intent.setData(android.net.Uri.parse("https://github.com/HUEVOMAN77/Cenit/blob/master/LICENSE"));
                     try {
                         startActivity(intent);
                     } catch (Exception e) {

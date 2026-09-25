@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "PSX2"
+rootProject.name = "Cenit"
 include(":app")

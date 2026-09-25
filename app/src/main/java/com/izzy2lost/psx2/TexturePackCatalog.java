@@ -189,7 +189,7 @@ public final class TexturePackCatalog {
             connection.setUseCaches(false);
             connection.setRequestProperty("Accept", "application/json");
             connection.setRequestProperty("Accept-Encoding", "identity");
-            connection.setRequestProperty("User-Agent", "PSX2-Android-TextureCatalog/1");
+            connection.setRequestProperty("User-Agent", "Cenit-Android-TextureCatalog/1");
 
             final int code = connection.getResponseCode();
             if (code != HttpURLConnection.HTTP_OK) {

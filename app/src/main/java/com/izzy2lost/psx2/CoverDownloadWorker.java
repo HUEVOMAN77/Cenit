@@ -152,7 +152,7 @@ public final class CoverDownloadWorker extends Worker {
             connection.setInstanceFollowRedirects(true);
             connection.setUseCaches(true);
             connection.setRequestProperty("Accept", "image/png");
-            connection.setRequestProperty("User-Agent", "PSX2-Android-CoverDownloader/1");
+            connection.setRequestProperty("User-Agent", "Cenit-Android-CoverDownloader/1");
 
             final int responseCode = connection.getResponseCode();
             if (responseCode != HttpURLConnection.HTTP_OK) {

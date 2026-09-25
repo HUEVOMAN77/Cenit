@@ -1,4 +1,4 @@
-name: Build PSX2 APK
+name: Build Cenit APK
 
 on:
     workflow_dispatch:

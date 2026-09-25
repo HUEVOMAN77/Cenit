@@ -68,8 +68,8 @@ android {
         applicationId = "com.izzy2lost.psx2"
         minSdk = 26
         targetSdk = 36
-        versionCode = 55
-        versionName = "0.6.18"
+        versionCode = 56
+        versionName = "0.6.19"
 
         externalNativeBuild {
             cmake {
@@ -100,7 +100,7 @@ android {
 
     base {
         archivesName.set(
-            "PSX2_${defaultConfig.versionCode}_${SimpleDateFormat("yyyyMMddHHmm").format(Date())}"
+            "Cenit_${defaultConfig.versionCode}_${SimpleDateFormat("yyyyMMddHHmm").format(Date())}"
         )
     }
 
