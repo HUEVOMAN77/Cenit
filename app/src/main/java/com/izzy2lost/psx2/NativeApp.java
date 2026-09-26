@@ -419,6 +419,14 @@ public class NativeApp {
     public static native String getGameSerial(String gameUri);
     public static native String getGameCrc(String gameUri);
     public static native String getCurrentGameSerial();
+    /** SERIAL o "" si el binario no está o la consulta falla. */
+    public static String safeGetCurrentGameSerial() {
+        if (hasNoNativeBinary) return "";
+        try {
+            final String s = getCurrentGameSerial();
+            return s == null ? "" : s;
+        } catch (Throwable t) { return ""; }
+    }
 
     // Cenit 0.6.4 (plan del inge §1.1): hacks de hardware POR JUEGO. El INI
     // global no sirve: LoadCoreSettings() aplica MaskUserHacks() y borra todos
@@ -616,6 +624,18 @@ public class NativeApp {
 	public static native void pause();
 	public static native void resume();
 	public static native boolean isPaused();
+
+	/** Total de cuadros presentados por el VM desde que arrancó. Solo avanza
+	 *  cuando la emulación entrega un cuadro real, así que un hang se manifiesta
+	 *  como "deja de avanzar" — a diferencia de getFPS(), cuyo último valor puede
+	 *  seguir pareciendo vivo durante una congelación. */
+	public static native long getFrameNumber();
+	/** -1 si el binario nativo no está o la consulta falla (el vigilante debe
+	 *  ignorar -1 en lugar de interpretarlo como congelación). */
+	public static long safeGetFrameNumber() {
+		if (hasNoNativeBinary) return -1L;
+		try { return getFrameNumber(); } catch (Throwable t) { return -1L; }
+	}
 	public static native void setFastForward(boolean enabled);
 	public static native void shutdown();
 

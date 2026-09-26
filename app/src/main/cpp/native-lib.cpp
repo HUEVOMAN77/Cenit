@@ -1141,6 +1141,14 @@ Java_com_izzy2lost_psx2_NativeApp_initialize(JNIEnv *env, jclass clazz,
     std::string _szPath = GetJavaString(env, p_szpath);
     EmuFolders::AppRoot = _szPath;
     EmuFolders::DataRoot = _szPath;
+    // Cenit 0.6.22: en Android el nucleo nunca corria SetDataDirectory() (la
+    // ruta de desktop), y esa es la unica que asigna EmuFolders::Settings =
+    // DataRoot/inis. Settings quedaba VACIO: playtime.dat y
+    // custom_properties.ini se abrian en "/playtime.dat" (relativo a la raiz)
+    // — el log del usuario lo probaba: "Failed to open '/playtime.dat'". El
+    // tiempo jugado nunca se guardaba. Se fija aqui, junto al DataRoot propio
+    // del port; EnsureFoldersExist() (unas lineas abajo) crea la carpeta.
+    EmuFolders::Settings = Path::Combine(EmuFolders::DataRoot, "inis");
     EmuFolders::SetResourcesDirectory();
 
     Log::SetConsoleOutputLevel(LOGLEVEL_DEBUG);
@@ -1320,6 +1328,18 @@ extern "C"
 JNIEXPORT jfloat JNICALL
 Java_com_izzy2lost_psx2_NativeApp_getFPS(JNIEnv *env, jclass clazz) {
     return (jfloat)PerformanceMetrics::GetFPS();
+}
+
+// Cenit 0.6.22 — vigilante de congelación. FPS no sirve para detectar un hang
+// total: PerformanceMetrics::GetFPS() se promedia/renueva en el bucle de
+// presentación, así que cuando el VM se cuelga el último valor puede seguir
+// "vivo" en el HUD. El contador de cuadros en cambio solo avanza cuando el
+// hilo de la emulación entrega un cuadro real (s_frame_number++ por cuadro
+// presentado), por lo que congelarse es exactamente dejar de avanzar.
+extern "C"
+JNIEXPORT jlong JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getFrameNumber(JNIEnv *env, jclass clazz) {
+    return (jlong)PerformanceMetrics::GetFrameNumber();
 }
 
 extern "C"

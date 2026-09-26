@@ -430,7 +430,30 @@ void Log::ExecuteCallbacks(LOGLEVEL level, ConsoleColors color, std::string_view
 	// TODO: Cache the message time.
 
 #if defined(__ANDROID__)
-    __android_log_print(ANDROID_LOG_DEBUG, "NDK_LOG", "%s", std::string(message).c_str());
+	// Cenit 0.6.22 — FIX DEL CANAL DE EVIDENCIA. El hack original del port
+	// envolvia TODO el despacho (archivo incluido) en este #if y hacia
+	// unicamente __android_log_print: emulog.txt NACIO SIEMPRE EN 0 BYTES en
+	// Android, y el boton «Enviar registro» llegaba sin el log del nucleo —
+	// justo cuando el usuario mas lo necesita (congelacion, cierre solo). El
+	// espejo a logcat se conserva (es lo que lee adb), pero ahora la linea
+	// sigue su camino a los destinos reales: archivo (WriteToFile, con su
+	// fflush por linea -> sobrevive un SIGKILL del sistema) y callback del
+	// host. Nota: el reparto por nivel (s_file_level) se respeta igual que
+	// en desktop; con Logging/EnableFileLogging=true (default Cenit) cada
+	// Console/DevCon queda en emulog.txt.
+	__android_log_print(ANDROID_LOG_DEBUG, "NDK_LOG", "%s", std::string(message).c_str());
+
+	pxAssert(level > LOGLEVEL_NONE);
+	if (level <= s_file_level)
+		WriteToFile(level, color, message);
+
+	if (level <= s_host_level)
+	{
+		const HostCallbackType callback = s_host_callback;
+		if (callback)
+			s_host_callback(level, color, message);
+	}
+	return;
 #else
 	// Split newlines into separate messages.
 	std::string_view::size_type start_pos = 0;

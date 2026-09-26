@@ -26,6 +26,7 @@ import android.graphics.Color;
 import android.content.ClipData;
 import android.content.SharedPreferences;
 import android.os.Build;
+import android.os.SystemClock;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
@@ -198,6 +199,59 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                 // Medir nunca puede tumbar el juego.
             }
             mHomeHandler.postDelayed(this, 1200);
+        }
+    };
+
+    // Cenit 0.6.22 — vigilante de congelación. Los cierres bruscos ya tenían
+    // foto de evidencia (captureCrashEvidence), pero una CONGELACIÓN no: el
+    // proceso sigue vivo, no hay señal, y el reporte salía vacío (más el canal
+    // emulog en 0 bytes, ya reparado en native). Este muestreador observa el
+    // contador de cuadros del VM (getFrameNumber), que solo avanza cuando el
+    // hilo de emulación entrega un cuadro real: si con el juego corriendo y sin
+    // ninguna pausa el contador no avanza durante FREEZE_STALL_MS, eso ES una
+    // congelación y se dispara captureCrashEvidence EN ESE INSTANTE, cuando la
+    // ventana de logcat todavía contiene lo que el hilo gráfico estaba haciendo.
+    // Una sola captura por episodio; se rearma cuando los cuadros vuelven a
+    // fluir. Umbral generoso (20 s) para no disparar con cargas largas.
+    private static final int FREEZE_CHECK_PERIOD_MS = 2000;
+    private static final long FREEZE_STALL_MS = 20000;
+    private long mFreezeLastFrames = -1L;
+    private long mFreezeStallSinceMs = 0L;
+    private boolean mFreezeCapturedThisEpisode = false;
+    private final Runnable mFreezeWatchdog = new Runnable() {
+        @Override
+        public void run() {
+            if (isFinishing() || isDestroyed()) return;
+            try {
+                // Solo vigila con emulacion activa y sin ninguna pausa pedida
+                // (de usuario, del sistema o automatica): pausado no genera
+                // cuadros y no es congelacion.
+                final boolean paused = mUserPauseRequested || mActivityPauseRequested
+                        || isAutomaticPauseRequested() || NativeApp.isPaused();
+                final long frames = NativeApp.safeGetFrameNumber();
+                if (!isThread() || paused || frames < 0L) {
+                    mFreezeLastFrames = -1L;
+                    mFreezeStallSinceMs = 0L;
+                    mFreezeCapturedThisEpisode = false;
+                } else if (frames != mFreezeLastFrames) {
+                    // Los cuadros fluyen (o es el primer fotograma): rearmar.
+                    mFreezeLastFrames = frames;
+                    mFreezeStallSinceMs = SystemClock.uptimeMillis();
+                    mFreezeCapturedThisEpisode = false;
+                } else if (frames > 0L && !mFreezeCapturedThisEpisode
+                        && SystemClock.uptimeMillis() - mFreezeStallSinceMs >= FREEZE_STALL_MS) {
+                    mFreezeCapturedThisEpisode = true;
+                    final String serial = NativeApp.safeGetCurrentGameSerial();
+                    final long stalled = SystemClock.uptimeMillis() - mFreezeStallSinceMs;
+                    android.util.Log.e("FreezeWatchdog",
+                            "CENIT vigilante: congelacion: contador de cuadros quieto en "
+                                    + frames + " durante " + stalled + " ms (game=" + serial + ")");
+                    captureCrashEvidence("congelacion-frame-stall-" + serial);
+                }
+            } catch (Throwable ignored) {
+                // Vigilar nunca puede tumbar el juego.
+            }
+            mHomeHandler.postDelayed(this, FREEZE_CHECK_PERIOD_MS);
         }
     };
 
@@ -1232,6 +1286,14 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         if (playing) mHomeHandler.postDelayed(mDriverStatSampler, 3000);
         else DriverStats.flush(getApplicationContext());
 
+        // Vigilante de congelación (0.6.22): arranca/para con el mismo ciclo que
+        // el muestreador. Se rearma por si quedó un episodio a medias.
+        mHomeHandler.removeCallbacks(mFreezeWatchdog);
+        mFreezeLastFrames = -1L;
+        mFreezeStallSinceMs = 0L;
+        mFreezeCapturedThisEpisode = false;
+        if (playing) mHomeHandler.postDelayed(mFreezeWatchdog, 6000);
+
         // El regidor de resolución solo mide con un juego delante.
         if (mDynRes == null) {
             mDynRes = new DynamicResolutionGovernor(this, new DynamicResolutionGovernor.Host() {
@@ -1327,6 +1389,7 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         mIntentionalExit = true;
         mHomeHandler.removeCallbacks(mVmEndWatcher);
         mHomeHandler.removeCallbacks(mDriverStatSampler);
+        mHomeHandler.removeCallbacks(mFreezeWatchdog);
         DriverStats.flush(getApplicationContext());
         // Cenit 0.6.8: salida deliberada. Si el guardarraya de drivers tenía un
         // intento pendiente, aquí se limpia: el usuario se fue, el driver no falló.
@@ -2711,6 +2774,17 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                             && CustomDriverManager.hasPendingAttempt(getApplicationContext())) {
                         CustomDriverManager.markPendingAttemptFailed(getApplicationContext());
                         captureCrashEvidence("vm-thread-died");
+                    }
+                    // Cenit 0.6.22: muerte a media sesion. El caso de arriba solo
+                    // fotografia dentro de la ventana de gracia del arranque, y el
+                    // usuario reporta que a veces el emulador "se sale solito"
+                    // jugando: si el hilo del VM muere sin salida deliberada y sin
+                    // reinicio programado, eso SIEMPRE es un fallo y la ventana de
+                    // logcat (con el bufer crash de debuggerd, senal + .so culpable)
+                    // hay que capturarla EN ESE INSTANTE, no esperar al siguiente
+                    // reporte. Con salida limpia (mIntentionalExit) no se toma nada.
+                    else if (!mEmulationRestarting && !mIntentionalExit && mVmStartMs > 0L) {
+                        captureCrashEvidence("muerte-inesperada-media-sesion");
                     }
                     // El juego terminó por sí solo (salida, cierre o fallo). Se vuelve
                     // al inicio, salvo que sea el hueco de un reinicio programado.

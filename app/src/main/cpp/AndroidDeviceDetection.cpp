@@ -91,7 +91,23 @@ namespace AndroidDeviceDetection
 		        platform.find("qcom") != std::string::npos);
 	}
 
+	GPUVendor DetectGPUVendorUncached();
+
 	GPUVendor DetectGPUVendor()
+	{
+		// Cenit 0.6.22: memoizado. El muestreador del dialogo de driver llama al
+		// tier cada 1.2 s y cada consulta re-leia propiedades del sistema y
+		// escribia 3-4 lineas de "Device Detection"/"Detected ..." en el log.
+		// Mientras el canal de archivo estuvo muerto (ver Console.cpp) eso solo
+		// inundaba logcat; con emulog.txt vivo habria enterrado la evidencia.
+		// El hardware del telefono no cambia en vida del proceso: se calcula una
+		// vez y se conserva. Las lineas de deteccion quedan (una sola vez, con
+		// valor diagnostico real en el reporte).
+		static const GPUVendor s_cached = DetectGPUVendorUncached();
+		return s_cached;
+	}
+
+	GPUVendor DetectGPUVendorUncached()
 	{
 		if (IsSnapdragon())
 		{
