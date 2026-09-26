@@ -637,12 +637,11 @@ __ri void ImGuiManager::DrawPerformanceOverlay(float& position_y, float scale, f
 				if (mVUSuperblock::IsEnabled() || mVUSuperblock::WasKilled())
 				{
 					const auto& sb = mVUSuperblock::g_stats[1];
-					using std::memory_order_relaxed;
 					s_vu_sb_line.format("VUSB: bld {} conf {} match {} div {} kill {}",
-						static_cast<unsigned long long>(sb.built.load(relaxed)),
-						static_cast<unsigned long long>(sb.promoted.load(relaxed)),
-						static_cast<unsigned long long>(sb.matched.load(relaxed)),
-						static_cast<unsigned long long>(sb.diverged.load(relaxed)),
+						static_cast<unsigned long long>(sb.built.load(std::memory_order::relaxed)),
+						static_cast<unsigned long long>(sb.promoted.load(std::memory_order::relaxed)),
+						static_cast<unsigned long long>(sb.matched.load(std::memory_order::relaxed)),
+						static_cast<unsigned long long>(sb.diverged.load(std::memory_order::relaxed)),
 						mVUSuperblock::WasKilled() ? 1u : 0u);
 					DRAW_LINE(osd_font, font_size, s_vu_sb_line.c_str(), white_color);
 				}
