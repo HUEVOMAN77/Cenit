@@ -10,6 +10,15 @@
 
 #include <thread>
 
+// Cenit 0.6.21 — Fase 4 (host scheduling) del VU Superblock Engine: subida de
+// prioridad HOST del hilo MTVU mientras el motor está ON. Solo POSIX/arm64
+// (el motor es JIT arm64; en Windows/desktop queda fuera igual que el motor).
+#if defined(ARCH_ARM64) && !defined(_WIN32)
+#include "arm64/MvuSuperblock-arm64.h" // header puro C++ (sin vixl)
+#include <sys/resource.h>
+#define CENIT_MTVU_SB_PRIO 1
+#endif
+
 VU_Thread vu1Thread;
 
 #define MTVU_ALWAYS_KICK 0
@@ -137,8 +146,31 @@ void VU_Thread::ExecuteRingBuffer()
 {
 	Threading::SetNameOfCurrentThread("MTVU");
 
+#ifdef CENIT_MTVU_SB_PRIO
+	// Prioridad host del episodio: con el motor de superbloques ON, el hilo
+	// MTVU recibe nice -2 para que la cadena validada no pierda CPU contra
+	// GS/audio (el documento: "host scheduling WITHOUT touching PS2 timing").
+	// Cero alteración de la simulación: no se toca VU1.cycle ni el
+	// presupuesto, y WaitVU/EECycleSkip/mVUcleanUp/mVUendProgram siguen
+	// intactos (el "NO TOCAR AÚN" del documento). El toggle del config tiró
+	// las cachés en el hilo de settings, pero este bucle es el único que
+	// escribe la prioridad: el flank se detecta en el siguiente paquete, sin
+	// cross-thread calls. Si el kernel la niega (restricción de nice de apps
+	// Android), setpriority falla en silencio y nada cambia — es una
+	// optimista de scheduling, no una dependencia.
+	int sbPrioApplied = 0;
+#endif
+
 	for (;;)
 	{
+#ifdef CENIT_MTVU_SB_PRIO
+		const int sbPrioWant = mVUSuperblock::IsEnabled() ? -2 : 0;
+		if (sbPrioWant != sbPrioApplied)
+		{
+			setpriority(PRIO_PROCESS, 0, sbPrioWant);
+			sbPrioApplied = sbPrioWant;
+		}
+#endif
 		semaEvent.WaitForWork();
 		if (m_shutdown_flag.load(std::memory_order_acquire))
 			break;

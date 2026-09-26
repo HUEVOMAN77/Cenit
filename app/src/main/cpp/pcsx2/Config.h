@@ -685,6 +685,16 @@ struct Pcsx2Config
 		// arm64-only; apaga por defecto y no cambia nada cuando esta apagada.
 		bool
 			EnableVUTraceProbe : 1;
+
+		// Cenit VU Superblock Engine — Fase 2-5 del documento de arquitectura:
+		// superbloques VU1 (fusion de ramas estaticas incondicionales calientes
+		// con guardas de presupuesto por tramo) validados con replay
+		// diferencial contra la cadena normal. Apagado por defecto; encendido
+		// fuerza la sonda (la elegibilidad vive de sus contadores) y pausa la
+		// caché de programas en disco. El validador auto-apaga el motor ante
+		// divergencias (GATE del documento).
+		bool
+			EnableVUSuperblock : 1;
 		BITFIELD_END
 
 		RecompilerOptions();

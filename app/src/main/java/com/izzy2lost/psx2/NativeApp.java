@@ -289,6 +289,29 @@ public class NativeApp {
         if (hasNoNativeBinary) return false;
         try { return getVUTraceProbeEffective(); } catch (Throwable t) { return false; }
     }
+    // --- Cenit 0.6.21: Fases 2-5 del motor de superbloques VU ---------------
+    // Fusiona en un solo bloque los bloques VU1 calientes que caen
+    // incondicionalmente uno sobre otro, y los valida por replay diferencial
+    // (parejas normal/superbloque con entrada idéntica: MATCH cuenta,
+    // DIVERGENCE invalida la variante y, a las 3, apaga el motor por sesión).
+    // EXPERIMENTAL y APAGADA por defecto: el GATE del documento de arquitectura
+    // exige cero divergencias y mejora sostenida medida en el dispositivo antes
+    // de habilitarla. Encenderla enciende la sonda y pausa la caché de programas
+    // VU en disco; el toggle recompila todo (invalida las cachés del
+    // recompiler). Informe: logs/vu_superblock.txt + resumen en emulog.txt.
+    // Solo existe en el JIT arm64; en otros SO la llamada es no-op.
+    public static native void setVUSuperblock(boolean enabled);
+    public static void setVUSuperblockAsync(boolean enabled) {
+        runNativeSettingAsync("setVUSuperblock", () -> setVUSuperblock(enabled));
+    }
+    public static native boolean getVUSuperblockEnabled();
+    public static native boolean getVUSuperblockEffective();
+    public static native void dumpVUSuperblockReport(String reason);
+    /** True si el motor está validando/actuando ahora mismo (el HUD lo pinta). */
+    public static boolean safeVUSuperblockEffective() {
+        if (hasNoNativeBinary) return false;
+        try { return getVUSuperblockEffective(); } catch (Throwable t) { return false; }
+    }
     public static native String getLogDirectory();
     /** Carpeta de logs según el núcleo, o null si el binario nativo no está. */
     public static String safeGetLogDirectory() {

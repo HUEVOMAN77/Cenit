@@ -43,6 +43,8 @@
 // Cenit 0.6.15 (Fase 1): fila de telemetría de la sonda de trazas VU. El
 // header de la sonda es puro C++ (sin vixl) y solo está en el árbol arm64.
 #include "arm64/MvuTraceProbe-arm64.h"
+// Cenit 0.6.21 (Fases 2-5): fila del motor de superbloques — mismo estilo.
+#include "arm64/MvuSuperblock-arm64.h"
 #include <string>
 #endif
 
@@ -82,6 +84,8 @@ SmallString s_gpu_usage_line;
 SmallString s_mtvu_sync_line; // Cenit 0.6.13: espera EE->VU1 visible en el HUD
 // Cenit 0.6.15 (Fase 1 sonda de trazas VU): solo se dibuja con la sonda ON.
 SmallString s_vu_probe_line;
+// Cenit 0.6.21 (motor de superbloques VU): solo se dibuja con el motor ON.
+SmallString s_vu_sb_line;
 // Cenit 0.6.14: build instalado, ajustes efectivos del núcleo y perfil de
 // hardware detectado. Estáticos por el mismo motivo que el resto de líneas del
 // HUD: se formatean en cada refresco y evitar allocations por frame.
@@ -620,6 +624,27 @@ __ri void ImGuiManager::DrawPerformanceOverlay(float& position_y, float scale, f
 						static_cast<unsigned long long>(db * 10u),
 						static_cast<unsigned long long>(ds * 10u), hitp.c_str());
 					DRAW_LINE(osd_font, font_size, s_vu_probe_line.c_str(), white_color);
+				}
+
+				// Cenit 0.6.21 (Fases 2-5 del motor de superbloques VU): línea
+				// de estado del replay diferencial. Solo con el motor ON.
+				// Acumulados de la tabla (los deltas por segundo no dicen nada
+				// aquí: la ventana de validación es a nivel de candidato, y el
+				// informe logs/vu_superblock.txt tiene el detalle). K = el
+				// motor se auto-apagó por divergencias (por sesión); se pinta
+				// aunque el config siga pidiendo ON, porque effective=false lo
+				// ocultaría y el usuario necesita ver POR qué se fue solo.
+				if (mVUSuperblock::IsEnabled() || mVUSuperblock::WasKilled())
+				{
+					const auto& sb = mVUSuperblock::g_stats[1];
+					using std::memory_order_relaxed;
+					s_vu_sb_line.format("VUSB: bld {} conf {} match {} div {} kill {}",
+						static_cast<unsigned long long>(sb.built.load(relaxed)),
+						static_cast<unsigned long long>(sb.promoted.load(relaxed)),
+						static_cast<unsigned long long>(sb.matched.load(relaxed)),
+						static_cast<unsigned long long>(sb.diverged.load(relaxed)),
+						mVUSuperblock::WasKilled() ? 1u : 0u);
+					DRAW_LINE(osd_font, font_size, s_vu_sb_line.c_str(), white_color);
 				}
 #endif
 

@@ -2101,6 +2101,12 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         // Cenit 0.6.15: sonda de trazas VU (Fase 1). Default apagado y sin
         // perfil que la encienda: es un ajuste de diagnóstico explícito.
         NativeApp.setVUTraceProbe(prefs.getBoolean("vu_trace_probe", false));
+        // Cenit 0.6.21: motor de superbloques VU (Fases 2-5). EXPERIMENTAL y
+        // apagado por defecto (el GATE del documento: cero divergencias y
+        // mejora sostenida medida antes de habilitar). Se re-aplica aquí por la
+        // misma razón que la sonda: el valor vive solo en la preferencia, y el
+        // toggle nativo es lo que sincroniza el INI antes de arrancar el VM.
+        NativeApp.setVUSuperblock(prefs.getBoolean("vu_superblock", false));
         if (mDynRes != null) mDynRes.reset();
         AudioOutputPreference.apply(this);
     }

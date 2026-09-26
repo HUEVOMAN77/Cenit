@@ -338,6 +338,15 @@
                                 style="@style/Cenit.Settings.Caption"
                                 android:text="Mide cuánto trabaja el VU1: ejecuciones por bloque, entradas al despachador y secuencias de microcódigo que se repiten. No cambia la emulación, pero mientras está encendida el juego va un poco más cargado y la caché de programas VU en disco queda en pausa. El informe se escribe al apagarla (o al parar el juego) en logs/vu_probe.txt, y el resumen viaja en el registro. Apagada por defecto." />
 
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/set_sw_vu_superblock"
+                                style="@style/Cenit.Settings.Switch"
+                                android:text="Motor de superbloques VU (experimental)" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Fusiona bloques VU1 calientes para saltarse la barrera de bloque. Apagado por defecto: puede cambiar el resultado gráfico en juegos concretos y se revierte solo si diverge." />
+
                             <TextView
                                 style="@style/Cenit.Settings.FieldLabel"
                                 android:text="Cola de cuadros" />

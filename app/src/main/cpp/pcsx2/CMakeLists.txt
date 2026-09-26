@@ -1117,6 +1117,7 @@ set(pcsx2arm64Sources
 	arm64/RecStubs.cpp
 	arm64/microVU-arm64.cpp
 	arm64/MvuTraceProbe-arm64.cpp
+	arm64/MvuSuperblock-arm64.cpp
 	x86/iR5900Analysis.cpp  # arch-neutral EE instruction-liveness analysis, shared with the x86 build
 	)
 
@@ -1133,6 +1134,7 @@ set(pcsx2arm64Headers
 	arm64/microVU_ProgCache-arm64.inl
 	arm64/microVU_Misc-arm64.h
 	arm64/MvuTraceProbe-arm64.h
+	arm64/MvuSuperblock-arm64.h
 )
 
 # These ones benefit a lot from LTO

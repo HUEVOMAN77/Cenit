@@ -316,7 +316,13 @@ void normBranchCompile(microVU& mVU, u32 branchPC, bool condEdge = false)
 	// cero por ejecucion. condEdge=true solo en el taken de condBranch: la
 	// fusion de una rama condicional NO elimina la entrada de B cuando la
 	// condicion falla, y min(execsA,execsB) sobreestima su beneficio.
-	if (mVUTraceProbe::IsEnabled() && mVU.index == 1)
+	// mVU.sbActive: el corte TERMINAL de una compilacion variante enlaza
+	// desde el ultimo tramo del area, pero con mVUstartPC = PC de entrada de
+	// la region. Registrar esa arista pisaria la A->B real del bloque normal
+	// (misma slot de clave) con una arista que solo existe dentro del
+	// superbloque, y desde ahi la elegibilidad se mediría contra datos
+	// inventados. Se omite; las aristas las escribe siempre la cadena normal.
+	if (mVUTraceProbe::IsEnabled() && mVU.index == 1 && !mVU.sbActive)
 		mVUTraceProbe::RecordStaticEdge(1, mVUstartPC, branchPC, condEdge ? 2 : 1);
 
 	microBlock* pBlock;

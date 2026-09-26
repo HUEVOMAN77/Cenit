@@ -281,6 +281,19 @@ public final class SettingsScreenController {
         toggle(R.id.set_sw_vu_probe, "vu_trace_probe", false,
                 checked -> NativeApp.setVUTraceProbeAsync(checked));
 
+        // Cenit 0.6.21: motor de superbloques VU (Fases 2-5 del documento).
+        // Fusiona bloques VU1 calientes con unión incondicional en un solo
+        // bloque y los VALIDA por replay diferencial antes de usarlos: cada
+        // superbloque pasa una ventana de parejas normal/superbloque con
+        // entrada idéntica (hash del estado de salida completo); con cero
+        // divergencias se confía en él, y a las 3 divergencias el motor se
+        // auto-apaga por sesión. Default apagado (GATE del documento: experimental
+        // hasta medir). Encenderlo enciende la sonda y pausa la caché de
+        // programas VU en disco; recompila todo al cambiar, así que invalida la
+        // caché del recompiler igual que la sonda.
+        toggle(R.id.set_sw_vu_superblock, "vu_superblock", false,
+                checked -> NativeApp.setVUSuperblockAsync(checked));
+
         // La posición del spinner ES el valor de la clave (ver arrays.xml). Como
         // con medio píxel y cuotas: el primer disparo del adaptador se ADOPTA sin
         // escribir, para no guardar "Óptima" en el teléfono de todo el mundo.
@@ -591,6 +604,7 @@ public final class SettingsScreenController {
         check(R.id.set_sw_fastcdvd, prefs.getBoolean("fast_cdvd", false));
         check(R.id.set_sw_mtvu, prefs.getBoolean("mtvu", NativeApp.defaultMTVU()));
         check(R.id.set_sw_vu_probe, prefs.getBoolean("vu_trace_probe", false));
+        check(R.id.set_sw_vu_superblock, prefs.getBoolean("vu_superblock", false));
         setSpinner(R.id.set_sp_framequeue,
                 prefs.getInt("frame_queue", NativeApp.defaultFrameLatencyQueue()));
         setSpinner(R.id.set_sp_preload,

@@ -170,6 +170,16 @@ static __fi void mVUstatusFlagOp(mV)
 	int i = mVUcount;
 	bool runLoop = true;
 
+	// Superblock (variante): las caminatas hacia atras NO pueden ir por PC
+	// (incPC2(-2)) — un area fusionada no es contigua en PC y el slot info[]
+	// del op anterior a una union es el ULTIMO del tramo previo, no PC-2. Se
+	// avanza por la tabla de region del paso 1 (sbOpSlot), indexada por el
+	// op-actual-de-mVUsetFlags (mVUcount al llamarse: el contador no lo toca
+	// esta funcion, solo el paso 2 de mVUsetFlags lo resetea). Equivalencia:
+	// en un bloque normal sbOpSlot[k]*2 == mVUstartPC + 2k, o sea exactamente
+	// lo que incPC2(-2) acumularia — solo en modo variante existe la tabla.
+	const bool sbWalk = (mVU.sbActive != 0);
+
 	if (sFLAG.doFlag)
 	{
 		sFLAG.doNonSticky = true;
@@ -178,7 +188,7 @@ static __fi void mVUstatusFlagOp(mV)
 	{
 		for (; i > 0; i--)
 		{
-			incPC2(-2);
+			if (sbWalk) { iPC = mVU.sbOpSlot[i - 1] * 2; setCode(); } else incPC2(-2);
 			if (sFLAG.doNonSticky)
 			{
 				runLoop = false;
@@ -195,7 +205,7 @@ static __fi void mVUstatusFlagOp(mV)
 	{
 		for (; i > 0; i--)
 		{
-			incPC2(-2);
+			if (sbWalk) { iPC = mVU.sbOpSlot[i - 1] * 2; setCode(); } else incPC2(-2);
 
 			if (sFLAG.doNonSticky)
 				break;
@@ -216,6 +226,21 @@ static __fi void mVUsetFlags(mV, microFlagCycles& mFC)
 	int endPC = iPC;
 	u32 aCount = 0; // Amount of instructions needed to get valid mac flag instances for block linking
 
+	// Superblock (variante): la region no es contigua en PC — las tres
+	// caminatas de esta funcion (preambulo hacia atras,FSSET de
+	// mVUstatusFlagOp y el bucle principal hacia adelante) avanzan por la
+	// tabla de region sbOpSlot[] en lugar de por incPC2(±2). Con sbWalk el
+	// preambulo arranca en el ULTIMO op (la caminata es hacia atras desde
+	// ahi); el bucle principal empieza en el op 0. La equivalencia con el
+	// PC lineal de un bloque normal es exacta (sbOpSlot[k]*2 ==
+	// mVUstartPC + 2k cuando no hay uniones).
+	const bool sbWalk = (mVU.sbActive != 0);
+	if (sbWalk)
+	{
+		iPC = mVU.sbOpSlot[mVUcount > 0 ? (mVUcount - 1) : 0] * 2;
+		setCode();
+	}
+
 	// Ensure last ~4+ instructions update mac/status flags (if next block's first 4 read them)
 	for (int i = mVUcount; i > 0; i--, aCount++)
 	{
@@ -230,7 +255,12 @@ static __fi void mVUsetFlags(mV, microFlagCycles& mFC)
 			if (aCount >= 3)
 				break;
 		}
-		incPC2(-2);
+		// Iteracion i lee el op i-1 (op n-1 en la entrada); al pasar de
+		// ventana hay que dejar iPC en el op i-2. En modo normal eso es
+		// incPC2(-2); con i==1 el paso sobrepasa el op 0 y nadie lo vuelve a
+		// leer (la caminata termina), con tabla se protege el indice.
+		if (sbWalk) { if (i >= 2) { iPC = mVU.sbOpSlot[i - 2] * 2; setCode(); } }
+		else incPC2(-2);
 	}
 
 	// Status/Mac Flags setup
@@ -273,7 +303,7 @@ static __fi void mVUsetFlags(mV, microFlagCycles& mFC)
 
 	mFC.cycles = 0;
 	u32 xCount = mVUcount;
-	iPC = mVUstartPC;
+	if (sbWalk) { iPC = mVU.sbOpSlot[0] * 2; setCode(); } else iPC = mVUstartPC;
 	for (mVUcount = 0; mVUcount < xCount; mVUcount++)
 	{
 		if (mVUlow.isFSSET && !noFlagOpts)
@@ -331,7 +361,11 @@ static __fi void mVUsetFlags(mV, microFlagCycles& mFC)
 		}
 
 		mFC.cycles++;
-		incPC2(2);
+		// El ultimo avance cae FUERA de la region (igual que incPC2(2) en el
+		// camino normal); en lugar de leer un slot ajeno se deja iPC donde
+		// esta — nadie lo pisa ya: se restaura endPC al salir.
+		if (sbWalk) { if (mVUcount + 1 < xCount) { iPC = mVU.sbOpSlot[mVUcount + 1] * 2; setCode(); } }
+		else incPC2(2);
 	}
 
 	mVUregs.flagInfo |= ((__Status) ? 0 : (xS << 2));

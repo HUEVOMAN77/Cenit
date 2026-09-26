@@ -24,6 +24,7 @@
 #include "microVU_Misc-arm64.h"
 #include "MvuObservedEntries.h"
 #include "MvuTraceProbe-arm64.h"
+#include "MvuSuperblock-arm64.h"
 #include "microVU_Persist-arm64.h"
 
 #ifndef XXH_versionNumber
@@ -54,7 +55,13 @@
 //       now emits the badBranch/evilBranch target-select sequence that
 //       the arm64 port had dropped — MGS2 VU0 solver hang); pre-fix
 //       payloads compiled the broken shape and must not be rehydrated.
-static constexpr u32 kMvuCompilerAbiVersion = 7;
+//   8 — VU Superblock Engine: fused shadow-block variants carry scratch
+//       bits in microRegInfo byte 6 and change dispatch/emit shape when
+//       enabled, and the options sentinel gains the device-tier byte.
+//       Payloads from an ABI-7 build must not be rehydrated under an
+//       ABI-8 sentinel (the tier byte keys the whole cache by hardware
+//       class once the engine exists).
+static constexpr u32 kMvuCompilerAbiVersion = 8;
 
 // Hash/equality functors for XXH128_hash_t — let std::unordered_map<XXH128_hash_t, …>
 // work without a wrapping struct. low64 already carries the well-mixed half of
@@ -507,6 +514,51 @@ struct microVU
 
 	VURegs& regs() const { return ::vuRegs[index]; }
 
+	// === Cenit VU Superblock Engine — estado de la compilacion variante ===
+	// Los toca UN solo hilo (el dispatcher de VU1) y solo DURANTE una
+	// compilacion variante (mVU.sbSlot >= 0), armada por SbArmCompile desde
+	// mVUexecute<1>. La variante es una SEGUNDA mVUcompile del PC de entrada
+	// cuyo primer paso CONTINUA el analisis a traves de las uniones B
+	// incondicionales elegibles: el area fusionada se analiza y se emite como
+	// UN solo bloque (cero flushAll, cero rotacion de instancias de bandera,
+	// cero salto, cero guarda de presupuesto y cero contador de sonda en cada
+	// union). Por eso mVUregs/mVUcycles/mVUcount/mFC recorren el area completa
+	// y el registro en el gestor lleva los bits de rasguino HORNEADOS SOLO en
+	// la copia del gestor (mVUblock.pState ES mVUregs: se hornea justo antes
+	// de add() y se limpia en la misma linea que ya limpia blockType, para que
+	// ni lpState ni el analisis vean nunca los bits).
+	//
+	// sbOpSlot[] es la razon de ser del modo variante en el frente de banderas:
+	// mVUsetFlags/mVUstatusFlagOp caminan el bloque por PC (incPC2(+/-2)), y un
+	// area fusionada NO es contigua en PC. El paso 1 registra aqui el slot de
+	// info[] de cada instruccion analizada, en orden de region, y las caminatas
+	// de banderas, cuando sbSlot >= 0, avanzan por esta tabla en lugar de por
+	// PC. Coste: un store por instruccion analizada, solo en modo variante.
+	//
+	// El paso 2 SI necesita estado extra, porque un area fusionada no es
+	// contigua en PC y el bucle de emision normal avanza iPC linealmente
+	// (incPC dentro de mVUexecuteInstruction/doUpperOp/doLowerOp). Por eso el
+	// bucle variante se RE-ANCLA en cada op con iPC = sbOpSlot[x] * 2 +
+	// setCode(), y ademas repone presupuesto: mVUtestCycles cobra ARRIBA los
+	// ciclos totales del area (una sola vez a la entrada), mientras que la
+	// cadena normal los deduce bloque a bloque. Sin correccion, mVU.cycles a
+	// mitad de area divergiria de los valores que la cadena normal tiene en
+	// cada punto, y el codigo generado de XGKICK lee mVU.cycles en tiempo de
+	// ejecucion (xgkicklastcycle = totalCycles - mVU.cycles + VU1.cycle). La
+	// correccion se emite justo al cruzar la barrera de cada union (tras el
+	// op del delay slot, indexado por sbJDelayOp[]) y suma al contador del
+	// host los ciclos de los tramos aun no ejecutados, tomados de
+	// sbSpanCycles[] (acumulados del area en cada union aceptada).
+	int sbSlot;                                        // frame variante activo; -1 = normal
+	u32 sbActive;                                      // 1 durante TODA la compilacion variante (paso 1 y 2), anidada con save/restore
+	u32 sbJunctions;                                   // uniones aceptadas (paso 1)
+	u32 sbOpCount;                                     // ops registradas en la tabla de region
+	u32 sbKick;                                        // KICK (isKick/doXGKICK) en el area: se descarta.
+	                                             // T/D NO: se emiten op a op con semantica
+	                                             // normal, y la union limpia ya los excluye.
+	u32 sbOpSlot[mVUSuperblock::kSbRegionCap];         // slot info[] de cada op de la region
+	u32 sbJDelayOp[mVUSuperblock::kSbMaxJunctions];    // indice de op del delay slot de cada union (el siguiente op abre tramo nuevo)
+
 	__fi REG_VI& getVI(uint reg) const { return regs().VI[reg]; }
 	__fi VECTOR& getVF(uint reg) const { return regs().VF[reg]; }
 	__fi VIFregisters& getVifRegs() const
@@ -631,6 +683,18 @@ public:
 		}
 		else
 		{
+			// Superblock identity invariant (VU Superblock Engine): a fused
+			// variant registers itself with the scratch bits (kSbScratchMask,
+			// byte 6 / blockType of microRegInfo) baked into its pState, and
+			// quickLookup/fBlockList comparisons below are FULL-key (quick64
+			// exact compare, or the 96-byte compareState for exact-match
+			// blocks). Every normal search therefore enters with a clean key
+			// and can never resolve to a variant — dispatch control lives
+			// 100% in C++ (mVUSuperblock::SbResolve). Do NOT mask the scratch
+			// bits out of stored keys here: that would make the variant
+			// reachable by normal block linking and defeat the design. The
+			// layout pin (blockType inside quick64[0]) is asserted in
+			// microVU-arm64.h next to the struct.
 			const u64 quick64 = pState->quick64[0];
 			for (const microBlockLinkRef& ref : quickLookup)
 			{

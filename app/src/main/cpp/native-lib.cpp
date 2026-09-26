@@ -38,6 +38,9 @@
 #ifdef __aarch64__
 // Cenit 0.6.15 (Fase 1): sonda de trazas VU — header puro C++, sin vixl.
 #include "pcsx2/arm64/MvuTraceProbe-arm64.h"
+// Cenit 0.6.21 (Fases 2-5): motor de superbloques VU — mismo estilo, header
+// puro C++ (el estado vive en MvuSuperblock-arm64.cpp, linkeado en el core).
+#include "pcsx2/arm64/MvuSuperblock-arm64.h"
 #endif
 #include <atomic>
 #include <algorithm>
@@ -723,6 +726,65 @@ Java_com_izzy2lost_psx2_NativeApp_dumpVUTraceReport(JNIEnv* env, jclass, jstring
 #ifdef __aarch64__
     const std::string r = reason ? GetJavaString(env, reason) : std::string("peticion");
     mVUTraceProbe::DumpReport(r.c_str());
+#else
+    (void)env; (void)reason;
+#endif
+}
+
+// Cenit 0.6.21 — Fases 2-5 del motor de superbloques VU (PDF de arquitectura).
+// Encendido por defecto NO: el GATE del documento exige cero divergencias y
+// mejora sostenida medida antes de habilitar; hasta que el usuario valide en su
+// dispositivo, la bandera es experimental. Encender el motor enciende la sonda
+// (la elegibilidad vive de sus contadores) y pausa la caché de programas en
+// disco; apagarlo vuelca el informe (logs/vu_superblock.txt + resumen en
+// emulog). El toggle cae en RecompilerOptions: CheckForCPUConfigChanges limpia
+// las cachés del recompiler en ambos flancos, así que ninguna variante
+// sobrevive a un cambio de bandera. Solo existe en el JIT arm64.
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setVUSuperblock(JNIEnv* env, jclass, jboolean enabled)
+{
+#ifdef __aarch64__
+    s_settings_interface.SetBoolValue("EmuCore/CPU/Recompiler", "EnableVUSuperblock", enabled == JNI_TRUE);
+    if (VMManager::HasValidVM()) VMManager::ApplySettings();
+#else
+    (void)env; (void)enabled; // el motor solo existe en el JIT arm64
+#endif
+}
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getVUSuperblockEnabled(JNIEnv*, jclass)
+{
+    return s_settings_interface.GetBoolValue("EmuCore/CPU/Recompiler", "EnableVUSuperblock", false)
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getVUSuperblockEffective(JNIEnv*, jclass)
+{
+#ifdef __aarch64__
+    // Efectiva == config aplicada con VM corriendo. El auto-apagado por
+    // divergencias se espeja aquí: si el motor se mató solo, g_enabled ya es
+    // false aunque el INI pida ON — la UI debe mostrar la verdad.
+    return (EmuConfig.Cpu.Recompiler.EnableVUSuperblock && VMManager::HasValidVM()
+        && mVUSuperblock::IsEnabled()) ? JNI_TRUE : JNI_FALSE;
+#else
+    return JNI_FALSE;
+#endif
+}
+
+// Vuelca el informe bajo demanda (botón de la UI / depuración): escribe
+// logs/vu_superblock.txt con el detalle de validación y el resumen al emulog.
+// No cambia nada.
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_dumpVUSuperblockReport(JNIEnv* env, jclass, jstring reason)
+{
+#ifdef __aarch64__
+    const std::string r = reason ? GetJavaString(env, reason) : std::string("peticion");
+    mVUSuperblock::DumpReport(r.c_str());
 #else
     (void)env; (void)reason;
 #endif

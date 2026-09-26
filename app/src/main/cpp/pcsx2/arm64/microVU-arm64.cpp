@@ -13,6 +13,12 @@
 #include "common/StringUtil.h"
 #include "SaveState.h"
 #include "VU1Trace.h"
+#ifdef __ANDROID__
+// Cenit VU Superblock Engine — Fase 3: el options sentinel incorpora el tier
+// del dispositivo (byte deviceTier) cuando el motor esta ON. Header del envoltorio
+// Android (existe tambien en desktop, pero GetDeviceTier solo esta definido aqui).
+#include "AndroidDeviceDetection.h"
+#endif
 #include "vu_capture.h"
 
 // Program-cache telemetry. Uncomment and rebuild to enable; off in
@@ -55,6 +61,24 @@ static_assert(offsetof(microVU, vuBlkExecCnt) - offsetof(microVU, macFlag) +
 		mVUTraceProbe::kProbeSlots * 8 <= 4095u * 8u,
 		"probe slots exceed scaled 64-bit immediate reach (imm12*8) from the x24 pin");
 static_assert(alignof(microVU::vuBlkExecCnt) >= 8, "probe counters need 8-byte alignment");
+
+// Cenit VU Superblock Engine — pins de identidad del motor. (a) blockType tiene
+// que caer en el byte kSbKeyBlockTypeOff del microRegInfo de 96 bytes: el TU
+// del motor barre ese offset de la clave de pareo sin ver el struct (vive libre
+// de vixl/microVU), y este assert es su unica garantia. (b) quick64[0] tiene
+// que incluir el byte horneado: microBlockManager::search compara quick64[0]
+// COMPLETO en la lista rapida, y esa es la barrera que hace a la variante
+// inalcanzable por enlace normal (el GATE). Si blockType saliera del primer
+// u64, la busqueda rapida no veria los bits y una variante podria resolver
+// como bloque normal sin validacion.
+static_assert(offsetof(microRegInfo, blockType) == mVUSuperblock::kSbKeyBlockTypeOff,
+	"microRegInfo::blockType moved - remap kSbKeyBlockTypeOff before shipping the engine");
+static_assert(offsetof(microRegInfo, blockType) < sizeof(u64),
+	"blockType escaped quick64[0] - the scratch-identity barrier in search() is dead");
+
+// Cenit VU Superblock Engine — prototipo del oraculo del replay diferencial
+// (definicion cerca de mVUexecute; registrada en mVUinit como g_exitDigest).
+static u64 mVU1ExitDigest(u32 consumedCycles);
 
 // SlotArray() — la vista publica del array de slots (declarada en el header
 // del probe para lectores sin acceso al struct).
@@ -352,13 +376,22 @@ void mVUbuildOptionsSentinel(microVU& mVU)
 		// disabled run. This field reclaims a zeroed reserved byte, so the
 		// recording-OFF sentinel is bit-identical to the pre-recording one.
 		u8  progCacheRecording;
+		// Cenit VU Superblock Engine (Fase 3 — identidad persistente): el
+		// documento pide que la identidad del cache incluya el tier del
+		// hardware. 0 == "motor OFF (o VU0): comportamiento de siempre" =>
+		// el sentinel apagado es bit-idéntico al pre-motor (nadie pierde su
+		// cache por existir la función). Con el motor ON en VU1 se guarda
+		// tier+1 (1..3) — nunca 0 — para que encender el motor re-keyee el
+		// cache de VU1 de forma atómica (los despachos validados viven bajo
+		// el mismo ABI 8 que ya horneó los bits de rasguño).
+		u8  deviceTier;
 		// Reserved tail so adding a future option byte doesn't shift downstream
 		// fields. Reclaim bytes with 0 == "feature off / old behavior" so the
 		// off-state sentinel stays bit-identical (no wholesale eviction for
 		// users who never enable the feature); a reclaimed byte whose zero
 		// state is NOT emission-identical needs a kMvuCompilerAbiVersion bump
 		// in the same commit.
-		u8  reserved[11];
+		u8  reserved[10];
 	};
 	static_assert(sizeof(Snapshot) == 64, "options sentinel layout drifted — bump kMvuCompilerAbiVersion");
 
@@ -401,6 +434,19 @@ void mVUbuildOptionsSentinel(microVU& mVU)
 	s.vu1Fpcr = EmuConfig.Cpu.VU1FPCR.bitmask;
 
 	s.progCacheRecording = mVUPersist::IsRecordingEnabled() ? 1 : 0;
+
+	// Device tier (motor ON en VU1): ver el campo en Snapshot. GetDeviceTier
+	// devuelve 0/1/2 (bajo/media/alta) — mas 1 para que el estado encendido
+	// jamas sea 0. Bajo __ANDROID__ unicamente; en desktop el byte queda 0.
+	if (mVUSuperblock::IsEnabled() && mVU.index == 1)
+	{
+#ifdef __ANDROID__
+		const int tier = AndroidDeviceDetection::GetDeviceTier();
+		s.deviceTier = static_cast<u8>((tier >= 0 && tier <= 2) ? (tier + 1) : 1);
+#else
+		s.deviceTier = 1;
+#endif
+	}
 
 	mVU.optionsSentinel      = XXH3_128bits(&s, sizeof(s));
 	mVU.optionsSentinelValid = true;
@@ -488,8 +534,29 @@ void mVUinit(microVU& mVU, uint vuIndex)
 	// ANTES de sincronizar la grabacion de persistencia, para que el corte
 	// (sonda ON => NO grabar, NO tocar el disco) quede establecido antes de
 	// que el sentinel y el Init vean el estado.
-	mVUTraceProbe::SyncFromConfig(EmuConfig.Cpu.Recompiler.EnableVUTraceProbe,
+	const bool sbCfg = EmuConfig.Cpu.Recompiler.EnableVUSuperblock;
+	mVUTraceProbe::SyncFromConfig(EmuConfig.Cpu.Recompiler.EnableVUTraceProbe || sbCfg,
 		microVU0.vuBlkExecCnt, microVU1.vuBlkExecCnt);
+	mVUSuperblock::SyncFromConfig(sbCfg);
+	if (vuIndex == 1)
+	{
+		// El motor pide el digest de salida al cerrar cada episodio de la
+		// ventana de replay (solo existe VU1; el motor es VU1-only).
+		mVUSuperblock::g_exitDigest = &mVU1ExitDigest;
+		// Token de armado de la compilacion variante. Ambos VUs lo inicializan:
+		// mVUinit hace memset(&mVU.prog,...) pero microVU0/1 son estaticos
+		// (cero-llenados), y sbSlot debe ser -1 = "sin frame variante", no 0
+		// = "candidato vivo #0". mVUreset lo repone en cada reset.
+		microVU0.sbSlot = -1;
+		microVU0.sbActive = 0;
+		microVU1.sbSlot = -1;
+		microVU1.sbActive = 0;
+		// Tabla muerta de la sesion VM anterior (mVUclose no la libera): las
+		// entradas apuntan a un code cache que ya no existe. SbKillAll es
+		// no-op con el motor OFF. Los PCs quemados sobreviven a proposito —
+		// codifican hechos de forma del microcodigo, no del cache.
+		mVUSuperblock::SbKillAll(0);
+	}
 
 	// Persisted-JIT recording follows the config bool — established before the
 	// sentinel (which bakes the recording byte). At boot this runs before
@@ -499,7 +566,8 @@ void mVUinit(microVU& mVU, uint vuIndex)
 	// a probe session carry the instrumented prologue and must never be
 	// persisted or rehydrated (the sentinel is deliberately NOT re-keyed, so
 	// the disk cache cannot tell instrumented code from clean by itself).
-	mVUPersist::SyncRecordingFromConfig(EmuConfig.Cpu.Recompiler.EnableVUProgramCache && !mVUTraceProbe::IsEnabled());
+	mVUPersist::SyncRecordingFromConfig(EmuConfig.Cpu.Recompiler.EnableVUProgramCache
+		&& !mVUTraceProbe::IsEnabled() && !mVUSuperblock::IsEnabled());
 
 	// Seed options sentinel from current config snapshot. Reset will rebuild it
 	// in case the user toggled clamp / FPCR / speedhack settings since init.
@@ -980,9 +1048,22 @@ void mVUreset(microVU& mVU, bool resetReserve)
 
 	// Cenit VU Superblock Engine — Fase 1: espejo del config de la sonda, con
 	// el corte de flanco (ON: limpia todo; OFF: vuelca el informe). Va ANTES
-	// de SyncRecordingFromConfig por el mismo motivo que en mVUinit.
-	mVUTraceProbe::SyncFromConfig(EmuConfig.Cpu.Recompiler.EnableVUTraceProbe,
+	// de SyncRecordingFromConfig por el mismo motivo que en mVUinit. Motor
+	// encendido implica sonda encendida (la elegibilidad vive de los
+	// contadores de la Fase 1), y SyncFromConfig del motor va en el mismo
+	// punto: corte de flanco con el code cache ya vaciado por el toggle.
+	const bool sbCfg = EmuConfig.Cpu.Recompiler.EnableVUSuperblock;
+	mVUTraceProbe::SyncFromConfig(EmuConfig.Cpu.Recompiler.EnableVUTraceProbe || sbCfg,
 		microVU0.vuBlkExecCnt, microVU1.vuBlkExecCnt);
+	mVUSuperblock::SyncFromConfig(sbCfg);
+	// El reset VU1 DESTRUYE el code cache (armSetAsmPtr mas abajo): cualquier
+	// variante viva es codigo liberado. SbKillAll es no-op con el motor OFF y
+	// con la tabla vacia; los flancos ON->ON sin toggle (agotamiento del cache
+	// en mVUcleanUp, hilo dispatcher — escritor unico de la tabla) quedan
+	// cubiertos aqui, y el caso settings-hilo tiene la misma exposicion
+	// documentada que el corte de flanco del SyncFromConfig de arriba.
+	if (mVU.index == 1)
+		mVUSuperblock::SbKillAll(0);
 
 	// Persisted-JIT recording follows the EnableVUProgramCache config bool, and
 	// MUST be established here — before mVUbuildOptionsSentinel bakes the
@@ -998,7 +1079,8 @@ void mVUreset(microVU& mVU, bool resetReserve)
 	// disk cache or be rehydrated from it (the sentinel is deliberately NOT
 	// re-keyed — instrumented and clean code share the contentHash space, so
 	// isolation has to be absolute while measuring).
-	mVUPersist::SyncRecordingFromConfig(EmuConfig.Cpu.Recompiler.EnableVUProgramCache && !mVUTraceProbe::IsEnabled());
+	mVUPersist::SyncRecordingFromConfig(EmuConfig.Cpu.Recompiler.EnableVUProgramCache
+		&& !mVUTraceProbe::IsEnabled() && !mVUSuperblock::IsEnabled());
 
 	// Rebuild options sentinel before any program rebuilds — config may have
 	// changed since the last init/reset (clamp flips, FPCR edits, speedhack
@@ -1044,6 +1126,13 @@ void mVUreset(microVU& mVU, bool resetReserve)
 
 	mVU.regs().nextBlockCycles = 0;
 	memset(&mVU.prog.lpState, 0, sizeof(mVU.prog.lpState));
+	// Cenit VU Superblock Engine — reposicionar el token de frame (ver mVUinit;
+	// el 0 del estado estatico significaria "candidato #0 vivo"). Va aqui, no
+	// antes del bloque THREAD_VU1 de arriba: el sync de VU1 puede ejecutar un
+	// episodio mas con el estado de la sesion anterior, y eso debe resolverse
+	// con la tabla ya sincronizada, no con un token colgado.
+	mVU.sbSlot  = -1;
+	mVU.sbActive = 0;
 	mVU.profiler.Reset(mVU.index);
 
 	// Program Variables
@@ -1126,6 +1215,12 @@ void mVUclose(microVU& mVU)
 	if (mVUTraceProbe::IsEnabled() && mVU.index == 1)
 		mVUTraceProbe::DumpReport("VM apagado (mVUclose VU1)");
 
+	// Cenit VU Superblock Engine — idem: el vuelco del informe de validacion es
+	// el ultimo punto con datos validos si el usuario cierra el juego con el
+	// motor ON. Idempotente por etiqueta de razon; serializa con mutex propio.
+	if (mVUSuperblock::IsEnabled() && mVU.index == 1)
+		mVUSuperblock::DumpReport("VM apagado (mVUclose VU1)");
+
 	// Final checkpoint of live programs to the on-disk cache before we let
 	// the contentMap go. Mirrors the mVUreset path; harmless if nothing
 	// new has been added since the last reset.
@@ -1164,6 +1259,15 @@ __fi void mVUclear(mV, u32 addr, u32 size)
 	// evento de invalidación potencial). Solo telemetría.
 	if (mVUTraceProbe::IsEnabled())
 		mVUTraceProbe::g_flow[mVU.index & 1].microWrites.fetch_add(1, std::memory_order_relaxed);
+
+	// Cenit VU Superblock Engine — regla del documento: cero trazas vivas sobre
+	// microcodigo que cambio. Toda escritura a la imagen micro invalida las
+	// variantes de VU1 (los PCs quemados siguen quemados; invalidar por
+	// escritura no borra una divergencia medida). Barato: SbKillAll sale de
+	// inmediato si el motor esta OFF, y VU0 no tiene variantes — el filtro por
+	// indice evita barrer la tabla desde el hilo EE.
+	if (mVU.index == 1 && mVUSuperblock::IsEnabled())
+		mVUSuperblock::SbKillAll(static_cast<u32>(mVU.microMemWriteGen));
 
 #ifdef mVUcacheTrace
 	mVUCacheTraceObserveClear(mVU, addr, size, /*wasRealClear=*/!mVU.prog.cleared);
@@ -1592,6 +1696,95 @@ _mVUt __fi void* mVUlookupProg(u32 startPC, uptr pState)
 }
 
 //------------------------------------------------------------------
+// Cenit VU Superblock Engine — Replay diferencial: digest de salida de VU1.
+//
+// El motor llama esto AL CIERRE de cada episodio emparejable (SbFinish, hilo
+// dispatcher de VU1) y compara el resultado entre el episodio de la cadena
+// normal y el del superbloque. Es el oraculo del replay: dos ejecuciones que
+// entraron con byte-a-byte el mismo estado (memcmp de SbResolve contra la
+// clave de construccion) tienen que salir con byte-a-byte el mismo estado
+// observable — si no, la fusion movio algo y la variante se invalida.
+//
+// Que entra (y por que): TODA la superficie observable por el EE/host al
+// terminar el episodio: VF/VI completos, ACC, q/p, flags, pendings Q/P, las
+// banderas macro/clip/status (absolutas e instancias micro_*), nextBlockCycles,
+// toda la maquinaria XGKICK, el respaldo VI con sus contadores, los anillos
+// fmac/fdiv/efu/ialu (estado + cabezas), y los 16 KB de memoria de datos VU1
+// (que el EE lee por la ventana de VU). Los punteros Mem/Micro, idx, y la
+// suciedad del interprete (code/start_pc/branch/branchpc/delaybranchpc/
+// takedelaybranch) NO entran: o son constantes por VU o el JIT de VU1 no los
+// mantiene — el par normal/SB puede terminar en instrucciones distintas por
+// el ritmo del despacho del EE, y medir eso daria divergencias falsas.
+// regs().cycle (contador GLOBAL continuo) se hashkea: entre los dos episodios
+// de un par la ruta EE externa es identica (el par se cierra en el mismo
+// bucle de ejecucion) y EECycleRate es inmutable durante la ventana (cualquier
+// cambio de config tiro el code cache y con el la tabla del motor). El consumo
+// REAL del episodio entra aparte como consumedCycles plegado: si una fusion
+// consumiera presupuesto distinto, eso es divergence visible por si sola.
+//
+// Coste: solo durante la ventana de validacion (kSbVerifyDispatches despachos
+// por candidato, ambas rutas) y con el motor explicitamente encendido por el
+// usuario — no es camino estable. XXH3_64 incremental sobre el stack.
+//------------------------------------------------------------------
+
+static u64 mVU1ExitDigest(u32 consumedCycles)
+{
+	VURegs& r = microVU1.regs();
+	XXH3_state_t st;
+	XXH3_64bits_reset(&st);
+
+#define SB_UPD(field) XXH3_64bits_update(&st, &(field), sizeof(field))
+
+	for (u32 i = 0; i < 32; i++) SB_UPD(r.VF[i]);
+	for (u32 i = 0; i < 32; i++) SB_UPD(r.VI[i]);
+	SB_UPD(r.ACC);
+	SB_UPD(r.q);
+	SB_UPD(r.p);
+	SB_UPD(r.cycle);
+	SB_UPD(r.flags);
+	SB_UPD(r.ebit);
+	SB_UPD(r.pending_q);
+	SB_UPD(r.pending_p);
+	for (u32 i = 0; i < 4; i++) SB_UPD(r.micro_macflags[i]);
+	for (u32 i = 0; i < 4; i++) SB_UPD(r.micro_clipflags[i]);
+	for (u32 i = 0; i < 4; i++) SB_UPD(r.micro_statusflags[i]);
+	SB_UPD(r.macflag);
+	SB_UPD(r.statusflag);
+	SB_UPD(r.clipflag);
+	SB_UPD(r.nextBlockCycles);
+	SB_UPD(r.xgkickaddr);
+	SB_UPD(r.xgkickdiff);
+	SB_UPD(r.xgkicksizeremaining);
+	SB_UPD(r.xgkicklastcycle);
+	SB_UPD(r.xgkickcyclecount);
+	SB_UPD(r.xgkickenable);
+	SB_UPD(r.xgkickendpacket);
+	SB_UPD(r.VIBackupCycles);
+	SB_UPD(r.VIOldValue);
+	SB_UPD(r.VIRegNumber);
+	for (u32 i = 0; i < 4; i++) SB_UPD(r.fmac[i]);
+	SB_UPD(r.fmacreadpos);
+	SB_UPD(r.fmacwritepos);
+	SB_UPD(r.fmaccount);
+	SB_UPD(r.fdiv);
+	SB_UPD(r.efu);
+	for (u32 i = 0; i < 4; i++) SB_UPD(r.ialu[i]);
+	SB_UPD(r.ialureadpos);
+	SB_UPD(r.ialuwritepos);
+	SB_UPD(r.ialucount);
+
+#undef SB_UPD
+
+	// El presupuesto consumido del episodio, plegado aparte (ver cabecera).
+	XXH3_64bits_update(&st, &consumedCycles, sizeof(consumedCycles));
+
+	// Memoria de datos VU1 (16 KB) — lo que el EE observa por la ventana.
+	XXH3_64bits_update(&st, VU1.Mem, 0x4000); // VU1_MEMSIZE (VUmicro.h)
+
+	return XXH3_64bits_digest(&st);
+}
+
+//------------------------------------------------------------------
 // Execution Functions
 //------------------------------------------------------------------
 
@@ -1644,6 +1837,60 @@ _mVUt void* mVUexecute(u32 startPC, u32 cycles)
 		result = mVUsearchProg<vuIndex>(maskedPC, pState);
 		mVUcloseCodeCache(mVU);
 	}
+
+	// === Cenit VU Superblock Engine — armado de la compilacion variante ===
+	// Despues de la resolucion normal de ESTE despacho: mVU.prog.cur ya vale
+	// (la compilacion variante necesita el gestor del programa), el bloque
+	// normal esta registrado, y la politica de elegibilidad (arista A->B
+	// medida, hotness, shapes, techos) puede fallar barata sin tocar nada.
+	// lpState es exactamente la clave de este despacho: la resolucion normal
+	// (lookup o searchProg) lo sincronizo consigo mismo en mVUinitFirstPass
+	// y nadie lo toco desde entonces — la copia a la sombra de SbArmCompile
+	// toma esa clave ANTES de que la compilacion variante lo pise. La entrada de la variante se DESCARTA: el retorno de esta
+	// resolucion es la entrada normal, y SbResolve (en mVUlookupProg_VU1, el
+	// unico punto de resolucion del motor) decide con la tabla ya poblada si el
+	// PROXIMO despacho toma el superbloque. sbSlot >= 0
+	// aqui seria un frame variante en vuelo (imposible en el dispatcher —
+	// lo cubre la comprobacion); nunca se re-arma encima de uno activo.
+	if (vuIndex == 1 && result && mVUSuperblock::IsEnabled() && mVU.sbSlot < 0)
+	{
+		const int sbSlotArm = mVUSuperblock::SbArmCompile(maskedPC, (const void*)pState);
+		if (sbSlotArm >= 0)
+		{
+			// Preservar lpState alrededor de la compilacion variante. El
+			// compile pisa lpState en dos caminos: (a) la sincronizacion
+			// inicial de mVUinitFirstPass (identica a la entrada — inocua);
+			// (b) el horneado RUNTIME de las continuaciones M-bit dentro del
+			// area: los stores que emite llevan mVUregs del paso 1 de LA
+			// VARIANTE — con el paso 1 continuo entre tramos, el valor
+			// horneado coincide con el que hornearia la cadena (mFC/regs a
+			// mitad de area son el estado que el enlace normal rotaria), pero
+			// la defensa debe ser local: una escritura de un estado
+			// "pre-union" no tiene porque coincidir byte-a-byte con la de la
+			// cadena, y este despacho aun va a RESOLVER Y CORRER por la
+			// cadena normal (result intacto) — lpState es SU clave.
+			// sbSlot se reposiciona a -1: perf_and_return rearma el token del
+			// marco interior (anidacion); aqui se apaga el frame del
+			// dispatcher — la compilacion variante termino.
+			microRegInfo sbSavedState = mVU.prog.lpState;
+			mVU.sbSlot = sbSlotArm;
+			mVUopenCodeCache(mVU);
+			mVUcompile(mVU, maskedPC, pState);
+			mVUcloseCodeCache(mVU);
+			mVU.prog.lpState = sbSavedState;
+			mVU.sbSlot = -1;
+		}
+	}
+
+	// SIN SbResolve aqui a proposito: cada despacho entra AL MENU por el stub
+	// emitido -> mVUlookupProg_VU1, que es el UNICO punto de resolucion del
+	// motor. Llamarlo dos veces por despacho duplicaria la ventana (window++
+	// y la alternacion de paridad contarian el mismo despacho dos veces y
+	// dejarian colgados *_Pending cruzados). El armado de la variante si vive
+	// aqui: es una sola vez por despacho lento, y la entrada resultante queda
+	// en la tabla para el stub de los DESPACHOS SIGUIENTES (la primera
+	// resolucion normal de este despacho es exactamente lo que la ventana
+	// quiere comparar).
 
 	// Secuencias repetidas (Fase 1): un despacho resuelto = (programa, PC).
 	// ObserveDispatch enlaza la transicion con el despacho anterior del
@@ -1766,9 +2013,34 @@ void* mVUlookupProg_VU1(u32 startPC, u32 cycles)
 		void* r = mVUlookupProg<1>(maskedPC, (uptr)&microVU1.prog.lpState);
 		if (r)
 			mVUTraceProbe::g_flow[1].stubHits.fetch_add(1, std::memory_order_relaxed);
+		// Cenit VU Superblock Engine — el control del superbloque tiene que
+		// cubrir TAMBIEN la ruta rapida del stub emitido (si no, una variante
+		// TRUSTED conviviria con despachos normales por stub y el replay ni
+		// se abriria). La resolucion normal de arriba ocurrio y conto como
+		// stubHit: SbResolve solo reemplaza la ENTRADA — la telemetria de la
+		// sonda sigue midiendo el flujo normal intacto (el superbloque no
+		// pisa lpState: preserva el presupuesto y enlaza al sucesor normal).
+		if (mVUSuperblock::IsEnabled())
+		{
+			void* sb = mVUSuperblock::SbResolve(maskedPC, (const void*)&microVU1.prog.lpState,
+				(s32)cycles);
+			if (sb)
+				r = sb;
+		}
 		return r;
 	}
-	return mVUlookupProg<1>(maskedPC, (uptr)&microVU1.prog.lpState);
+	void* r = mVUlookupProg<1>(maskedPC, (uptr)&microVU1.prog.lpState);
+	// Cenit VU Superblock Engine — misma cobertura sobre la resolucion rapida
+	// del stub (ruta sin sonda). Barato: SbResolve sale de inmediato si no
+	// hay motor, y su escaneo es O(vivos) con la tabla vacia.
+	if (mVUSuperblock::IsEnabled())
+	{
+		void* sb = mVUSuperblock::SbResolve(maskedPC, (const void*)&microVU1.prog.lpState,
+			(s32)cycles);
+		if (sb)
+			r = sb;
+	}
+	return r;
 }
 
 #ifdef PCSX2_RECOMPILER_TESTS
@@ -1960,11 +2232,30 @@ void recMicroVU1::Execute(u32 cycles)
 		? vu1_trace::begin('r', VU1.VI[REG_TPC].UL, cycles)
 		: nullptr;
 #endif
+	// Cenit VU Superblock Engine — entrada del episodio en bytes de microMem:
+	// TPC YA multiplicado por <<3 arriba, enmascarado a 13 bits de micro como
+	// hace el dispatcher (0x3ff8). Se captura ANTES de la llamada porque el
+	// codigo generado puede mover TPC dentro del episodio.
+	const u32 sbEntryPC = VU1.VI[REG_TPC].UL & 0x3ff8;
+	const bool sbRun = mVUSuperblock::IsEnabled();
 	((mVUrecCall)microVU1.startFunct)(VU1.VI[REG_TPC].UL, cycles);
 	VU1.VI[REG_TPC].UL >>= 3;
 #ifdef PCSX2_RECOMPILER_TESTS
 	vu1_trace::finish(trace);
 #endif
+	// Cierre del episodio (SbFinish decide si hay algo abierto para esta
+	// entrada; sin candidato es un return inmediato). El stub de salida ya
+	// banko regs().cycle y DEJO EL CONSUMO DEL EPISODIO en microVU1.cycles
+	// (contabilidad inline en mVUdispatcherAB: totalCycles - max(0,restante),
+	// corre tambien en el tail de reset; un re-dispatch interno con presupuesto
+	// acortado refleja el total del episodio porque totalCycles se fija una
+	// sola vez al entrar). El clip a 0 es por el degenerate restante>total —
+	// el mismo plegado en ambos lados del par, no puede romper un MATCH.
+	if (sbRun)
+	{
+		const s32 c0 = microVU1.cycles;
+		mVUSuperblock::SbFinish(sbEntryPC, (c0 > 0) ? (u32)c0 : 0u);
+	}
 
 	if (microVU1.regs().flags & 0x4 && !THREAD_VU1)
 	{

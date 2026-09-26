@@ -739,7 +739,7 @@ __fi void mVUinitConstValues(microVU& mVU)
 	mVUconstReg[15].regValue = mVUregs.vi15v ? mVUregs.vi15 : 0;
 }
 
-__fi void mVUinitFirstPass(mV, uptr pState, u8* thisPtr)
+__fi void mVUinitFirstPass(mV, uptr pState, u8* thisPtr, int sbFrame)
 {
 	mVUstartPC = iPC;
 	mVUbranch  = 0;
@@ -765,12 +765,32 @@ __fi void mVUinitFirstPass(mV, uptr pState, u8* thisPtr)
 	// here would just defer a NULL/stale deref into UB. Fail fast instead.
 	pxAssertRel(mVU.prog.cur, "microVU: mVUinitFirstPass with NULL mVU.prog.cur");
 	blockCreate(mVUstartPC / 2);
+	// Cenit VU Superblock Engine — identidad de variante: el bit de rasguño se
+	// hornea SOLO aqui, sobre blockType (que en una entrada de despacho es 0),
+	// de modo que la copia que el gestor hace de pState en add() (memcpy del
+	// microBlock entero a su propio microBlockLink) es la UNICA que lo lleva.
+	// La linea original de abajo (mVUregs.blockType = 0) lo borra justo despues
+	// del add, antes de que el analisis o lpState puedan verlo. Las busquedas
+	// normales comparan quick64/96B completos con una clave limpia, asi que la
+	// variante es inalcanzable por enlace normal: el control vive en SbResolve.
+	// Ademas, el enlace del gestor es PROPIO (pStateEnd propio): el codigo
+	// M-bit/JR del area escribe mVUpBlock->pStateEnd y compartirlo con el
+	// bloque normal lo corromperia cruzado.
+	if (sbFrame >= 0)
+		mVUregs.blockType |= mVUSuperblock::kSbScratchVariant;
 	mVUpBlock = mVUblocks[mVUstartPC / 2]->add(mVU, &mVUblock);
 	pxAssertRel(mVUpBlock, "microVU: mVUpBlock NULL after blockManager::add");
 	// Register this block (manager copy + host entry) with the VU program-cache
 	// recorder so the emitted code can be persisted and reloaded across runs.
-	mVUPersist::OnBlockCompiled(mVU, mVUpBlock, thisPtr, mVUstartPC * 4);
-	mVUregs.needExactMatch = (mVUpBlock->pState.blockType) ? 7 : 0;
+	// Con frame variante NO: un superbloque nunca pisa el disco (Fase 3 del
+	// documento: la variante es codigo de validacion, no cache persistible).
+	if (sbFrame < 0)
+		mVUPersist::OnBlockCompiled(mVU, mVUpBlock, thisPtr, mVUstartPC * 4);
+	// needExactMatch se deriva del blockType del enlace LIMPIO (& ~mask): los
+	// bits de rasguño no deben forzar igualdad exacta artificial en el analisis
+	// (en la variante el blockType original es 0 -> needExactMatch 0, igual que
+	// el bloque normal).
+	mVUregs.needExactMatch = (mVUpBlock->pState.blockType & ~mVUSuperblock::kSbScratchMask) ? 7 : 0;
 	mVUregs.blockType = 0;
 	mVUregs.viBackUp  = 0;
 	mVUregs.flagInfo  = 0; // Must be cleared each compile: mVUsetFlags OR-updates
@@ -842,13 +862,44 @@ void* mVUcompile(microVU& mVU, u32 startPC, uptr pState)
 	pxAssert(armAsm);
 	u8* thisPtr = armGetCurrentCodePointer();
 
+	// === Cenit VU Superblock Engine — frame de compilación variante ===
+	// mVU.sbSlot >= 0 SOLO cuando este mVUcompile es la compilación variante
+	// armada por SbArmCompile (el hook de mVUexecute<1> lo deposita antes de
+	// reentrar). Es una local de esta llamada: ninguna compilación recursiva
+	// (normBranchCompile de un corte terminal, sub-bloques M-bit) puede ver
+	// el frame — se anida sbSlot a -1 para las recursiones y se restaura al
+	// volver. sbSpanCycles[] acumula los ciclos cobrados por tramo: el paso 2
+	// de una región fusionada necesita reproducir el valor de mVU.cycles que
+	// la cadena normal tendría en cada punto de unión (el contador global del
+	// episodio alimenta los contadores XGKICK en código generado), y cada
+	// tramo consume exactamente los ciclos que su análisis contabilizó.
+	const int sbFrame = mVU.sbSlot;
+	const u32 sbOuterActive = mVU.sbActive;
+	mVU.sbSlot = -1;
+	// sbActive cubre ESTE mVUcompile y solo este: paso 2 y emision terminal
+	// incluidos. La sonda (forma/contadores de bloque/aristas) no debe ver
+	// nunca el area fusionada, o contaminaria los datos de elegibilidad del
+	// bloque normal. Las compilaciones recursivas desde el corte terminal
+	// (normBranchCompile de un sucesor aun sin compilar, continuaciones M-bit)
+	// son bloques NORMALES: se anidan con sbActive=0, registran su propia
+	// forma/aristas y caminan las banderas por PC; al volver restauran el 1.
+	mVU.sbActive = (sbFrame >= 0) ? 1 : 0;
+	u32 sbSpanCycles[mVUSuperblock::kSbMaxJunctions + 2];
+	u32 sbSpanCount = 0;
+	if (sbFrame >= 0)
+	{
+		mVU.sbJunctions = 0;
+		mVU.sbOpCount   = 0;
+		mVU.sbKick      = 0;
+	}
+
 	const u32 endCount = (((microRegInfo*)pState)->blockType) ? 1 : (mVU.microMemSize / 8);
 
 	// === First Pass (Analysis) ===
 	iPC = startPC / 4;
 	mVUsetupRange(mVU, startPC, 1);
 	mVU.regAlloc->reset(false);
-	mVUinitFirstPass(mVU, pState, thisPtr);
+	mVUinitFirstPass(mVU, pState, thisPtr, sbFrame);
 	mVUbranch = 0;
 
 	// Fase 1.5 (sonda ON): motivo por el que el primer paso corta el bloque.
@@ -948,25 +999,144 @@ void* mVUcompile(microVU& mVU, u32 startPC, uptr pState)
 			mVUlow.kickcycles = 0;
 		}
 
+		// Superblock (variante): cualquier kick dentro del area es observable
+		// por VIF1/host -> el area entera se repele (regla del documento). El
+		// countdown doXGKICK (efecto real del kick) y el opcode XGKICK entran
+		// ambos aqui; el T/D-bit NO: fuera del par rama/delay se emiten op a op
+		// igual que en cualquier bloque normal (la union limpia ya los excluye).
+		if (sbFrame >= 0 && (mVUlow.isKick || mVUinfo.doXGKICK))
+			mVU.sbKick = 1;
+
 		mVUinfo.readQ = mVU.q;
 		mVUinfo.writeQ = !mVU.q;
 		mVUinfo.readP = mVU.p && isVU1;
 		mVUinfo.writeP = !mVU.p && isVU1;
+		// Superblock (variante): tabla de region — slot info[] de cada op
+		// analizada, en orden de region. El area fusionada NO es contigua en
+		// PC, y tanto las caminatas de banderas (Flags.inl) como la re-anclada
+		// del paso 2 se indexan por esta tabla.
+		if (sbFrame >= 0)
+			mVU.sbOpSlot[mVU.sbOpCount++] = iPC / 2;
 		mVUcount++;
 
 		if (branch >= 2)
 		{
-			mVUinfo.isEOB = true;
-			if (branch == 3)
-				mVUinfo.isBdelay = true;
-			branchWarning(mVU);
-			probeCut = 1; // rama/eBit: el bloque corta en delay slot
-			if (mVUregs.xgkickcycles)
+			// === Superblock: consulta de union (continue-analysis) ===
+			// En modo variante, un corte por rama incondicional limpia NO corta
+			// el analisis: se continua a traves del objetivo con mVUregs tal
+			// como normBranchCompile se lo habria entregado al sucesor (el
+			// mVUsetFlagInfo de la iteracion de la rama ya ajusto
+			// needExactMatch, y el enlace normal no normaliza nada mas de ahi).
+			// El area entera se emitira despues como UN bloque: cero flushAll,
+			// cero mVUsetupFlags, cero rotacion P/Q, cero salto por union.
+			bool fused = false;
+			if (sbFrame >= 0)
 			{
-				mVUlow.kickcycles = mVUregs.xgkickcycles;
-				mVUregs.xgkickcycles = 0;
+				// Ventana de la rama: los dos pares se inspeccionan con incPC.
+				// Se leen AMBOS slots de info (no solo el del delay slot): la
+				// semantica del corte normal vive en la rama (bad/evil/eBit) y en
+				// el delay (bits, VI_write), y la emision fusionada tiene que
+				// reproducir la del par exacto de la cadena.
+				incPC(-2);
+				const u32  jBranch = mVUlow.branch;
+				const u32  jCode   = mVU.code;
+				const u32  jTarget = branchAddr(mVU);
+				const bool jBadR   = mVUlow.badBranch;
+				const bool jEvilR  = mVUlow.evilBranch;
+				const bool jEBr    = mVUup.eBit;
+				const bool jTBr    = mVUup.tBit;
+				const bool jDBr    = mVUup.dBit;
+				incPC(2);
+				const u32 jDelay = curI;
+				const bool clean =
+					jBranch == 1 &&                                        // solo B (no BAL)
+					!(jCode & (_Ebit_ | _Mbit_ | _Dbit_ | _Tbit_ | _Ibit_)) &&
+					!(jDelay & (_Ebit_ | _Mbit_ | _Dbit_ | _Tbit_ | _Ibit_)) &&
+					!jBadR && !jEvilR && !mVUlow.badBranch && !mVUlow.evilBranch &&
+					// jEBr/jTBr/jDBr son el PAR de la rama (leidos con incPC(-2));
+					// los ultimos tres son el delay slot (donde estamos). El corte
+					// normal tolera un eBit acumulado en la rama poniendo
+					// isNOP en el delay (:829) — aqui eso significaria emitir un
+					// NOP por la mitad de la region: ni falta hace, se repele.
+					!(jEBr || jTBr || jDBr) &&
+					!mVUup.eBit && !mVUup.tBit && !mVUup.dBit &&
+					mVUregs.xgkickcycles == 0;                             // sin kick pendiente
+				// REVISITAS: si el objetivo cae sobre un slot info[] ya analizado
+				// en esta region, el analisis continuaria por codigo que
+				// startLoop() esta por memsetear de nuevo (los slots son
+				// compartidos: la region dejaria de ser una secuencia definida y
+				// sbOpSlot perderia el orden). Barato: la caminata solo ocurre en
+				// uniones candidatas del modo variante.
+				// E-bit en el PRIMER par del objetivo: la cadena lo resuelve
+				// con blockType=1 (el sucesor se compila como bloque de un par
+				// que termina por endCount). Dentro de la region eBitPass1 NO
+				// pone branch (su guard ve blockType==1 del estado heredado) y
+				// nada cortaria el analisis: el E-bit se emitiria como un op
+				// normal y el programa seguiria mas alla del fin real. Se
+				// repele la union (corte normal, que si enlaza con el bloque
+				// monobloque de siempre).
+				const u32 jTgtUp = ((const u32*)mVU.regs().Micro)[(jTarget / 4) + 1];
+				bool reenter = false;
+				for (u32 si = 0; !reenter && si < mVU.sbOpCount; si++)
+					reenter = (mVU.sbOpSlot[si] == jTarget / 8);
+				if (clean && !(jTgtUp & _Ebit_) && !reenter &&
+						mVUSuperblock::SbAskJunction(sbFrame, jTarget, true,
+							mVUcount, mVUcycles) >= 0)
+				{
+					fused = true;
+					// El corte normal terminaria AQUI; la continue-analysis debe
+					// reproducir el arranque FRESCO del sucesor: el bucle normal del
+					// bloque sucesor entra con branch = 0 (la delay slot consumida),
+					// mVUbranch = 0 (la del par ya fue consumida en :1116) y su
+					// propio contador de uniones. Sin el branch = 0 el siguiente par
+					// caeria de nuevo en el corte (branch==3) y rompiria el area tras
+					// una sola instruccion del tramo nuevo.
+					branch = 0;
+					mVUbranch = 0;
+					mVU.sbJunctions++;
+					// Flush del kick pendiente al delay slot: IDENTICO al corte
+					// normal (:964-968) — deja mVUlow.kickcycles del delay con
+					// los ciclos acumulados, asi que la emision XGKICK_SYNC del
+					// paso 2 sobre ese par sale en la misma posicion y con los
+					// mismos valores que en la cadena normal.
+					mVUlow.kickcycles = mVUregs.xgkickcycles;
+					mVUregs.xgkickcycles = 0;
+					// El sucesor normal reseteaba needExactMatch/viBackUp en su
+					// mVUinitFirstPass (blockType limpio); la continue-analysis
+					// debe reproducir ese arranque para que los scans de las
+					// uniones siguientes y el enlace terminal calculen exactly
+					// lo mismo que calcularia el bloque sucesor suelto.
+					mVUregs.needExactMatch = 0;
+					mVUregs.viBackUp = 0;
+					// Tabla de tramos para el paso 2: indice de op del delay
+					// slot (el siguiente op abre el tramo nuevo) y ciclos
+					// acumulados del area hasta aqui (reintegro de presupuesto).
+					mVU.sbJDelayOp[sbSpanCount] = mVU.sbOpCount - 1;
+					sbSpanCycles[sbSpanCount] = mVUcycles;
+					sbSpanCount++;
+					// Continuar el analisis en el objetivo (lo que haria
+					// normBranchCompile -> mVUcompile del sucesor, salvo que
+					// NO se toca el gestor de bloques ni el registro del tramo).
+					mVUsetupRange(mVU, jTarget, false);
+					iPC = jTarget / 4; // palabra inferior del primer par objetivo
+					setCode();
+					continue;
+				}
 			}
-			break;
+			if (!fused)
+			{
+				mVUinfo.isEOB = true;
+				if (branch == 3)
+					mVUinfo.isBdelay = true;
+				branchWarning(mVU);
+				probeCut = 1; // rama/eBit: el bloque corta en delay slot
+				if (mVUregs.xgkickcycles)
+				{
+					mVUlow.kickcycles = mVUregs.xgkickcycles;
+					mVUregs.xgkickcycles = 0;
+				}
+				break;
+			}
 		}
 		else if (branch == 1)
 		{
@@ -1001,6 +1171,12 @@ void* mVUcompile(microVU& mVU, u32 startPC, uptr pState)
 		incPC(1);
 	}
 
+	// Variante: cierra la tabla de prefijos de presupuesto (sbSpanCycles[j] es
+	// el acumulado del area al terminar el tramo j; el ultimo tramo no tiene
+	// union, su acumulado es el total). Indexado 0..sbSpanCount.
+	if (sbFrame >= 0)
+		sbSpanCycles[sbSpanCount] = mVUcycles;
+
 	mVUregs.vi15 = 0;
 	mVUregs.vi15v = 0;
 	mVUsetFlags(mVU, mFC);
@@ -1018,8 +1194,13 @@ void* mVUcompile(microVU& mVU, u32 startPC, uptr pState)
 	// entradas por salida de presupuesto (Remove() del BaseblockEx pisa la
 	// primera palabra de 4 bytes del bloque: aquí es aceptable — Fase 1 es
 	// medición, y OFF reconstruye todo vía ClearCPUExecutionCaches).
-	if (mVUTraceProbe::IsEnabled() && isVU1)
+	if (mVUTraceProbe::IsEnabled() && isVU1 && sbFrame < 0)
 	{
+		// (sbFrame >= 0: el area fusionada NUNCA registra forma ni contador —
+		// pisaria la forma del bloque normal yéndose a su tamaño real e
+		// inflaría el contador de entradas del PC de entrada con despachos
+		// resueltos por la variante; la elegibilidad se mide solo en la
+		// cadena normal.)
 		// Fase 1.5: forma del bloque (tabla C++, cero instrucciones emitidas).
 		// mVUcount/mVUcycles salen del primer paso tal cual; probeCut es el
 		// motivo de corte. Va aqui, y no junto al ldr/add/str, para no mezclar
@@ -1044,8 +1225,66 @@ void* mVUcompile(microVU& mVU, u32 startPC, uptr pState)
 
 	mvuPreloadRegisters(mVU, endCount);
 
+	// Superblock (variante) — devolucion de presupuesto (parte 1 de 2). El
+	// area fusionada NO es un bloque de la cadena normal: mVUtestCycles acabo
+	// de cobrar los ciclos de TODA el area de una sola vez, mientras que la
+	// cadena los deduce a la ENTRADA de cada bloque. Para que el valor que el
+	// codigo generado lee de mVU.cycles (contadores XGKICK: xgkicklastcycle =
+	// totalCycles - mVU.cycles + VU1.cycle) sea el MISMO que tendria la cadena
+	// en cada instruccion, durante el tramo 0 hay que devolver todo lo cobrado
+	// de mas: areas_total - ciclos_del_tramo_0 (= sbSpanCycles[0], prefijo
+	// acumulado del area al terminar el tramo 0). sbSpanCycles es tabla de
+	// PREFIJOS (el acumulado justo al cruzar cada union; la ultima entrada,
+	// escrita tras el paso 1, es el total del area), indexada 0..sbSpanCount.
+	// La parte 2 de la correccion se emite en la frontera de cada union, dentro
+	// del bucle. x8/w9: el mismo scratch que usa mVUtestCycles, fuera del pool
+	// del allocator.
+	if (sbFrame >= 0 && sbSpanCount > 0)
+	{
+		armMoveAddressToReg(a64::x8, &mVU.cycles);
+		armAsm->Ldr(a64::w9, a64::MemOperand(a64::x8));
+		armAsm->Add(a64::w9, a64::w9, mVUcycles - sbSpanCycles[0]);
+		armAsm->Str(a64::w9, a64::MemOperand(a64::x8));
+	}
+
+	// Correccion de presupuesto (parte 2 de 2): al cruzar cada union, el
+	// contador baja lo que la cadena habria deducido al entrar al bloque del
+	// tramo siguiente (sbSpanCycles[j+1] - sbSpanCycles[j] = ciclos de ese
+	// tramo). Se emite al ARRANQUE de la primera instruccion del tramo nuevo
+	// — el punto exacto donde la cadena pondria la cabecera de su bloque,
+	// salvo que aqui NO hay guarda: SbResolve ya filtro por presupuesto, y la
+	// guarda de entrada del superbloque comparo el area entera. Con esto el
+	// valor durante el tramo j es B - sbSpanCycles[j] para toda la region,
+	// incluida la ultima (donde sbSpanCycles[sbSpanCount] == mVUcycles, o sea
+	// sin correccion: la salida terminal ve exactamente lo mismo que veria la
+	// cadena). x8 se re-materializa en cada frontera: el emisor de ops lo
+	// pisa igual que el resto del scratch.
+	u32 sbNextJ = 0;
 	for (; x < endCount; x++)
 	{
+		// Superblock (variante): el area NO es contigua en PC, y el bucle
+		// normal avanza iPC linealmente (incPC dentro de
+		// mVUexecuteInstruction/doUpperOp/doLowerOp). Cada iteracion variante
+		// se re-ancla al par que le toca segun la tabla de region del paso 1
+		// (sbOpSlot[x] = indice de par; *2 = palabra inferior, que es donde
+		// empieza una iteracion del bucle normal). Las salidas por isEOB y el
+		// corte terminal conservan su semantica intacta: son posiciones de la
+		// tabla como cualquier otra.
+		if (sbFrame >= 0)
+		{
+			if (x >= mVU.sbOpCount)
+				break; // region terminada (no debe darse: el corte terminal marca isEOB)
+			iPC = mVU.sbOpSlot[x] * 2;
+			setCode();
+			while (sbNextJ < sbSpanCount && x == mVU.sbJDelayOp[sbNextJ] + 1)
+			{
+				armMoveAddressToReg(a64::x8, &mVU.cycles);
+				armAsm->Ldr(a64::w9, a64::MemOperand(a64::x8));
+				armAsm->Sub(a64::w9, a64::w9, sbSpanCycles[sbNextJ + 1] - sbSpanCycles[sbNextJ]);
+				armAsm->Str(a64::w9, a64::MemOperand(a64::x8));
+				sbNextJ++;
+			}
+		}
 		if (mVUinfo.isEOB) { x = 0xffff; }
 
 		// M-bit: signal the EE-visible M-flag so VU0 micro-mode can break/sync
@@ -1217,6 +1456,24 @@ void* mVUcompile(microVU& mVU, u32 startPC, uptr pState)
 	mVUendProgram(mVU, &mFC, 1);
 
 perf_and_return:
+	// === Cenit VU Superblock: cierre de la compilacion variante ===
+	// Unica salida del paso 2 (los terminales M-bit/evil/branch/E-bit caen
+	// todos aqui). Se ENROLLA el frame (sbSlot/sbActive al valor del marco
+	// exterior — con esto las compilaciones recursivas del corte terminal ya
+	// no veian el frame, pero el marco de arriba, si lo hubiera, lo
+	// recupera) y se entrega el parte al motor: junctions, kick (areaBad),
+	// ops y ciclos del area. Con junctions == 0 no hay superbloque (solo una
+	// compilacion duplicada que se tira); SbCloseCompile libera el slot en
+	// ese caso. El hostEntry registrado en el gestor (mVUblock, copia propia
+	// del pState con el bit de rasguino horneado) es la entrada que el motor
+	// guardara para SbResolve.
+	if (sbFrame >= 0)
+	{
+		mVUSuperblock::SbCloseCompile(sbFrame, startPC, thisPtr, mVU.sbJunctions,
+			mVU.sbKick != 0, mVUcount, mVUcycles);
+		mVU.sbSlot   = sbFrame;
+		mVU.sbActive = sbOuterActive;
+	}
 	// Register the program-entry compile only, not every continuation block
 	// compiled at a mid-program PC (start_pc stays the program entry for
 	// branch-target sub-blocks; it's only re-pointed on the dispatch/indirect-
