@@ -182,21 +182,20 @@ namespace mVUSuperblock
 
 		void DumpStatsLine(std::FILE* f, const char* tag, const Stats& s)
 		{
-			using std::memory_order_relaxed;
 			SbPrintf(f, "%s attempts=%" PRIu64 " built=%" PRIu64 " junctions=%" PRIu64
 				" fused_ops=%" PRIu64 "\n",
-				tag, s.attempts.load(relaxed), s.built.load(relaxed),
-				s.junctions.load(relaxed), s.fused_ops.load(relaxed));
+				tag, s.attempts.load(std::memory_order::relaxed), s.built.load(std::memory_order::relaxed),
+				s.junctions.load(std::memory_order::relaxed), s.fused_ops.load(std::memory_order::relaxed));
 			SbPrintf(f, "%s rejected struct=%" PRIu64 " cold=%" PRIu64 " budget=%" PRIu64
 				" identity=%" PRIu64 "\n",
-				tag, s.rejected_struct.load(relaxed), s.rejected_cold.load(relaxed),
-				s.rejected_budget.load(relaxed), s.rejected_identity.load(relaxed));
+				tag, s.rejected_struct.load(std::memory_order::relaxed), s.rejected_cold.load(std::memory_order::relaxed),
+				s.rejected_budget.load(std::memory_order::relaxed), s.rejected_identity.load(std::memory_order::relaxed));
 			SbPrintf(f, "%s replay normal=%" PRIu64 " sb=%" PRIu64 " unmatched=%" PRIu64
 				" matched=%" PRIu64 " diverged=%" PRIu64 "\n",
-				tag, s.verify_normal.load(relaxed), s.verify_sb.load(relaxed),
-				s.unmatched.load(relaxed), s.matched.load(relaxed), s.diverged.load(relaxed));
+				tag, s.verify_normal.load(std::memory_order::relaxed), s.verify_sb.load(std::memory_order::relaxed),
+				s.unmatched.load(std::memory_order::relaxed), s.matched.load(std::memory_order::relaxed), s.diverged.load(std::memory_order::relaxed));
 			SbPrintf(f, "%s outcome promoted=%" PRIu64 " unproven=%" PRIu64 " killed=%" PRIu64 "\n",
-				tag, s.promoted.load(relaxed), s.unproven.load(relaxed), s.killed.load(relaxed));
+				tag, s.promoted.load(std::memory_order::relaxed), s.unproven.load(std::memory_order::relaxed), s.killed.load(std::memory_order::relaxed));
 		}
 
 		// ------------------------------------------------------------------
