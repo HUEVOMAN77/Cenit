@@ -318,30 +318,100 @@ std::string GetJavaString(JNIEnv *env, jstring jstr) {
     return cpp_string;
 }
 
+// Cenit 0.6.23 — EL ARREGLO DEL CONGELAMIENTO (causa raíz probada con el
+// reporte del usuario del 2026-09-26, God of War SCES-53133).
+//
+// Qué pasaba: con el juego CORRIENDO, cualquier consulta de metadatos por URI
+// (serial, CRC, hacks por-juego del diálogo de ajustes) hacía esto:
+//     CDVD = &CDVDapi_Iso; CDVD->open(path); ...; DoCDVDclose();
+// Pero el lector ISO del núcleo es UN solo objeto global
+// (CDVDisoReader.cpp: `static InputIsoFile iso`). Abrirlo para leer un
+// metadato CERRABA el disco que el juego tenía abierto: m_blocks quedaba en 0
+// y el cierre final dejaba al VM sin disco. A partir de ahí TODA lectura del
+// juego fallaba — el log del usuario lo mostraba literal:
+//     "isoFile error: Block index is past the end of file! (23781 >= 0)"
+// (23781 >= 0: el 0 es el número de bloques, no el fin del archivo). El juego
+// seguía dibujando el último cuadro mientras esperaba un sector que nunca
+// llegaba: eso es la congelación. Y el candado de Java (CDVD_LOCK) no servía
+// de nada: solo serializa las consultas de Java entre sí, no contra el hilo
+// de emulación que estaba leyendo el disco en ese mismo instante.
+//
+// El arreglo: NUNCA abrir el disco para metadatos con el VM vivo.
+//  - Si es el juego en ejecución → la identidad ya está en memoria (serial,
+//    CRC y ruta que resolvió el propio arranque): costo cero, sin tocar el CDVD.
+//  - Si es otro juego → solo la caché de la lista (GetEntryForPath), jamás el disco.
+//  - Sin VM → se puede abrir, pero por la ruta de GameList, que toma el mutex
+//    compartido con el escáner de biblioteca (el candado que faltaba).
+static bool ResolveGameIdentitySafely(const std::string& game_path, std::string* serial, u32* crc)
+{
+	if (game_path.empty())
+		return false;
+
+	// Manifiestos arcade: son INIs, no discos; la ruta vieja ya los resolvía aquí.
+	if (VMManager::isArcadeManifest(game_path))
+	{
+		INISettingsInterface manifest(game_path);
+		if (!manifest.Load())
+			return false;
+		if (serial)
+			*serial = manifest.GetStringValue("game", "gameid", "");
+		if (crc)
+			*crc = 0;
+		return true;
+	}
+
+	// Cenit 0.6.23: "VM vivo" = cualquier estado distinto de Apagado. HasValidVM()
+	// no basta: deja fuera Initializing, y para cuando el VM entra en Running el
+	// disco YA está abierto — una consulta durante el arranque (es exactamente lo
+	// que muestra el log: ráfagas de reapertura justo tras cargar) volvería a
+	// pisar el lector global. Con el disco en la mano, nadie más lo toca.
+	if (VMManager::GetState() != VMState::Shutdown)
+	{
+		// El disco abierto por el emulador (puede ser un override de las
+		// settings del juego; comparar contra la ruta pedida cubre ambos).
+		const std::string disc_path = VMManager::GetDiscPath();
+		if (!disc_path.empty() && disc_path == game_path)
+		{
+			if (serial)
+				*serial = VMManager::GetDiscSerial();
+			if (crc)
+				*crc = VMManager::GetDiscCRC();
+			return true;
+		}
+
+		// Otro juego distinto al que corre: solo la caché de la biblioteca.
+		if (const GameList::Entry* entry = GameList::GetEntryForPath(game_path.c_str()))
+		{
+			if (entry->serial.empty())
+				return false;
+			if (serial)
+				*serial = entry->serial;
+			if (crc)
+				*crc = entry->crc;
+			return true;
+		}
+
+		// Sin caché y con el VM vivo: mejor identidad desconocida que matar la
+		// partida de alguien.
+		return false;
+	}
+
+	std::string cached_serial;
+	u32 cached_crc = 0;
+	if (!GameList::GetSerialAndCRCForFilename(game_path.c_str(), &cached_serial, &cached_crc))
+		return false;
+	if (serial)
+		*serial = std::move(cached_serial);
+	if (crc)
+		*crc = cached_crc;
+	return true;
+}
+
 static std::string GetGameSerialForPath(const std::string& game_path)
 {
-    if (game_path.empty())
-        return {};
-
-    if (VMManager::isArcadeManifest(game_path))
-    {
-        INISettingsInterface manifest(game_path);
-        return manifest.Load() ? manifest.GetStringValue("game", "gameid", "") : std::string();
-    }
-
-    // Determine serial via CDVD using the same path the core will open
-    Error error;
-    std::string serial;
-    auto* prev = CDVD;
-    CDVD = &CDVDapi_Iso;
-    if (CDVD->open(game_path, &error))
-    {
-        (void)DoCDVDdetectDiskType();
-        cdvdGetDiscInfo(&serial, nullptr, nullptr, nullptr, nullptr, nullptr);
-        DoCDVDclose();
-    }
-    CDVD = prev;
-    return serial;
+	std::string serial;
+	ResolveGameIdentitySafely(game_path, &serial, nullptr);
+	return serial;
 }
 
 static void ApplyPerGameSettingsForSerial(const std::string& serial)
@@ -916,21 +986,12 @@ static std::string ResolveGameSettingsPathForUri(const std::string& game_path)
     if (game_path.empty())
         return {};
 
-    const std::string serial = GetGameSerialForPath(game_path);
+    // Cenit 0.6.23: identidad por la ruta segura (ver ResolveGameIdentitySafely
+    // arriba). Antes esto reabría el ISO con el VM corriendo y mataba la
+    // partida — el congelamiento reportado en God of War.
+    std::string serial;
     u32 crc = 0;
-    if (!VMManager::isArcadeManifest(game_path))
-    {
-        Error error;
-        auto* prev = CDVD;
-        CDVD = &CDVDapi_Iso;
-        if (CDVD->open(game_path, &error))
-        {
-            (void)DoCDVDdetectDiskType();
-            cdvdGetDiscInfo(nullptr, nullptr, nullptr, nullptr, &crc, nullptr);
-            DoCDVDclose();
-        }
-        CDVD = prev;
-    }
+    ResolveGameIdentitySafely(game_path, &serial, &crc);
 
     // Misma cascada que usa el núcleo al cargar (UpdateGameSettingsLayer):
     // SERIAL_CRC.ini, luego SERIAL.ini. Reusar la ruta ya existente en vez de
@@ -1388,17 +1449,11 @@ Java_com_izzy2lost_psx2_NativeApp_getGameCrc(JNIEnv* env, jclass, jstring p_uri)
         return env->NewStringUTF("");
     std::string path = GetJavaString(env, p_uri);
 
-    Error error;
+    // Cenit 0.6.23: ya no abre el disco con el VM corriendo (vease
+    // ResolveGameIdentitySafely). Con el juego delante, el CRC es el del disco
+    // en memoria — el mismo valor, sin tocar el CDVD.
     u32 crc = 0;
-    auto* prev = CDVD;
-    CDVD = &CDVDapi_Iso;
-    if (CDVD->open(path, &error))
-    {
-        (void)DoCDVDdetectDiskType();
-        cdvdGetDiscInfo(nullptr, nullptr, nullptr, nullptr, &crc, nullptr);
-        DoCDVDclose();
-    }
-    CDVD = prev;
+    ResolveGameIdentitySafely(path, nullptr, &crc);
 
     const std::string crc_hex = (crc != 0) ? StringUtil::StdStringFromFormat("%08X", crc) : std::string("");
     return env->NewStringUTF(crc_hex.c_str());

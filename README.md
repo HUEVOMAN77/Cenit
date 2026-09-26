@@ -3,7 +3,7 @@
 [![Licencia: GPL v3](https://img.shields.io/badge/Licencia-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.en.html)
 [![Android](https://img.shields.io/badge/Android-8.0%20o%20superior-green.svg)](https://developer.android.com/)
 [![ARM64](https://img.shields.io/badge/Procesador-arm64--v8a-orange.svg)](https://developer.arm.com/)
-[![Última versión](https://img.shields.io/badge/versión%20actual-0.6.22-informational)](https://github.com/HUEVOMAN77/Cenit/releases/tag/base-0.6.22)
+[![Última versión](https://img.shields.io/badge/versión%20actual-0.6.23-informational)](https://github.com/HUEVOMAN77/Cenit/releases/tag/base-0.6.23)
 [![Driver](https://img.shields.io/badge/driver%20incluido-Turnip%2025.3.6-yellow)](https://github.com/HUEVOMAN77/Cenit/releases)
 
 **Cenit es mi emulador de PlayStation 2 para Android.** Lo diseño, lo programo, lo compilo y lo mantengo yo solo: [HUEVOMAN77](https://github.com/HUEVOMAN77). Empezó como bifurcación de [PSX2](https://github.com/izzy2lost/PSX2) (el adaptador Android de PCSX2 2.7), pero eso fue el punto de partida, no el proyecto: hoy Cenit es propiedad mía y todo lo que lo define —el motor de rendimiento adaptativo, los ajustes por juego, mi driver Vulkan propio, el guardarraya, la interfaz, la instrumentación del recompilador VU— es trabajo mío, pieza por pieza y en público. Cada decisión de este repositorio se toma aquí.
@@ -12,7 +12,7 @@ La meta es muy concreta: **que los juegos de PS2 se muevan fluidos en celulares 
 
 No es una copia con otro logo. Cada versión suma mejoras de rendimiento y de uso que no existen ni en PSX2 ni en PCSX2, y —salvo que yo mismo diga lo contrario— medidas sobre hardware real antes de publicarse.
 
-> **Versión actual: 0.6.22.** Mantengo una línea pública y continua (0.6.x), con su release, su verificación en teléfono real y mi registro de qué cambió y qué no. En [Historial versión por versión](#historial-versión-por-versión) está todo el camino recorrido, sin adornos.
+> **Versión actual: 0.6.23.** Mantengo una línea pública y continua (0.6.x), con su release, su verificación en teléfono real y mi registro de qué cambió y qué no. En [Historial versión por versión](#historial-versión-por-versión) está todo el camino recorrido, sin adornos.
 
 ---
 
@@ -20,8 +20,8 @@ No es una copia con otro logo. Cada versión suma mejoras de rendimiento y de us
 
 | | |
 |---|---|
-| **Versión actual** | 0.6.22 |
-| **Descarga** | [Lanzamientos](https://github.com/HUEVOMAN77/Cenit/releases) → `Cenit-0.6.22.apk` |
+| **Versión actual** | 0.6.23 |
+| **Descarga** | [Lanzamientos](https://github.com/HUEVOMAN77/Cenit/releases) → `Cenit-0.6.23.apk` |
 | **Driver incluido** | `Cenit-Turnip-25.3.6` (compilado por mi CI) |
 | **Requiere** | Android 8 o superior, procesador de 64 bits y tu propia BIOS de PS2 |
 | **No incluye** | BIOS, juegos ni ningún archivo con derechos de autor |
@@ -120,7 +120,7 @@ Lo digo claro: ningún truco hace correr *God of War* a 60 cuadros en un teléfo
 
 ## Cómo empezar
 
-1. Descarga `Cenit-0.6.22.apk` desde [Lanzamientos](https://github.com/HUEVOMAN77/Cenit/releases) e instálala (Android pedirá permitir apps de esta fuente la primera vez).
+1. Descarga `Cenit-0.6.23.apk` desde [Lanzamientos](https://github.com/HUEVOMAN77/Cenit/releases) e instálala (Android pedirá permitir apps de esta fuente la primera vez).
 2. Abre la app y sigue el asistente: coloca la **BIOS extraída de tu propia PS2** y elige la carpeta de tus juegos.
 3. Toca un juego de la biblioteca y listo. Con una partida abierta, el panel **Ajustes → Rendimiento** muestra todos los mandos de Cenit.
 4. **Si tu teléfono es Snapdragon/Adreno**: descarga también `Cenit-Turnip-25.3.6-*.zip` de la misma release, impórtalo en **Ajustes → Controlador gráfico personalizado** (no lo descomprimas), toca «Forzar otra vez el driver seleccionado» y juega normal. La segunda sesión de cada juego ya no recompila shaders; el diálogo del driver va llenando el medidor solo.
@@ -197,6 +197,12 @@ Todo mi camino, incluido lo que estuvo mal y corregí. Cada fila tiene su releas
 | Versión | Qué sumó |
 |---|---|
 | **0.6.22** | **El reporte de errores por fin trae el log del núcleo, y ahora captura la congelación en el momento.** En Android, el canal de archivo del registro estaba muerto: la línea de despacho envolvía *todo* el envío y solo espejaba al registro del sistema, así que `emulog.txt` nacía siempre en 0 bytes y el botón «Enviar registro» llegaba sin el log del núcleo — justo cuando más se necesita (congelación, cierre solo). Reparado: cada línea va ahora a logcat **y** al archivo (con flush por línea, sobrevive un cierre brusco del sistema). Además: **vigilante de congelación** —si el juego está corriendo, sin pausa, y el contador de cuadros del VM lleva 20 segundos quieto, Cenit toma la foto del registro EN ESE INSTANTE (incluido el búfer de fallos nativos de Android) en vez de esperar al siguiente reporte—; **captura de muertes inesperadas a media sesión**, que antes solo se fotografiaban si ocurrían en la ventana de arranque; **arreglado el tiempo jugado**, que nunca se guardaba porque la carpeta de ajustes no existía en Android; y la detección de hardware ya no repite sus mensajes cada segundo. Sin promesas: lo que la congelación de God of War es —driver, MTVU o memoria— lo dirá la evidencia que este build ya recoge. |
+
+### Causa raíz del congelamiento encontrada y reparada + mandos que se apartan solos (0.6.23)
+
+| Versión | Qué sumó |
+|---|---|
+| **0.6.23** | **El congelamiento de God of War tenía causa en Cenit, y ya está arreglada.** Con la evidencia que empezó a traer el reporte de 0.6.22 lo confirmé: el emulador **se cargaba su propio disco**. Cuando el juego ya estaba corriendo, cualquier consulta de datos del juego (identificador, CRC, ajustes por juego) **reabría y cerraba el ISO que el juego tenía abierto**, porque el lector de disco del núcleo es un único objeto compartido. A partir de ahí toda lectura del juego fallaba (`Block index is past the end of file!`) y el juego se quedaba esperando un dato que nunca llegaba: eso es la congelación. Lo mismo explica varios «se sale solito». El arreglo: **nunca tocar el disco con el juego delante** — la identidad del juego en marcha ya está en memoria, y para los demás juegos se usa solo la caché de la biblioteca. **Y los mandos en pantalla ahora se apartan solos:** si dejas de tocar la pantalla 10 segundos (por ejemplo porque jugabas con mando Bluetooth), desaparecen para dejar ver solo el juego; al volver a tocar, reaparecen. Con un dedo puesto sobre el joystick no se ocultan, y el botón de pausa y el de menú se quedan siempre a la mano. |
 
 ---
 

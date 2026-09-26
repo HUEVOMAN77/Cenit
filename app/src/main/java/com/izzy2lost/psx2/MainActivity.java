@@ -961,6 +961,32 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         // Offer RetroAchievements re-login after a short delay (if previously enabled)
         scheduleRetroAchievementsReLoginPrompt();
     }
+
+    // Cenit 0.6.23: cualquier toque —en el juego o en un botón virtual— despierta
+    // los mandos y reinicia los 10 segundos. dispatchTouchEvent ve TODOS los
+    // toques antes de repartirlos. Se cuentan los dedos puestos: ocultar los
+    // mandos con un joystick arrastrado sería un error del temporizador, no
+    // inactividad del usuario. Si el contador se desalineara (imperfecto pero
+    // posible con diálogos encima), el modo de fallo seguro es MANTENER visible.
+    @Override
+    public boolean dispatchTouchEvent(android.view.MotionEvent ev) {
+        switch (ev.getActionMasked()) {
+            case android.view.MotionEvent.ACTION_DOWN:
+            case android.view.MotionEvent.ACTION_POINTER_DOWN:
+                mActivePointers.incrementAndGet();
+                wakeTouchControls();
+                break;
+            case android.view.MotionEvent.ACTION_UP:
+            case android.view.MotionEvent.ACTION_POINTER_UP:
+            case android.view.MotionEvent.ACTION_CANCEL:
+                if (mActivePointers.decrementAndGet() < 0) mActivePointers.set(0);
+                if (mActivePointers.get() == 0) wakeTouchControls(); // dedo fuera: cuenta nueva
+                break;
+            default:
+                break;
+        }
+        return super.dispatchTouchEvent(ev);
+    }
     
     @Override
     protected void onUserLeaveHint() {
@@ -1826,10 +1852,58 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         // Con la pantalla de inicio por delante nunca hay mandos en pantalla,
         // tenga o no un mando físico conectado.
         if (mHomeScreenVisible) visible = false;
-        if (!visible) {
+        if (!visible && mControlsBaseVisible) {
+            // Ocultación real (terminó el juego, se conectó un mando, se volvió
+            // al inicio): apagar el turbo y soltar las teclas virtuales. Con la
+            // auto-ocultación por inactividad esto NO debe pasar — el turbo es
+            // una decisión del usuario, no un toque olvidado.
             setFastForwardEnabled(false);
-            releaseVirtualStickInputs();
         }
+        if (!visible) releaseVirtualStickInputs();
+        mControlsBaseVisible = visible;
+        if (!visible) {
+            // El juego terminó o hay mando: fuera el temporizador y la marca.
+            mHomeHandler.removeCallbacks(mTouchControlsHideTask);
+            mTouchControlsAutoHidden = false;
+        }
+        applyControlsVisibility();
+        if (visible) {
+            // Cuenta los 10 s desde ahora; cualquier toque los reinicia.
+            mHomeHandler.removeCallbacks(mTouchControlsHideTask);
+            mHomeHandler.postDelayed(mTouchControlsHideTask, TOUCH_CONTROLS_HIDE_MS);
+        }
+    }
+
+    // Cenit 0.6.23 — mandos táctiles que se apartan solos. El pedido del
+    // usuario: con mando Bluetooth conectado ya no estorban, y aunque no lo
+    // haya, si lleva 10 segundos sin tocar la pantalla se ve solo el juego.
+    // Al volver a tocar (lo que sea, en cualquier parte), reaparecen. El botón
+    // de menú y el de pausa NO se ocultan: son la única puerta para pausar.
+    private static final long TOUCH_CONTROLS_HIDE_MS = 10_000L;
+    private boolean mControlsBaseVisible = false;
+    private boolean mTouchControlsAutoHidden = false;
+    // Dedos puestos ahora mismo. Con un joystick arrastrado durante minutos no
+    // hay ACTION_DOWN nuevos, y ocultar los mandos con el dedo encima sería un
+    // error del vigilante, no inactividad del usuario.
+    private final java.util.concurrent.atomic.AtomicInteger mActivePointers =
+            new java.util.concurrent.atomic.AtomicInteger(0);
+    private final Runnable mTouchControlsHideTask = new Runnable() {
+        @Override
+        public void run() {
+            if (isFinishing() || isDestroyed()) return;
+            if (!mControlsBaseVisible || mTouchControlsAutoHidden) return;
+            if (mActivePointers.get() > 0) {
+                // Sigue habiendo dedos sobre la pantalla: reintentar al soltar.
+                mHomeHandler.postDelayed(this, 1000L);
+                return;
+            }
+            mTouchControlsAutoHidden = true;
+            applyControlsVisibility();
+        }
+    };
+
+    private void applyControlsVisibility() {
+        final boolean visible = mControlsBaseVisible && !mTouchControlsAutoHidden;
         int vis = visible ? View.VISIBLE : View.GONE;
         findViewById(R.id.btn_fast_forward).setVisibility(vis);
         View llDpad = findViewById(R.id.ll_pad_dpad);
@@ -1845,6 +1919,20 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         if (llRight != null) llRight.setVisibility(vis);
         if (llSelectStart != null) llSelectStart.setVisibility(vis);
         if (llJoy != null) llJoy.setVisibility(vis);
+        // El botón de pausa y el de menú NO se tocan aquí: siguen con su lógica
+        // de siempre (visibles con juego delante). Son la única puerta para
+        // pausar; ocultarlos por inactividad dejaría al usuario sin salida.
+    }
+
+    /** Despierta los mandos con cualquier toque y reinicia los 10 segundos. */
+    private void wakeTouchControls() {
+        if (!mControlsBaseVisible) return; // sin juego o con mando físico: nada que hacer
+        if (mTouchControlsAutoHidden) {
+            mTouchControlsAutoHidden = false;
+            applyControlsVisibility();
+        }
+        mHomeHandler.removeCallbacks(mTouchControlsHideTask);
+        mHomeHandler.postDelayed(mTouchControlsHideTask, TOUCH_CONTROLS_HIDE_MS);
     }
 
     private void releaseVirtualStickInputs() {
