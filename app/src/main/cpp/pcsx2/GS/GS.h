@@ -101,6 +101,15 @@ std::vector<GSAdapterInfo> GSGetAdapterInfo(GSRendererType renderer);
 u32 GSGetMaxUpscaleMultiplier(u32 max_texture_size);
 GSVideoMode GSgetDisplayMode();
 void GSgetInternalResolution(int* width, int* height);
+
+/// Cenit 0.6.26: evidencia del ultimo present, para el HUD. `src_*` es el tamano del
+/// buffer interno que se mando a presentar y `dst_*` el tamano de destino en pantalla;
+/// `easu_active` dice si la cadena EASU -> RCAS corrio de verdad ese frame y
+/// `easu_stages` cuantas pasadas EASU uso (0 cuando no corrio). Existe porque en
+/// 0.6.25 no habia forma de distinguir "la reconstruccion no se activo" de
+/// "se activo y se ve mal", y eso costo un ciclo de medicion completo.
+void GSgetPresentEvidence(int* src_width, int* src_height, int* dst_width, int* dst_height, bool* easu_active,
+	int* easu_stages);
 void GSgetStats(SmallStringBase& info);
 void GSgetMemoryStats(SmallStringBase& info);
 void GSgetTitleStats(std::string& info);

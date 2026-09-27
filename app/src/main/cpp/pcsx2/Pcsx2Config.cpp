@@ -741,9 +741,14 @@ Pcsx2Config::GSOptions::GSOptions()
 	// por defecto (ver el gate de cualquier feature nueva: primero medir).
 	AsyncTFXPipelineCompile = false;
 	// Cenit 0.6.25: reconstrucción EASU para escalas internas sub-nativas.
-	// EXPERIMENTAL y APAGADA por defecto, y además inocua si CAS está apagado
-	// (ver GSRenderer::Present): sin CAS no hay afilado detrás de EASU.
-	EASUReconstruct = false;
+	// Cenit 0.6.26: ENCENDIDA por defecto. En 0.6.25 el default apagado, sumado al
+	// gate invisible "requiere CAS" (cuyo default también es apagado), hizo que la
+	// función nunca ejecutara en ningún teléfono y se liberara borrosa sin que
+	// nadie pudiera verlo. Ahora la cadena es autocontenida (EASU en pasadas <=2x
+	// + RCAS con piso de nitidez) y el HUD muestra la línea PRESENT con la
+	// evidencia, así que ON por defecto es seguro: solo cambia el camino
+	// sub-nativo en Vulkan, y el usuario la puede apagar.
+	EASUReconstruct = true;
 	DisableFramebufferFetch = false;
 	DisablePS2DepthQuantization = false;
 	DisableVertexShaderExpand = false;

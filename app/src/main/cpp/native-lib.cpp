@@ -881,12 +881,14 @@ Java_com_izzy2lost_psx2_NativeApp_setAsyncShaderCompile(JNIEnv* env, jclass, jbo
 }
 
 // Cenit 0.6.25 — reconstruccion EASU (AMD FidelityFX FSR1) para escala sub-nativa.
-// EXPERIMENTAL y APAGADA por defecto. Opcion b elegida por el usuario: EASU solo
-// corre si CAS esta encendido, porque la cadena real es EASU -> CAS forzado a
-// sharpen_only; sin CAS no hay quien reenfoque el resultado y el gate de C++ lo
-// rechaza (GSRenderer.cpp Present). Tampoco se fuerza el CAS desde aqui: la
-// preferencia manda, y el aviso lo da la UI. Tampoco esta en
-// RestartOptionsAreEqual, asi que se aplica en caliente. Sin getter expuesto: la
+// Cenit 0.6.26 — la cadena es AUTOCONTENIDA: ya no exige CAS encendido. Cuando la
+// opcion esta activa y la imagen interna es mas chica que el destino, GSRenderer
+// encadena pasadas EASU (<=2x lineal cada una) y despues corre CAS en modo
+// sharpen_only haciendo el papel de RCAS, con un piso de nitidez propio. El gate
+// "opcion b" de 0.6.25 (requerir CASMode != Disabled) fue un error: el default de
+// CAS es Desactivado, asi que en un telefono normal la funcion nunca ejecutaba.
+// Tampoco se fuerza el CAS del usuario desde aqui: su preferencia manda, y lo que
+// hace la cadena es afilar por su cuenta sin tocarla. Sin getter expuesto: la
 // preferencia de Java es la unica fuente, igual que async_shader_compile.
 extern "C"
 JNIEXPORT void JNICALL
@@ -1699,9 +1701,9 @@ Java_com_izzy2lost_psx2_NativeApp_renderUpscalemultiplier(JNIEnv *env, jclass cl
     // sub-nativos del gobernador (0.5x/0.75x) en un no-op silencioso. Ahora el
     // piso es 0.5x. Riesgo conocido: por debajo de 1x el propio nucleo avisa
     // "Upscale multiplier is below native, this will break rendering."
-    // (VMManager.cpp) — por eso la reconstruccion EASU (que exige CAS encendido)
-    // existe: deja de ser un estiramiento bilinear y pasa a ser una
-    // reconstruccion. El default del governor sigue siendo 1x.
+    // (VMManager.cpp) — por eso existe la reconstruccion EASU: deja de ser un
+    // estiramiento bilinear y pasa a ser una reconstruccion en cadena (con su
+    // propio paso de enfocado). El default del governor sigue siendo 1x.
     if (p_value < 0.5f) p_value = 0.5f;   // Minimum sub-native step
     if (p_value > 12.0f) p_value = 12.0f; // Cap at maximum 12x
     

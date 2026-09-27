@@ -28,6 +28,14 @@ private:
 protected:
 	GSVector2i m_real_size{0, 0};
 
+	// Cenit 0.6.26: evidencia de lo que se esta presentando de verdad, para el HUD.
+	// Sin esto no se puede distinguir "EASU no corrio" de "EASU corrio y se ve mal",
+	// que es exactamente como se perdio un ciclo de medicion entero en 0.6.25.
+	GSVector2i m_present_src{0, 0};   ///< tamano del buffer interno que se presenta
+	GSVector2i m_present_dst{0, 0};   ///< tamano de destino en pantalla (draw_rect)
+	bool m_easu_active = false;       ///< la cadena EASU -> RCAS corri6 este frame
+	int m_easu_stages = 0;            ///< cuantas pasadas uso la cadena (0 = no corrio)
+
 	virtual GSTexture* GetOutput(int i, float& scale, int& y_offset) = 0;
 	virtual GSTexture* GetFeedbackOutput(float& scale) { return nullptr; }
 
@@ -62,6 +70,17 @@ public:
 	bool IsSavingMetrics();
 	void PresentCurrentFrame();
 	static GSVector4 GetLastDrawRect();
+
+	// Cenit 0.6.26: evidencia del present para el HUD (ver miembros arriba).
+	struct PresentEvidence
+	{
+		GSVector2i src;
+		GSVector2i dst;
+		bool easu_active;
+		int easu_stages;
+	};
+	PresentEvidence GetPresentEvidence() const { return {m_present_src, m_present_dst, m_easu_active, m_easu_stages}; }
+
 	bool BeginCapture(std::string filename, const GSVector2i& size = GSVector2i(0, 0));
 	void EndCapture();
 };

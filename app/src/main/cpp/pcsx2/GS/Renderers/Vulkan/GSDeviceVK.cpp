@@ -52,10 +52,14 @@ enum : u32
 	MAX_STORAGE_IMAGE_DESCRIPTORS_PER_FRAME = 2 * MAX_DRAW_CALLS_PER_FRAME,
 	MAX_INPUT_ATTACHMENT_IMAGE_DESCRIPTORS_PER_FRAME = 2 * MAX_DRAW_CALLS_PER_FRAME,
 	// Cenit 0.6.25: EASU necesita un sampler explicito (lee con textureGather, y en
-	// Vulkan sampler y texture van en descriptors separados). Es UNO por frame,
-	// igual que el storage image de CAS; se pone holgura pequena, no el presupuesto
-	// de draws, porque un pool de 8192 samplers seria memoria reservada de balde.
-	MAX_SAMPLER_DESCRIPTORS_PER_FRAME = 4,
+	// Vulkan sampler y texture van en descriptors separados). En 0.6.25 era UNO por
+	// frame; con la cadena de pasadas de 0.6.26 puede haber hasta MAX_EASU_STAGES (8)
+	// por frame en el peor caso, y cada etapa reserva un set en el pool cuando el
+	// driver no tiene push descriptors. Se pone holgura para la cadena completa, no
+	// el presupuesto de draws, porque un pool de 8192 samplers seria memoria
+	// reservada de balde. Si aun asi se agota, DoEASU devuelve false y Present
+	// degrada al estirado normal: nunca corrompe el frame.
+	MAX_SAMPLER_DESCRIPTORS_PER_FRAME = 8,
 	MAX_DESCRIPTOR_SETS_PER_FRAME = MAX_DRAW_CALLS_PER_FRAME * 2,
 
 	VERTEX_BUFFER_SIZE = 32 * 1024 * 1024,

@@ -2264,12 +2264,13 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         // re-aplica aquí igual que las banderas de arriba.
         NativeApp.setAsyncShaderCompile(prefs.getBoolean("async_shader_compile", false));
         // Cenit 0.6.25: reconstrucción EASU (FSR1) para escala sub-nativa.
-        // EXPERIMENTAL y apagada por defecto; ningún perfil de hardware toca
-        // esta clave, así que la preferencia es la única fuente. Se re-aplica
-        // aquí por el mismo motivo que las banderas de arriba: es lo que
-        // sincroniza el INI antes de arrancar la VM. El gate real (requiere CAS
-        // encendido y resolución interna menor que la de salida) vive en C++.
-        NativeApp.setEASUReconstruct(prefs.getBoolean("easu_reconstruct", false));
+        // Cenit 0.6.26: ENCENDIDA por defecto y autocontenida (cadena EASU en
+        // pasadas <=2x + RCAS propio); ya no depende de que CAS esté activo.
+        // Ningún perfil de hardware toca esta clave, así que la preferencia es
+        // la única fuente. Se re-aplica aquí por el mismo motivo que las banderas
+        // de arriba: es lo que sincroniza el INI antes de arrancar la VM. El gate
+        // real (resolución interna menor que la de salida) vive en C++.
+        NativeApp.setEASUReconstruct(prefs.getBoolean("easu_reconstruct", true));
         if (mDynRes != null) mDynRes.reset();
         AudioOutputPreference.apply(this);
     }

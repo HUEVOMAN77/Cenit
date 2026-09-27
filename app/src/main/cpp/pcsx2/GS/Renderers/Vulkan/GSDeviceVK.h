@@ -591,7 +591,8 @@ private:
 		GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants) final;
 
 	// Cenit 0.6.25: EASU en Vulkan. Solo existe si CompileEASUPipelines() tuvo exito
-	// (m_easu_pipeline != VK_NULL_HANDLE); por eso GSDevice::EASU mira su retorno.
+	// (m_easu_pipeline != VK_NULL_HANDLE); por eso GSDevice::EASUChain mira su retorno
+	// en cada etapa.
 	bool DoEASU(GSTexture* sTex, GSTexture* dTex, const std::array<u32, NUM_EASU_CONSTANTS>& constants) final;
 
 	VkSampler GetSampler(GSHWDrawConfig::SamplerSelector ss);

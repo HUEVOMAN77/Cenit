@@ -3,7 +3,7 @@
 [![Licencia: GPL v3](https://img.shields.io/badge/Licencia-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.en.html)
 [![Android](https://img.shields.io/badge/Android-8.0%20o%20superior-green.svg)](https://developer.android.com/)
 [![ARM64](https://img.shields.io/badge/Procesador-arm64--v8a-orange.svg)](https://developer.arm.com/)
-[![Última versión](https://img.shields.io/badge/versión%20actual-0.6.25-informational)](https://github.com/HUEVOMAN77/Cenit/releases/tag/base-0.6.25)
+[![Última versión](https://img.shields.io/badge/versión%20actual-0.6.26-informational)](https://github.com/HUEVOMAN77/Cenit/releases/tag/base-0.6.26)
 [![Driver](https://img.shields.io/badge/driver%20incluido-Turnip%2025.3.6-yellow)](https://github.com/HUEVOMAN77/Cenit/releases)
 
 **Cenit es mi emulador de PlayStation 2 para Android.** Lo diseño, lo programo, lo compilo y lo mantengo yo solo: [HUEVOMAN77](https://github.com/HUEVOMAN77). Empezó como bifurcación de [PSX2](https://github.com/izzy2lost/PSX2) (el adaptador Android de PCSX2 2.7), pero eso fue el punto de partida, no el proyecto: hoy Cenit es propiedad mía y todo lo que lo define —el motor de rendimiento adaptativo, los ajustes por juego, mi driver Vulkan propio, el guardarraya, la interfaz, la instrumentación del recompilador VU— es trabajo mío, pieza por pieza y en público. Cada decisión de este repositorio se toma aquí.
@@ -12,7 +12,7 @@ La meta es muy concreta: **que los juegos de PS2 se muevan fluidos en celulares 
 
 No es una copia con otro logo. Cada versión suma mejoras de rendimiento y de uso que no existen ni en PSX2 ni en PCSX2, y —salvo que yo mismo diga lo contrario— medidas sobre hardware real antes de publicarse.
 
-> **Versión actual: 0.6.25.** Mantengo una línea pública y continua (0.6.x), con su release, su verificación en teléfono real y mi registro de qué cambió y qué no. En [Historial versión por versión](#historial-versión-por-versión) está todo el camino recorrido, sin adornos.
+> **Versión actual: 0.6.26.** Mantengo una línea pública y continua (0.6.x), con su release, su verificación en teléfono real y mi registro de qué cambió y qué no. En [Historial versión por versión](#historial-versión-por-versión) está todo el camino recorrido, sin adornos.
 
 ---
 
@@ -20,8 +20,8 @@ No es una copia con otro logo. Cada versión suma mejoras de rendimiento y de us
 
 | | |
 |---|---|
-| **Versión actual** | 0.6.25 |
-| **Descarga** | [Lanzamientos](https://github.com/HUEVOMAN77/Cenit/releases) → `Cenit-0.6.25.apk` |
+| **Versión actual** | 0.6.26 |
+| **Descarga** | [Lanzamientos](https://github.com/HUEVOMAN77/Cenit/releases) → `Cenit-0.6.26.apk` |
 | **Driver incluido** | `Cenit-Turnip-25.3.6` (compilado por mi CI) |
 | **Requiere** | Android 8 o superior, procesador de 64 bits y tu propia BIOS de PS2 |
 | **No incluye** | BIOS, juegos ni ningún archivo con derechos de autor |
@@ -120,7 +120,7 @@ Lo digo claro: ningún truco hace correr *God of War* a 60 cuadros en un teléfo
 
 ## Cómo empezar
 
-1. Descarga `Cenit-0.6.25.apk` desde [Lanzamientos](https://github.com/HUEVOMAN77/Cenit/releases) e instálala (Android pedirá permitir apps de esta fuente la primera vez).
+1. Descarga `Cenit-0.6.26.apk` desde [Lanzamientos](https://github.com/HUEVOMAN77/Cenit/releases) e instálala (Android pedirá permitir apps de esta fuente la primera vez).
 2. Abre la app y sigue el asistente: coloca la **BIOS extraída de tu propia PS2** y elige la carpeta de tus juegos.
 3. Toca un juego de la biblioteca y listo. Con una partida abierta, el panel **Ajustes → Rendimiento** muestra todos los mandos de Cenit.
 4. **Si tu teléfono es Snapdragon/Adreno**: descarga también `Cenit-Turnip-25.3.6-*.zip` de la misma release, impórtalo en **Ajustes → Controlador gráfico personalizado** (no lo descomprimas), toca «Forzar otra vez el driver seleccionado» y juega normal. La segunda sesión de cada juego ya no recompila shaders; el diálogo del driver va llenando el medidor solo.
@@ -216,6 +216,12 @@ Todo mi camino, incluido lo que estuvo mal y corregí. Cada fila tiene su releas
 |---|---|
 | **0.6.25** | **El ajuste dinámico de resolución ahora puede bajar de 1x, y cuando lo hace la imagen se reconstruye en vez de estirarse. Experimental y APAGADA por defecto.** Dos piezas. La primera: el regidor y el menú de escala suman los escalones **0.5x y 0.75x** por debajo de nativo; en un teléfono que no llega a 1x, bajar de nativo deja de ser territorio prohibido y pasa a ser una salida más. También destapé lo que lo bloqueaba por dentro: el puente nativo recortaba cualquier valor bajo a 1x —es decir, pedirlo no habría hecho nada— y varios pisos del propio regidor estaban escritos con el 1 literal. La segunda: porté **EASU**, la fase de reconstrucción de **AMD FidelityFX Super Resolution 1** (código abierto, MIT), a Vulkan. EASU toma la imagen interna chica y la reconstruye a la resolución de salida con un filtro por gradiente; encima le puse mi CAS ya existente en modo «solo enfocar» (antes, por debajo de 1x, el CAS estaba haciendo el reescalado a su manera). La preferencia nueva se llama «Reconstruir imagen por debajo de 1x (EASU)» y **necesita la nitidez CAS encendida** — no la fuerzo por ti; si la enciendes con CAS apagado, Cenit te lo avisa y no pasa nada más. Digo lo que hace y lo que no: **EASU reconstruye bordes y detalle muchísimo mejor que estirar, pero no inventa detalle que nunca se renderizó** — una textura que a 0.5x nunca existió no aparece por arte de magia; no es idéntico a 1x nativo, es lo mejor que se puede sacar de esa imagen. Todo lo demás es defensivo por diseño: si el shader no compila en tu driver, si el juego no baja de 1x, si CAS está apagado, el camino es exactamente el de 0.6.24. Lo que falta ahora es medirlo en el teléfono: escena de lluvia de God of War, misma ruta, apagado contra encendido en 0.5x, mirando resolución interna, GPU % y tiempo de cuadro en el HUD. |
 
+### 0.6.25 no reconstruía: cadena EASU autocontenida, evidencia en el HUD y encendida por defecto (0.6.26)
+
+| Versión | Qué sumó |
+|---|---|
+| **0.6.26** | **0.6.25 prometió reconstrucción sub-nativa y no la cumplió: en un teléfono normal EASU nunca ejecutó. Esta versión lo arregla, y lo dice con números.** Detección honesta de la falla: en 0.6.25 condicioné EASU a que la nitidez CAS estuviera encendida (la «opción b» que diseñé). Pero el default de CAS es «Desactivado», y nada la encendía — así que en la práctica la pantalla seguía mostrando el estirado bilinear de siempre, borroso y pixelado, y el HUD no dejaba verlo: confundí «reconstruye mal» con «no ejecuta nunca», y eso costó un ciclo de medición completo. Tres arreglos. **Uno: la cadena es autocontenida.** Cuando pides reconstrucción y la imagen interna es más chica que la salida, Cenit arma él mismo el EASU → enfoque RCAS (el segundo paso que AMD exige textualmente después del primero), con un piso de nitidez propio — ya no necesita que toques CAS, y no te toca tu preferencia. **Dos: ya no basta una sola pasada EASU.** Verificado contra el propio código de AMD: EASU está diseñado para «1x to 4x area range» — hasta 2x lineal por pasada. God of War a 0.5x entrega 256x224 y el panel pide ~960x720: 3.75x lineal, ~14x de área, más del triple del rango declarado. Estirar en una sola pasada *fuera de especificación* es lo que sale borroso aunque el filtro esté activo. Desde ahora la reconstrucción encadena pasadas de <=2x cada una (dos en ese caso), cada una dentro del rango para el que AMD escribió el filtro. **Tres: el HUD muestra la evidencia.** Con el HUD de resolución activo aparece la línea `PRESENT 256x224 -> 960x720 x3.75 EASU ON x2` (verde cuando corre, blanca con OFF cuando no): se puede leer, con números, qué se manda, dónde se presenta y si la reconstrucción está viva. Y **la opción queda ENCENDIDA por defecto** desde 0.6.26 — con la evidencia visible en el HUD, dejarla apagada por defecto era repetir el error. Lo que no cambia: FSR1 no inventa detalle que nunca se renderizó; a 0.5x se ve claramente mejor que estirado y mucho peor que 1x nativo. Los escalones 0.5x/0.75x, el governor y todo lo demás de 0.6.25 quedan igual. |
+
 ---
 
 ## Hoja de ruta
@@ -234,7 +240,7 @@ Lo que sigue es mi plan honesto: parte es ingeniería difícil, parte es directa
 
 ### La gran apuesta: renderizar abajo, ver arriba
 
-> **Primer ladrillo entregado (0.6.25):** los escalones sub-nativos 0.5x/0.75x en el ajuste dinámico y la reconstrucción EASU de FidelityFX FSR1 antes del CAS, en Vulkan, con interruptor propio y apagada por defecto. Falta lo demás: las guías del motor (profundidad, vectores de movimiento) y la validación juego por juego.
+> **Ladrillos entregados:** 0.6.25 sumó los escalones sub-nativos 0.5x/0.75x al ajuste dinámico y portó EASU a Vulkan; 0.6.26 convirtió eso en una función que de verdad corre sola — cadena EASU en pasadas <=2x + RCAS, evidencia visible en el HUD, encendida por defecto — después de que la medición mostrara que en 0.6.25 nunca ejecutaba. Falta lo demás: las guías del motor (profundidad, vectores de movimiento) y la validación juego por juego.
 
 La idea central de mis próximas versiones grandes: **que el juego renderice por debajo de la resolución nativa de PS2 —incluso 0.5×, la más baja— y que Cenit reconstruya esa imagen en tiempo real para mostrarla nítida a 720p u 1080p en la pantalla del celular.**
 

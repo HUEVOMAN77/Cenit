@@ -1507,11 +1507,12 @@ protected:
 	GSTexture* m_target_tmp = nullptr;
 	GSTexture* m_current = nullptr;
 	GSTexture* m_cas = nullptr;
-	// Cenit 0.6.25: scratch de EASU, a la derecha de m_cas y con su misma politica
-	// (se recrea solo si cambia el tamano de destino). Despues de EASU el frame ya
-	// esta a resolucion de salida y CAS corre encima en modo sharpen_only, escribiendo
-	// en m_cas como siempre: dos buffers distintos es lo que rompe el doble-upscale.
-	GSTexture* m_easu = nullptr;
+	// Cenit 0.6.26: una scratch por etapa de la cadena EASU. Cada etapa escribe en un
+	// tamano distinto, asi que no alcanza con un solo buffer. Con IR y pantalla fijas
+	// el plan no cambia y las texturas se reusan igual que m_cas: solo se recrea la
+	// etapa cuyo tamano pedido sea distinto del que tiene.
+	static constexpr int MAX_EASU_STAGES = 8;
+	GSTexture* m_easu_stage[MAX_EASU_STAGES] = {};
 	GSTexture* m_colclip_rt = nullptr; ///< Temp hw colclip texture
 	GSTexture* m_ds_as_rt = nullptr; ///< Depth as color
 
@@ -1544,8 +1545,9 @@ protected:
 		return false;
 	}
 
-	/// Cenit 0.6.25: la entrada publica que hace la mecanica de scratch es `EASU()`,
-	/// declarada mas abajo, junto a `CAS()`.
+	/// Cenit 0.6.26: la cadena publica (y la explicacion de por que son varias
+	/// pasadas y no una) esta declarada junto a `CAS()`, mas abajo: la llama
+	/// GSRenderer::Present, que no es clase amiga de GSDevice.
 
 	/// Perform texture operations for ImGui
 	void UpdateImGuiTextures();
@@ -1777,14 +1779,26 @@ public:
 	void ShadeBoost();
 	void Resize(int width, int height);
 
-	void CAS(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect, bool sharpen_only);
+	void CAS(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect, bool sharpen_only,
+		float sharpness_override = -1.0f);
 
-	/// Cenit 0.6.25: reconstruye la imagen sub-nativa a la resolucion de destino con
-	/// EASU (FSR1) y reasigna tex/src_rect/src_uv a la scratch `m_easu`; misma
-	/// mecanica de `CAS()` de arriba, con buffer propio: eso es lo que permite
-	/// encadenar EASU -> CAS(sharpen_only) sin duplicar manejos intermedios.
-	/// Devuelve false sin tocar nada si el compute falla y el llamante decide.
-	bool EASU(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect);
+	/// Cenit 0.6.26: reconstruye la imagen sub-nativa hasta la resolucion de destino
+	/// encadenando varias pasadas EASU (FSR1) y reasigna tex/src_rect/src_uv al
+	/// resultado, que vive en los scratch `m_easu_stage[]`; misma mecanica de `CAS()`
+	/// de arriba, con buffers propios: eso es lo que permite encadenar
+	/// EASU -> CAS(sharpen_only) sin duplicar manejos intermedios.
+	///
+	/// Por que no alcanza con una sola pasada (que era 0.6.25): el propio header de
+	/// AMD declara EASU para "1x to 4x area range spatial scaling", o sea hasta 2x
+	/// lineal. Un God of War a IR=0.5x entrega 256x224 y la pantalla del telefono
+	/// pide ~960x720: eso son 3.75x lineales (14x de area, mas del triple del rango
+	/// que el header declara). Una unica pasada ahi no "reconstruye",
+	/// interpola mal y se ve borrosa — que es exactamente lo que se midio.
+	/// Encadenando pasadas de <=2x cada una, cada etapa trabaja dentro de su rango
+	/// de diseno. `*stages_out` (opcional) informa cuantas pasadas se usaron.
+	/// Devuelve false sin tocar nada si alguna etapa falla y el llamante decide.
+	bool EASUChain(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect,
+		int* stages_out);
 
 	bool ResizeRenderTarget(GSTexture** t, int w, int h, bool preserve_contents, bool recycle);
 

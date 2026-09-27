@@ -325,11 +325,13 @@ public class NativeApp {
     }
 
     // --- Cenit 0.6.25: reconstrucción EASU de FSR1 (Vulkan) -----------------
-    // EXPERIMENTAL y APAGADA por defecto. Cuando el governor baja la resolución
-    // interna por debajo de 1x (0.5x / 0.75x), la imagen llegaría al panel
-    // estirada. EASU la reconstruye a la resolución de salida antes del realce,
-    // y CAS pasa a modo "solo enfocar" sobre esa imagen (no vuelve a escalar).
-    // Requiere CAS encendido: si CAS está apagado, EASU simplemente no corre.
+    // Cenit 0.6.26: encendida por defecto, y la cadena es autocontenida. Cuando la
+    // resolución interna baja de 1x (0.5x / 0.75x del governor), la imagen llegaría
+    // al panel estirada con bilinear. Ahora Cenit encadena pasadas EASU de hasta 2x
+    // lineales cada una (el rango para el que AMD escribió el filtro) hasta la
+    // resolución de salida, y aplica CAS en modo "solo enfocar" haciendo el papel de
+    // RCAS, con un piso de nitidez. Ya NO requiere CAS encendido: ese gate de 0.6.25
+    // fue un error y la función nunca ejecutaba en un teléfono normal.
     // No inventa detalle que nunca se renderizó: se nota mucho mejor que
     // estirar, no idéntico a nativo. Solo Vulkan; se aplica en caliente.
     public static native void setEASUReconstruct(boolean enabled);

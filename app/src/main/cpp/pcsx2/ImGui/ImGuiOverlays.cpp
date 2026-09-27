@@ -73,6 +73,11 @@ SmallString s_gs_stats_line;
 SmallString s_gs_memory_stats_line;
 SmallString s_gs_frame_times_line;
 SmallString s_resolution_line;
+// Cenit 0.6.26: linea de evidencia del present (buffer interno -> destino, EASU ON/OFF).
+SmallString s_present_evidence_line;
+// Su color vive aparte porque el bloque "cached" (entre refreshes) no vuelve a leer
+// el estado: mismo patron que s_speed_line_color.
+ImU32 s_present_evidence_color = IM_COL32(255, 255, 255, 255);
 SmallString s_hardware_info_cpu_line;
 SmallString s_hardware_info_gpu_line;
 SmallString s_cpu_usage_ee_line;
@@ -437,6 +442,30 @@ __ri void ImGuiManager::DrawPerformanceOverlay(float& position_y, float scale, f
 
 				s_resolution_line.format("{}x{} {} {}", iwidth, iheight, ReportVideoMode(), ReportInterlaceMode());
 				DRAW_LINE(osd_font, font_size, s_resolution_line.c_str(), white_color);
+
+				// Cenit 0.6.26: evidencia de la cadena de reconstruccion. Muestra el
+				// buffer interno que se presenta, el tamano de destino real en pantalla
+				// y si EASU -> RCAS esta corriendo. Existe porque en 0.6.25 la funcion
+				// dependia de un ajuste apagado por defecto, no habia forma de verlo, y
+				// se perdio un ciclo de medicion entero creyendo que "reconstruia mal"
+				// cuando en realidad no ejecutaba.
+				int sw, sh, dw, dh;
+				bool easu;
+				int easu_stages;
+				GSgetPresentEvidence(&sw, &sh, &dw, &dh, &easu, &easu_stages);
+				if (sw > 0 && dw > 0)
+				{
+					// El ratio lineal con dos decimales: es el numero que dice si se esta
+					// dentro del rango para el que FSR1 EASU fue escrito (AMD declara
+					// "1x to 4x AREA", o sea hasta 2x lineal). Tambien se muestra cuantas
+					// pasadas uso la cadena, para poder leer que cada una quedo <=2x.
+					const float ratio = static_cast<float>(dw) / static_cast<float>(sw);
+					s_present_evidence_line.format("PRESENT {}x{} -> {}x{}  x{:.2f}  EASU {}{}", sw, sh, dw, dh, ratio,
+						easu ? "ON" : "OFF", easu ? fmt::format(" x{}", easu_stages) : "");
+					// ON en verde, OFF en blanco para que se lea sin confundirse con un error.
+					s_present_evidence_color = easu ? IM_COL32(100, 255, 100, 255) : white_color;
+					DRAW_LINE(osd_font, font_size, s_present_evidence_line.c_str(), s_present_evidence_color);
+				}
 			}
 
 			if (GSConfig.OsdShowHardwareInfo)
@@ -724,6 +753,11 @@ __ri void ImGuiManager::DrawPerformanceOverlay(float& position_y, float scale, f
 
 			if (GSConfig.OsdShowResolution)
 				DRAW_LINE(osd_font, font_size, s_resolution_line.c_str(), white_color);
+
+			// Cenit 0.6.26: la evidencia se pinta tambien entre refreshes, con el ultimo
+			// valor leido (mismo criterio que la linea de resolucion de arriba).
+			if (GSConfig.OsdShowResolution && !s_present_evidence_line.empty())
+				DRAW_LINE(osd_font, font_size, s_present_evidence_line.c_str(), s_present_evidence_color);
 
 			if (GSConfig.OsdShowHardwareInfo)
 			{

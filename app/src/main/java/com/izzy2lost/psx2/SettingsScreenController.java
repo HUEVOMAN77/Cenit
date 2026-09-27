@@ -41,8 +41,9 @@ public final class SettingsScreenController {
      * Escalas disponibles, de 0.5x a 8x. El texto vive en scale_entries_cenit.
      * Cenit 0.6.25: los dos primeros escalones son sub-nativos (0.5x/0.75x).
      * Los usa el gobernador de resolución dinámica cuando el juego no llega a
-     * 1x; por debajo de nativo la imagen se reconstruye con EASU si el usuario
-     * lo enciende (y CAS está puesto), o se estira como antes si no. El techo
+     * 1x; por debajo de nativo la imagen se reconstruye con la cadena EASU -> RCAS
+     * (encendida por defecto desde 0.6.26), o se estira como antes si el usuario la
+     * apaga o va con OpenGL. El techo
      * que respeta el governor sigue siendo el valor que elija el usuario:
      * quien no baje de 1x en el menú jamás verá estos escalones en pantalla.
      */
@@ -315,26 +316,16 @@ public final class SettingsScreenController {
                 checked -> NativeApp.setAsyncShaderCompileAsync(checked));
 
         // Cenit 0.6.25: reconstrucción EASU (FSR1) para los escalones sub-nativos
-        // del gobernador (0.5x/0.75x). Opción b pactada: EASU NO fuerza CAS; la
-        // cadena real es EASU -> CAS en modo "solo enfocar", y el gate de C++
-        // (GSRenderer.cpp) la rechaza si CAS está apagado. Aquí se avisa con un
-        // toast al encenderla con CAS en "Apagada", para que el "no hace nada"
-        // no se sienta como un bug. Default apagado (experimental); no está entre
-        // las opciones que reinician el dispositivo, así que ApplySettings la
-        // aplica con la VM viva.
-        MaterialSwitch easuSw = root.findViewById(R.id.set_sw_easu);
-        if (easuSw != null) {
-            easuSw.setOnCheckedChangeListener((b, checked) -> {
-                if (checked == prefs.getBoolean("easu_reconstruct", false)) return;
-                prefs.edit().putBoolean("easu_reconstruct", checked).apply();
-                NativeApp.setEASUReconstructAsync(checked);
-                if (checked && prefs.getInt("cas_mode", 0) == 0) {
-                    android.widget.Toast.makeText(context,
-                            "EASU necesita la nitidez CAS encendida: sin CAS no reconstruye nada.",
-                            android.widget.Toast.LENGTH_LONG).show();
-                }
-            });
-        }
+        // del gobernador (0.5x/0.75x). Cenit 0.6.26: la cadena es autocontenida —
+        // EASU en pasadas de <=2x seguida de CAS en modo "solo enfocar" (el papel
+        // de RCAS que AMD exige), con piso de nitidez propio. Ya NO necesita que
+        // el usuario encienda CAS: el gate "opción b" de 0.6.25 fue un error
+        // (CAS viene apagado por defecto, así que la función nunca ejecutaba).
+        // Encendida por defecto desde 0.6.26 (el usuario pidió que la
+        // reconstrucción simplemente funcione); no está entre las opciones que
+        // reinician el dispositivo, así que ApplySettings la aplica con la VM viva.
+        toggle(R.id.set_sw_easu, "easu_reconstruct", true,
+                checked -> NativeApp.setEASUReconstructAsync(checked));
 
         // La posición del spinner ES el valor de la clave (ver arrays.xml). Como
         // con medio píxel y cuotas: el primer disparo del adaptador se ADOPTA sin
@@ -648,7 +639,7 @@ public final class SettingsScreenController {
         check(R.id.set_sw_vu_probe, prefs.getBoolean("vu_trace_probe", false));
         check(R.id.set_sw_vu_superblock, prefs.getBoolean("vu_superblock", false));
         check(R.id.set_sw_async_shaders, prefs.getBoolean("async_shader_compile", false));
-        check(R.id.set_sw_easu, prefs.getBoolean("easu_reconstruct", false));
+        check(R.id.set_sw_easu, prefs.getBoolean("easu_reconstruct", true));
         setSpinner(R.id.set_sp_framequeue,
                 prefs.getInt("frame_queue", NativeApp.defaultFrameLatencyQueue()));
         setSpinner(R.id.set_sp_preload,

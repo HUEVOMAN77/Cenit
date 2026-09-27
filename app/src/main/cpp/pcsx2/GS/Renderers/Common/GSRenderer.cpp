@@ -687,31 +687,69 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
 				GetVideoMode() == GSVideoMode::SDTV_480P);
 			s_last_draw_rect = draw_rect;
 
-			// Cenit 0.6.25: reconstruccion EASU (opcional, apagada por defecto). Solo
-			// cuando el usuario la pidio, el renderer la soporta, HAY CAS delante (opcion
-			// b: EASU reconstruye y CAS afila; sin CAS no la activamos, porque dejaria el
-			// frame sin afilar detras del upscale) y la imagen interna es MAS CHICA que
-			// el destino (escala sub-nativa; EASU es upscale-only, nunca downscales).
-			// Si EASU falla en runtime, current queda intacta y CAS hace lo de siempre.
+			// Cenit 0.6.26 — la cadena EASU -> RCAS se completa SOLA.
+			//
+			// En 0.6.25 pedí "opcion b": EASU solo corria si el usuario tenia CAS
+			// encendido. Fue un error de diseño mio, y caro: el default de CASMode es
+			// Disabled, asi que en el telefono de cualquiera EASU NO ejecutaba y lo que
+			// se veia era el estiramiento bilinear de siempre. Peor aun: el HUD no
+			// mostraba CAS, asi que ni siquiera se podia ver por que.
+			//
+			// Ahora, cuando el usuario pide reconstruccion y la imagen interna es mas
+			// chica que el destino, Cenit arma la cadena completa por su cuenta:
+			// EASU reescala a resolucion de salida y CAS corre despues en modo
+			// sharpen_only haciendo el papel de RCAS (el afilado que AMD manda aplicar
+			// despues de EASU, con su propio punto de partida de nitidez). No se toca
+			// la preferencia de CAS del usuario: esto vive dentro del camino de EASU.
+			// Si EASU falla, current queda intacta y el bloque de CAS de abajo hace
+			// exactamente lo que hacia antes.
 			bool easu_ran = false;
-			if (GSConfig.EASUReconstruct && GSConfig.CASMode != GSCASMode::Disabled &&
-				g_gs_device->Features().easu_reconstruct)
+			int easu_stages = 0;
+			// Cenit 0.6.26: la evidencia se captura ANTES de que EASU reasigne
+			// `current`, porque lo que interesa mostrar es de cuanto venia el juego.
+			// Se reporta el buffer interno completo, no src_rect: src_rect puede venir
+			// recortado y lo que el usuario quiere leer es "cuantos pixeles estoy
+			// mandando de verdad a reconstruir".
+			m_present_src = current->GetSize();
+			m_present_dst = GSVector2i(static_cast<int>(std::ceil(draw_rect.z - draw_rect.x)),
+			                           static_cast<int>(std::ceil(draw_rect.w - draw_rect.y)));
+			if (GSConfig.EASUReconstruct && g_gs_device->Features().easu_reconstruct)
 			{
-				const int out_w = static_cast<int>(std::ceil(draw_rect.z - draw_rect.x));
-				const int out_h = static_cast<int>(std::ceil(draw_rect.w - draw_rect.y));
+				const int out_w = m_present_dst.x;
+				const int out_h = m_present_dst.y;
 				if (current->GetWidth() < out_w && current->GetHeight() < out_h)
-					easu_ran = g_gs_device->EASU(current, src_rect, src_uv, draw_rect);
+					easu_ran = g_gs_device->EASUChain(current, src_rect, src_uv, draw_rect, &easu_stages);
+			}
+			m_easu_active = easu_ran;
+			m_easu_stages = easu_stages;
+
+			if (easu_ran)
+			{
+				// RCAS sobre la imagen ya reconstruida. Sin esto, EASU solo se ve
+				// "suave": el filtro preserva bordes pero no los realza, y AMD lo dice
+				// explicitamente en el header ("RCAS needs to be applied after EASU as a
+				// separate pass").
+				//
+				// Nitidez: reuso la perilla que el usuario ya tiene (CAS_Sharpness,
+				// 0..100) para que "mas nitidez" signifique lo mismo en los dos caminos,
+				// pero con un piso de 0.5. Razon: CasSetup define 0 = minimo ringing y
+				// 1 = maximo, y despues de EASU la imagen sale MAS suave que un estirado
+				// bilinear, asi que los valores bajos vuelven a dejarla "leche" — justo
+				// la queja que motiva esta version.
+				const float user_sharpness = static_cast<float>(GSConfig.CAS_Sharpness) * 0.01f;
+				g_gs_device->CAS(current, src_rect, src_uv, draw_rect, true, std::max(user_sharpness, 0.5f));
 			}
 
-			if (GSConfig.CASMode != GSCASMode::Disabled)
+			if (GSConfig.CASMode != GSCASMode::Disabled && !easu_ran)
 			{
 				static bool cas_log_once = false;
 				if (g_gs_device->Features().cas_sharpening)
 				{
 					// sharpen only if the IR is higher than the display resolution
-					// Cenit 0.6.25: si EASU ya corrio, current esta a resolucion de
-					// salida: forzar sharpen_only (no queda nada que estirar).
-					const bool sharpen_only = easu_ran ||
+					// Cenit 0.6.26: `!easu_ran` arriba — si la cadena EASU->RCAS ya
+					// corrio, current esta a resolucion de salida y afilada; volver a
+					// pasar CAS aqui seria doble nitidez (borde blanco y ringing).
+					const bool sharpen_only =
 						(GSConfig.CASMode == GSCASMode::SharpenOnly ||
 						 (current->GetWidth() > g_gs_device->GetWindowWidth() &&
 						  current->GetHeight() > g_gs_device->GetWindowHeight()));

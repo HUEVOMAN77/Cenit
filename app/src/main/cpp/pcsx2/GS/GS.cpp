@@ -771,6 +771,29 @@ void GSgetInternalResolution(int* width, int* height)
 	*height = res.y;
 }
 
+// Cenit 0.6.26: ver declaracion en GS.h. El HUD necesita poder decir, con numeros,
+// si la reconstruccion se esta ejecutando o no.
+void GSgetPresentEvidence(int* src_width, int* src_height, int* dst_width, int* dst_height, bool* easu_active,
+	int* easu_stages)
+{
+	GSRenderer* gs = g_gs_renderer.get();
+	if (!gs)
+	{
+		*src_width = *src_height = *dst_width = *dst_height = 0;
+		*easu_active = false;
+		*easu_stages = 0;
+		return;
+	}
+
+	const GSRenderer::PresentEvidence ev = gs->GetPresentEvidence();
+	*src_width = ev.src.x;
+	*src_height = ev.src.y;
+	*dst_width = ev.dst.x;
+	*dst_height = ev.dst.y;
+	*easu_active = ev.easu_active;
+	*easu_stages = ev.easu_stages;
+}
+
 void GSgetStats(SmallStringBase& info)
 {
 	GSPerfMon& pm = g_perfmon;

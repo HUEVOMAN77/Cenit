@@ -522,11 +522,11 @@
                             <com.google.android.material.materialswitch.MaterialSwitch
                                 android:id="@+id/set_sw_easu"
                                 style="@style/Cenit.Settings.Switch"
-                                android:text="Reconstruir imagen por debajo de 1x (EASU, experimental)" />
+                                android:text="Reconstruir imagen por debajo de 1x (EASU, experimental, encendida por defecto)" />
 
                             <TextView
                                 style="@style/Cenit.Settings.Caption"
-                                android:text="Cuando la resolución interna baja de 1x (escalones 0.5x y 0.75x del ajuste dinámico), reconstruye la imagen a la resolución de salida con FidelityFX FSR1 en lugar de simplemente estirarla. Sale bastante más nítida que el estiramiento, pero no recupera detalle que nunca se renderizó: no se confunde con 1x nativo. Requiere la nitidez CAS encendida (no la fuerza por ti), solo funciona en Vulkan y se nota únicamente por debajo de 1x. Apagada por defecto: experimental, se aplica sin reiniciar." />
+                                android:text="Cuando la resolución interna baja de 1x (escalones 0.5x y 0.75x del ajuste dinámico), reconstruye la imagen a la resolución de salida con FidelityFX FSR1 en lugar de simplemente estirarla: encadena pasadas EASU de hasta 2x cada una (el rango para el que AMD escribió el filtro) y aplica un enfoque RCAS después, todo dentro de la propia función — ya no necesita activar la nitidez CAS. Sale bastante más nítida que el estirado, pero no inventa detalle que nunca se renderizó: no se confunde con 1x nativo. Solo funciona en Vulkan y se nota únicamente por debajo de 1x. Con el HUD de resolución activo, la línea PRESENT muestra con números si la reconstrucción está corriendo (EASU ON, en verde) o no (EASU OFF). Encendida por defecto desde 0.6.26; experimental, se aplica sin reiniciar." />
                         </LinearLayout>
                     </com.google.android.material.card.MaterialCardView>
                 </LinearLayout>

@@ -19,6 +19,8 @@
 #include "imgui.h"
 
 #include <algorithm>
+#include <cmath>
+#include <iterator>
 #include <ostream>
 #include <fstream>
 
@@ -251,7 +253,12 @@ GSDevice::GSDevice()
 GSDevice::~GSDevice()
 {
 	// should've been cleaned up in Destroy()
-	pxAssert(m_pool[0].empty() && m_pool[1].empty() && !m_merge && !m_weavebob && !m_blend && !m_mad && !m_target_tmp && !m_cas);
+	// Cenit 0.6.26: las scratch de la cadena EASU entran en el mismo contrato que
+	// m_cas: ClearCurrent() (invocado por Destroy()) las borra y las deja nulas.
+	pxAssert(m_pool[0].empty() && m_pool[1].empty() && !m_merge && !m_weavebob && !m_blend && !m_mad &&
+		!m_target_tmp && !m_cas &&
+		std::all_of(std::begin(m_easu_stage), std::end(m_easu_stage),
+			[](const GSTexture* t) { return t == nullptr; }));
 }
 
 GSVector2i GSDevice::GetPresentationSize() const
@@ -1007,7 +1014,12 @@ void GSDevice::ClearCurrent()
 	delete m_mad;
 	delete m_target_tmp;
 	delete m_cas;
-	delete m_easu;
+	// Cenit 0.6.26: las scratch de la cadena EASU, con la misma politica que m_cas.
+	// No hay riesgo de puntero colgado: ClearCurrent() acaba de poner m_current a
+	// nulo y el primer Present del ciclo nuevo reasigna current desde el renderer,
+	// asi que nadie vuelve a tocar estas texturas hasta que se vuelvan a crear.
+	for (int i = 0; i < MAX_EASU_STAGES; i++)
+		delete m_easu_stage[i];
 
 	m_merge = nullptr;
 	m_weavebob = nullptr;
@@ -1015,7 +1027,8 @@ void GSDevice::ClearCurrent()
 	m_mad = nullptr;
 	m_target_tmp = nullptr;
 	m_cas = nullptr;
-	m_easu = nullptr;
+	for (int i = 0; i < MAX_EASU_STAGES; i++)
+		m_easu_stage[i] = nullptr;
 }
 
 void GSDevice::Merge(GSTexture* sTex[3], GSVector4* sRect, GSVector4* dRect, const GSVector2i& fs, const GSRegPMODE& PMODE, const GSRegEXTBUF& EXTBUF, u32 c)
@@ -1259,7 +1272,8 @@ bool GSDevice::GetEASUShaderSource(std::string* source)
 	return true;
 }
 
-void GSDevice::CAS(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect, bool sharpen_only)
+void GSDevice::CAS(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect, bool sharpen_only,
+	float sharpness_override)
 {
 	const int dst_width = sharpen_only ? src_rect.width() : static_cast<int>(std::ceil(draw_rect.z - draw_rect.x));
 	const int dst_height = sharpen_only ? src_rect.height() : static_cast<int>(std::ceil(draw_rect.w - draw_rect.y));
@@ -1279,7 +1293,16 @@ void GSDevice::CAS(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, con
 	}
 
 	std::array<u32, NUM_CAS_CONSTANTS> consts;
-	CasSetup(&consts[0], &consts[4], static_cast<float>(GSConfig.CAS_Sharpness) * 0.01f,
+	// Cenit 0.6.26: cuando la cadena es EASU -> CAS, el llamante pasa la nitidez por
+	// parametro. No es un capricho: despues de EASU la imagen ya esta a resolucion de
+	// salida y el ratio input/output de CasSetup vale 1, asi que la nitidez que el
+	// usuario eligio para "reescalar y afinar" no aplica igual. Ademas, aqui CAS hace
+	// el papel de RCAS de FSR1 (el afilado que AMD manda aplicar DESPUES de EASU), y
+	// RCAS pide un punto de partida mas fuerte que el CAS de rutina.
+	const float sharpness = (sharpness_override >= 0.0f)
+		                        ? std::clamp(sharpness_override, 0.0f, 1.0f)
+		                        : static_cast<float>(GSConfig.CAS_Sharpness) * 0.01f;
+	CasSetup(&consts[0], &consts[4], sharpness,
 		static_cast<AF1>(src_rect.width()), static_cast<AF1>(src_rect.height()),
 		static_cast<AF1>(dst_width), static_cast<AF1>(dst_height));
 	consts[8] = static_cast<u32>(src_offset_x);
@@ -1297,55 +1320,105 @@ void GSDevice::CAS(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, con
 	src_uv = GSVector4(0.0f, 0.0f, 1.0f, 1.0f);
 }
 
-// Cenit 0.6.25: reconstruccion EASU (AMD FidelityFX Super Resolution 1).
+// Cenit 0.6.26: reconstruccion EASU en cadena de pasadas.
 //
-// Misma forma que `CAS()` arriba, deliberadamente: decide el tamano de destino por
-// draw_rect, reusa la scratch solo si coincide, arma constantes en CPU con el
-// propio FsrEasuConOffset del header, y al exito reasigna tex/src_rect/src_uv. La
-// diferencia es que EASU SIEMPRE escribe a resolucion de destino (no tiene modo
-// sharpen_only) y que aqui la entrada puede venir recortada, por eso se pasa el
-// offset (src_rect.x/y) al setup de constantes.
-bool GSDevice::EASU(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect)
+// Que hace y por que es asi. Cada etapa toma una imagen y la escribe mas grande, con
+// constantes calculadas por el propio FsrEasuConOffset del header de AMD. La
+// diferencia con 0.6.25 es que aqui se encadenan N etapas en vez de una sola, porque
+// el header declara su rango de diseno textual ("[EASU] ... 1x to 4x area range
+// spatial scaling"), o sea hasta 2x LINEAL por pasada. Medido en el telefono: God of
+// War a IR=0.5x entrega 256x224 y el area de presentacion pide ~960x720. Eso es 3.75x
+// lineal = ~14x en area, mas del triple del rango de area declarado. Una pasada ahi no
+// reconstruye: interpola fuera de especificacion y el resultado es borroso — que es
+// literalmente lo que se vio y se midio.
+//
+// Con etapas de <=2x cada una, cada pasada trabaja dentro de su rango y la informacion
+// de bordes que EASU si puede recuperar se recupera en cada salto.
+//
+// La mecanica de reuso es la de CAS(): una scratch por etapa, recreada solo si cambia
+// el tamano pedido. Con IR y pantalla fijas el plan no cambia nunca, asi que en
+// steady state esto no asigna nada.
+bool GSDevice::EASUChain(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect,
+	int* stages_out)
 {
 	const int dst_width = static_cast<int>(std::ceil(draw_rect.z - draw_rect.x));
 	const int dst_height = static_cast<int>(std::ceil(draw_rect.w - draw_rect.y));
 	if (dst_width <= 0 || dst_height <= 0)
 		return false;
 
-	GSTexture* src_tex = tex;
-	if (!m_easu || m_easu->GetWidth() != dst_width || m_easu->GetHeight() != dst_height)
+	const int src_width = src_rect.width();
+	const int src_height = src_rect.height();
+	if (src_width <= 0 || src_height <= 0)
+		return false;
+
+	const float ratio_x = static_cast<float>(dst_width) / static_cast<float>(src_width);
+	const float ratio_y = static_cast<float>(dst_height) / static_cast<float>(src_height);
+	const float max_ratio = std::max(ratio_x, ratio_y);
+
+	// Etapas necesarias para que ningun eje de ninguna pasada supere el 2x lineal.
+	static constexpr float MAX_STAGE_RATIO = 2.0f;
+	int stages = (max_ratio <= MAX_STAGE_RATIO) ? 1
+	                                            : static_cast<int>(std::ceil(std::log(max_ratio) / std::log(MAX_STAGE_RATIO)));
+	stages = std::clamp(stages, 1, MAX_EASU_STAGES);
+
+	GSTexture* cur_tex = tex;
+	GSVector4i cur_rect = src_rect;
+
+	for (int i = 0; i < stages; i++)
 	{
-		delete m_easu;
-		m_easu = CreateSurface(GSTexture::ShaderWriteTexture, dst_width, dst_height, 1, GSTexture::Format::Color);
-		if (!m_easu)
+		// Cada eje progresa hacia su propio destino, asi el aspect final queda exacto
+		// aunque el ratio horizontal y el vertical distinen (letterbox / stretch).
+		const float t = static_cast<float>(i + 1) / static_cast<float>(stages);
+		const bool last = (i == stages - 1);
+		const int w = last ? dst_width : std::max(cur_rect.width() + 1,
+		                                static_cast<int>(std::lround(src_width * std::pow(ratio_x, t))));
+		const int h = last ? dst_height : std::max(cur_rect.height() + 1,
+		                                static_cast<int>(std::lround(src_height * std::pow(ratio_y, t))));
+		// Nunca pasar de largo del destino: con redondeo podria crecer un pixel.
+		const int stage_w = last ? dst_width : std::min(w, dst_width);
+		const int stage_h = last ? dst_height : std::min(h, dst_height);
+
+		if (!m_easu_stage[i] || m_easu_stage[i]->GetWidth() != stage_w || m_easu_stage[i]->GetHeight() != stage_h)
 		{
-			Console.Error("Failed to allocate EASU RW texture.");
+			delete m_easu_stage[i];
+			m_easu_stage[i] =
+				CreateSurface(GSTexture::ShaderWriteTexture, stage_w, stage_h, 1, GSTexture::Format::Color);
+			if (!m_easu_stage[i])
+			{
+				Console.Error("Failed to allocate EASU stage {} ({}x{}).", i + 1, stage_w, stage_h);
+				return false;
+			}
+		}
+
+		// FsrEasuConOffset escribe bits de float en cada slot (AU1_AF1), asi que el
+		// array viaja como u32 y el shader lo reinterpreta a su vuelta. El offset solo
+		// aplica a la primera etapa: las siguientes leen un buffer nuestro, entero.
+		std::array<u32, NUM_EASU_CONSTANTS> consts;
+		AU1* con0 = &consts[0];
+		AU1* con1 = &consts[4];
+		AU1* con2 = &consts[8];
+		AU1* con3 = &consts[12];
+		FsrEasuConOffset(con0, con1, con2, con3,
+			static_cast<AF1>(cur_rect.width()), static_cast<AF1>(cur_rect.height()),
+			static_cast<AF1>(cur_tex->GetWidth()), static_cast<AF1>(cur_tex->GetHeight()),
+			static_cast<AF1>(stage_w), static_cast<AF1>(stage_h),
+			static_cast<AF1>(static_cast<int>(cur_rect.x)), static_cast<AF1>(static_cast<int>(cur_rect.y)));
+
+		if (!DoEASU(cur_tex, m_easu_stage[i], consts))
+		{
+			Console.Warning("Applying EASU stage {} failed.", i + 1);
 			return false;
 		}
+
+		cur_tex = m_easu_stage[i];
+		cur_rect = GSVector4i(0, 0, stage_w, stage_h);
 	}
 
-	// FsrEasuCon/FsrEasuConOffset escriben bits de float en cada slot (AU1_AF1), asi
-	// que el array viaja como u32 y el shader lo reinterpreta a su vuelta.
-	std::array<u32, NUM_EASU_CONSTANTS> consts;
-	AU1* con0 = &consts[0];
-	AU1* con1 = &consts[4];
-	AU1* con2 = &consts[8];
-	AU1* con3 = &consts[12];
-	FsrEasuConOffset(con0, con1, con2, con3,
-		static_cast<AF1>(src_rect.width()), static_cast<AF1>(src_rect.height()),
-		static_cast<AF1>(src_tex->GetWidth()), static_cast<AF1>(src_tex->GetHeight()),
-		static_cast<AF1>(dst_width), static_cast<AF1>(dst_height),
-		static_cast<AF1>(static_cast<int>(src_rect.x)), static_cast<AF1>(static_cast<int>(src_rect.y)));
-
-	if (!DoEASU(src_tex, m_easu, consts))
-	{
-		Console.Warning("Applying EASU failed.");
-		return false;
-	}
-
-	tex = m_easu;
-	src_rect = GSVector4i(0, 0, dst_width, dst_height);
+	tex = cur_tex;
+	src_rect = cur_rect;
 	src_uv = GSVector4(0.0f, 0.0f, 1.0f, 1.0f);
+	if (stages_out)
+		*stages_out = stages;
 	return true;
 }
 

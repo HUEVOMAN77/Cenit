@@ -807,7 +807,9 @@ struct Pcsx2Config
 					// Vulkan (experimental, apagada por defecto).
 					AsyncTFXPipelineCompile : 1,
 					// Cenit 0.6.25: reconstrucción EASU (FidelityFX FSR1) cuando la
-					// escala interna baja de 1x. Experimental y apagada por defecto.
+					// escala interna baja de 1x. Desde 0.6.26 es autocontenida
+					// (cadena EASU en pasadas <=2x + RCAS propio) y ENCENDIDA por
+					// defecto; sigue siendo experimental y solo afecta a Vulkan.
 					// No va en RestartOptionsAreEqual: se aplica en caliente.
 					EASUReconstruct : 1,
 					DisableFramebufferFetch : 1,
