@@ -21,6 +21,7 @@
 #include "common/HostSys.h"
 #include "common/Path.h"
 #include "common/ScopedGuard.h"
+#include "common/Threading.h"
 #include "common/Timer.h"
 
 #include "imgui.h"
@@ -29,6 +30,11 @@
 #include <limits>
 #include <mutex>
 #include <sstream>
+#include <system_error> // std::system_error del std::thread del worker async
+
+#ifdef __ANDROID__
+#include <sys/resource.h> // setpriority para el hilo de compilación async
+#endif
 
 // Tweakables
 enum : u32
@@ -53,6 +59,14 @@ enum : u32
 	VERTEX_UNIFORM_BUFFER_SIZE = 8 * 1024 * 1024,
 	FRAGMENT_UNIFORM_BUFFER_SIZE = 8 * 1024 * 1024,
 	TEXTURE_BUFFER_SIZE = 64 * 1024 * 1024,
+
+	// Cenit 0.6.24 (async pipelines): techo de la cola del worker. Al desbordar,
+	// GetTFXPipeline degrada al camino síncrono de siempre (pico incluido) antes
+	// de dejar primitivos sin dibujar una eternidad. 64 entradas × 32 B = 2 KB.
+	ASYNC_PIPELINE_QUEUE_CAP = 64,
+	// Cada cuántos pipelines publicados se vuelca el VkPipelineCache a disco (el
+	// vuelco por defecto solo ocurre al cerrar, y una sesión matada perdía todo).
+	ASYNC_PIPELINE_FLUSH_EVERY = 24,
 };
 
 
@@ -2463,6 +2477,12 @@ void GSDeviceVK::Destroy()
 		ExecuteCommandBuffer(false);
 		WaitForGPUIdle();
 	}
+
+	// Cenit 0.6.24 (async): ANTES de tocar cualquier recurso. Después de este
+	// punto se destruyen los pipelines del mapa (DestroyResources) y el
+	// VKShaderCache; con el worker vivo eso sería use-after-free. Stop garantiza
+	// hilo unido y cero compilaciones en vuelo.
+	StopAsyncPipelineCompiler();
 
 	m_swap_chain.reset();
 
@@ -5388,9 +5408,18 @@ void GSDeviceVK::DestroyResources()
 
 VkShaderModule GSDeviceVK::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel)
 {
-	const auto it = m_tfx_vertex_shaders.find(sel.key);
-	if (it != m_tfx_vertex_shaders.end())
-		return it->second;
+	// Cenit 0.6.24 (async): el mapa ya no es de un solo hilo (el worker de
+	// compilación lo comparte), así que la lectura va bajo lock. En un miss, la
+	// construcción del módulo (shaderc, lenta) se hace SIN lock para no frenar al
+	// otro hilo, y al volver a lockear gana quien publicó primero: el perdedor
+	// destruye su duplicado (nunca llegó a un command buffer, es seguro).
+	VkShaderModule built = VK_NULL_HANDLE;
+	{
+		std::lock_guard lock(m_tfx_shader_mutex);
+		const auto it = m_tfx_vertex_shaders.find(sel.key);
+		if (it != m_tfx_vertex_shaders.end())
+			return it->second;
+	}
 
 	std::stringstream ss;
 	AddShaderHeader(ss);
@@ -5403,19 +5432,36 @@ VkShaderModule GSDeviceVK::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel)
 	AddMacro(ss, "VS_PROVOKING_VERTEX_LAST", static_cast<int>(m_features.provoking_vertex_last));
 	ss << m_tfx_source;
 
-	VkShaderModule mod = g_vulkan_shader_cache->GetVertexShader(ss.str());
-	if (mod)
-		Vulkan::SetObjectName(m_device, mod, "TFX Vertex %08X", sel.key);
+	built = g_vulkan_shader_cache->GetVertexShader(ss.str());
+	if (built)
+		Vulkan::SetObjectName(m_device, built, "TFX Vertex %08X", sel.key);
 
-	m_tfx_vertex_shaders.emplace(sel.key, mod);
-	return mod;
+	{
+		std::lock_guard lock(m_tfx_shader_mutex);
+		const auto [it, inserted] = m_tfx_vertex_shaders.emplace(sel.key, built);
+		if (!inserted)
+		{
+			// El otro hilo publicó el mismo módulo primero: el nuestro es un
+			// duplicado que nunca entró en un command buffer, se destruye.
+			if (built != VK_NULL_HANDLE && built != it->second)
+				vkDestroyShaderModule(m_device, built, nullptr);
+			built = it->second;
+		}
+	}
+	return built;
 }
 
 VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector& sel)
 {
-	const auto it = m_tfx_fragment_shaders.find(sel);
-	if (it != m_tfx_fragment_shaders.end())
-		return it->second;
+	// Cenit 0.6.24 (async): igual que el vertex shader — lectura bajo lock,
+	// construcción fuera, y el duplicado de la carrera se destruye.
+	VkShaderModule built = VK_NULL_HANDLE;
+	{
+		std::lock_guard lock(m_tfx_shader_mutex);
+		const auto it = m_tfx_fragment_shaders.find(sel);
+		if (it != m_tfx_fragment_shaders.end())
+			return it->second;
+	}
 
 	std::stringstream ss;
 	AddShaderHeader(ss);
@@ -5484,12 +5530,23 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
 	AddMacro(ss, "PS_ROV_DEPTH", static_cast<u32>(sel.rov_depth));
 	ss << m_tfx_source;
 
-	VkShaderModule mod = g_vulkan_shader_cache->GetFragmentShader(ss.str());
-	if (mod)
-		Vulkan::SetObjectName(m_device, mod, "TFX Fragment %016" PRIX64 "_%016" PRIX64, sel.key_hi, sel.key_lo);
+	built = g_vulkan_shader_cache->GetFragmentShader(ss.str());
+	if (built)
+		Vulkan::SetObjectName(m_device, built, "TFX Fragment %016" PRIX64 "_%016" PRIX64, sel.key_hi, sel.key_lo);
 
-	m_tfx_fragment_shaders.emplace(sel, mod);
-	return mod;
+	{
+		std::lock_guard lock(m_tfx_shader_mutex);
+		const auto [it, inserted] = m_tfx_fragment_shaders.emplace(sel, built);
+		if (!inserted)
+		{
+			// Carrera con el worker: gana el publicado primero, el duplicado se
+			// destruye (nunca estuvo en un command buffer).
+			if (built != VK_NULL_HANDLE && built != it->second)
+				vkDestroyShaderModule(m_device, built, nullptr);
+			built = it->second;
+		}
+	}
+	return built;
 }
 
 VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
@@ -5609,7 +5666,15 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
 	if (m_features.framebuffer_fetch && p.IsRTFeedbackLoop())
 		gpb.AddBlendFlags(VK_PIPELINE_COLOR_BLEND_STATE_CREATE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_BIT_EXT);
 
-	VkPipeline pipeline = gpb.Create(m_device, g_vulkan_shader_cache->GetPipelineCache(true));
+	// Cenit 0.6.24 (async): con el worker compartiendo el VkPipelineCache, la spec
+	// pide sincronización externa entre usuarios del MISMO objeto (Vulkan §3.6.1),
+	// y el worker además vuelca el caché periódicamente. Este mutex cubre ambos;
+	// sin worker activo es un lock no competido, coste despreciable.
+	VkPipeline pipeline;
+	{
+		std::lock_guard compile_lock(m_pipeline_compile_mutex);
+		pipeline = gpb.Create(m_device, g_vulkan_shader_cache->GetPipelineCache(true));
+	}
 	if (pipeline)
 	{
 		Vulkan::SetObjectName(
@@ -5621,13 +5686,311 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
 
 VkPipeline GSDeviceVK::GetTFXPipeline(const PipelineSelector& p)
 {
-	const auto it = m_tfx_pipelines.find(p);
-	if (it != m_tfx_pipelines.end())
-		return it->second;
+	{
+		std::lock_guard lock(m_tfx_pipeline_mutex);
+		const auto it = m_tfx_pipelines.find(p);
+		if (it != m_tfx_pipelines.end())
+			return it->second;
+	}
 
-	VkPipeline pipeline = CreateTFXPipeline(p);
-	m_tfx_pipelines.emplace(p, pipeline);
-	return pipeline;
+	// Cenit 0.6.24 — compilación asíncrona (experimental, OFF por defecto).
+	// Con la bandera apagada el comportamiento es EXACTAMENTE el de siempre:
+	// compilar aquí, en el hilo de dibujo.
+	if (!GSConfig.AsyncTFXPipelineCompile)
+	{
+		// Si el usuario apagó la bandera con worker vivo, se junta aquí. Stop se
+		// llama siempre: con worker inactivo es un lock no competido y return, y
+		// así evitamos leer m_async_active sin sincronizar.
+		StopAsyncPipelineCompiler();
+
+		// Se levanta el enclavamiento de fallo: apagar y volver a encender la
+		// bandera es la forma explícita del usuario de reintentar (ver abajo).
+		m_async_start_failed = false;
+
+		return PublishTFXPipeline(p, CreateTFXPipeline(p));
+	}
+
+	std::unique_lock lock(m_async_mutex);
+	if (m_async_start_failed)
+	{
+		// Ya se intentó crear el hilo esta vez que la bandera está ON y no se pudo
+		// (presión de threads/memoria). Reintentar en CADA miss sería un Error en
+		// el log por primitivo, así que se queda en camino síncrono hasta que la
+		// bandera se mueva.
+		lock.unlock();
+		return PublishTFXPipeline(p, CreateTFXPipeline(p));
+	}
+
+	if (!m_async_active && !StartAsyncPipelineCompiler())
+	{
+		// Sin worker (no se pudo crear el hilo). Se paga el camino de siempre en
+		// vez de encolar al vacío — encolar sin quien saque de la cola dejaría el
+		// primitivo sin dibujar para siempre.
+		m_async_start_failed = true;
+		lock.unlock();
+		return PublishTFXPipeline(p, CreateTFXPipeline(p));
+	}
+
+	if (m_async_queue.size() + m_async_inflight >= ASYNC_PIPELINE_QUEUE_CAP)
+	{
+		// Cola desbordada: el worker no llega. Se degrada al camino síncrono de
+		// siempre — pico de frame incluido, pero el juego no se queda sin este
+		// primitivo durante una eternidad. (La cola no puede crecer sin techo:
+		// cada entrada son 32 B + duplicados potenciales de shaderc.)
+		m_async_dropped.fetch_add(1, std::memory_order_relaxed);
+		lock.unlock();
+
+		return PublishTFXPipeline(p, CreateTFXPipeline(p));
+	}
+
+	if (m_async_pending.find(p) == m_async_pending.end())
+	{
+		m_async_pending.insert(p);
+		m_async_queue.push_back(p);
+		m_async_enqueued.fetch_add(1, std::memory_order_relaxed);
+		m_async_cv.notify_one();
+	}
+	// Aún no está: este primitivo se omite este frame (BindDrawPipeline devuelve
+	// false con VK_NULL_HANDLE, el mismo camino que ya usa el backend cuando la
+	// compilación falla). Qué se ve en pantalla: ese draw concreto no pinta sobre
+	// el contenido YA presente en el framebuffer — ni borrado, ni color equivocado,
+	// ni geometría sustituta. Un destello de uno o dos frames de UN solo efecto
+	// (sombras, lluvia) mientras el worker publica, deliberado en vez de dibujar
+	// un pipeline equivocado.
+	return VK_NULL_HANDLE;
+}
+
+// --- Cenit 0.6.24: worker de compilación de pipelines TFX ------------------------
+// Una sola verdad sobre el bloqueo: vkCreateGraphicsPipelines (VKBuilders.cpp:286)
+// y shaderc corrían EN el hilo GS en el miss de BindDrawPipeline. Aquí se mudan a
+// un hilo propio; el hilo GS solo encola y mira mapas.
+
+void GSDeviceVK::TakeAsyncWorkLocked(PipelineSelector* sel)
+{
+	// Preferencia por vertex shader: un mismo primitivo suele pedir muchos PS
+	// distintos (mezclas, máscaras) con el VS idéntico. Al completarlos de una, su
+	// draw-skip queda concentrado en pocos frames consecutivos en vez de
+	// dispersarse uno por frame.
+	if (m_async_has_last_vs)
+	{
+		for (auto it = m_async_queue.begin(); it != m_async_queue.end(); ++it)
+		{
+			if (it->vs.key == m_async_last_vs_key)
+			{
+				*sel = *it;
+				m_async_queue.erase(it);
+				m_async_inflight++;
+				return;
+			}
+		}
+	}
+
+	*sel = m_async_queue.front();
+	m_async_queue.pop_front();
+	m_async_inflight++;
+}
+
+VkPipeline GSDeviceVK::PublishTFXPipeline(const PipelineSelector& sel, VkPipeline pipeline)
+{
+	// Se publica con el lock del mapa tomado SOLO (sin sostener ningún otro mutex)
+	// y, si hace falta destruir un handle perdedor, se hace DESPUÉS de soltarlo,
+	// bajo el mutex de compilación. Así ningún hilo anida dos de estos locks.
+	VkPipeline loser = VK_NULL_HANDLE;
+	VkPipeline effective = pipeline;
+	{
+		std::lock_guard plock(m_tfx_pipeline_mutex);
+		const auto [it, inserted] = m_tfx_pipelines.emplace(sel, pipeline);
+		if (!inserted)
+		{
+			if (it->second == VK_NULL_HANDLE && pipeline != VK_NULL_HANDLE)
+			{
+				// El otro camino había publicado un fallo; el nuestro es bueno:
+				// se sustituye en el mapa, no se tira.
+				it->second = pipeline;
+			}
+			else if (pipeline != VK_NULL_HANDLE && pipeline != it->second)
+			{
+				// Perdedor de una carrera duplicada (worker + fallback síncrono
+				// con el mismo selector). El handle sobrante nunca entró en un
+				// command buffer, así que es seguro destruirlo.
+				loser = pipeline;
+			}
+			effective = it->second;
+		}
+	}
+
+	if (loser != VK_NULL_HANDLE)
+	{
+		std::lock_guard compile_lock(m_pipeline_compile_mutex);
+		vkDestroyPipeline(m_device, loser, nullptr);
+	}
+	return effective;
+}
+
+void GSDeviceVK::PublishAsyncPipeline(const PipelineSelector& sel, VkPipeline pipeline)
+{
+	PublishTFXPipeline(sel, pipeline);
+
+	std::lock_guard lock(m_async_mutex);
+	m_async_pending.erase(sel);
+	m_async_inflight--;
+	m_async_compiled.fetch_add(1, std::memory_order_relaxed);
+	m_async_last_vs_key = sel.vs.key;
+	m_async_has_last_vs = true;
+	m_async_cv.notify_all(); // Stop espera a que inflight vuelva a 0
+}
+
+void GSDeviceVK::AsyncPipelineCompilerThread()
+{
+	Threading::SetNameOfCurrentThread("VKPipeCompile");
+
+#ifdef __ANDROID__
+	// Cordura con el teléfono: el worker no debe ganarle CPU al hilo de dibujo.
+	// nice() desde una app normalmente no tiene permiso y falla en silencio — el
+	// intento sale caro una vez y no cambia nada si falla (misma lección que el
+	// lado MTVU). La protección real es otra: este hilo duerme en el cv, así que
+	// no consume cuando no hay compilaciones pendientes.
+	setpriority(PRIO_PROCESS, 0, 5);
+#endif
+
+	u32 since_flush = 0;
+
+	for (;;)
+	{
+		PipelineSelector sel;
+
+		{
+			std::unique_lock lock(m_async_mutex);
+			m_async_cv.wait(lock, [this]() {
+				return m_async_stop_requested || !m_async_queue.empty();
+			});
+
+			if (m_async_stop_requested)
+			{
+				// Parar = descartar, no drenar: el join en Destroy (o en el
+				// apagado de la bandera) no puede esperar a medio centenar de
+				// compilaciones que ya no hacen falta. Lo descartado vuelve a
+				// pedirse la próxima vez que aparezca el primitivo (limpiar
+				// pending hace que se re-encole).
+				m_async_queue.clear();
+				m_async_pending.clear();
+				break;
+			}
+
+			// El predicate de arriba garantiza cola no vacía.
+			TakeAsyncWorkLocked(&sel);
+		}
+
+		// Fuera de TODO lock: shaderc + vkCreateGraphicsPipelines. Si la
+		// compilación falla se publica VK_NULL_HANDLE — mismo resultado que hoy
+		// (el primitivo se omite), con la diferencia de que no se pagó un pico.
+		const VkPipeline pipeline = CreateTFXPipeline(sel);
+		PublishAsyncPipeline(sel, pipeline);
+		since_flush++;
+
+		// El VkPipelineCache de disco solo se escribía al cerrar el proceso; una
+		// sesión matada (app al fondo, reinicio) perdía TODAS las compilaciones
+		// nuevas — una de las razones por las que God of War recompilaba en cada
+		// visita. Vuelco periódico cada N pipelines, bajo el mutex de compilación
+		// (FlushPipelineCache lee el caché; otro hilo podría estar escribiéndolo).
+		// El contador se limpia SIEMPRE, no solo cuando el vuelco escribe: devolver
+		// false también significa "no hay nada nuevo que guardar" (o caché de disco
+		// desactivada), y reintentar en cada publicación sería preguntar dos
+		// vkGetPipelineCacheData por pipeline en ese caso.
+		if (since_flush >= ASYNC_PIPELINE_FLUSH_EVERY)
+		{
+			since_flush = 0;
+			std::lock_guard compile_lock(m_pipeline_compile_mutex);
+			g_vulkan_shader_cache->FlushPipelineCache();
+		}
+	}
+}
+
+bool GSDeviceVK::StartAsyncPipelineCompiler()
+{
+	// Solo desde el hilo GS, con m_async_mutex tomado.
+	// Cero de contadores en cada arranque: si el usuario apaga y vuelve a encender la
+	// bandera con la VM viva, el resumen del paro describe SOLO ese tramo, no la suma
+	// de los dos. (Sin esto, "compiled ~= enqueued" dejaría de cerrar.)
+	m_async_compiled.store(0, std::memory_order_relaxed);
+	m_async_enqueued.store(0, std::memory_order_relaxed);
+	m_async_dropped.store(0, std::memory_order_relaxed);
+	m_async_last_vs_key = 0;
+	m_async_has_last_vs = false;
+
+	// Crear el hilo puede fallar (std::system_error con EAGAIN si el sistema ya no da
+	// más threads). Eso NO puede tirar el juego: se reporta y la bandera queda como
+	// si estuviera apagada — GetTFXPipeline compila en el hilo GS, con sus picos, y
+	// lo intenta otra vez en el siguiente miss.
+	std::thread thread;
+	try
+	{
+		thread = std::thread(&GSDeviceVK::AsyncPipelineCompilerThread, this);
+	}
+	catch (const std::system_error& ex)
+	{
+		Console.Error("VK async pipeline compiler: no se pudo crear el hilo (%s); "
+		              "se compila de forma síncrona",
+			ex.what());
+		return false;
+	}
+
+	m_async_stop_requested = false;
+	m_async_active = true;
+	m_async_thread = std::move(thread);
+	Console.WriteLn("VK async pipeline compiler: worker iniciado (experimental)");
+	return true;
+}
+
+void GSDeviceVK::StopAsyncPipelineCompiler()
+{
+	// Solo desde el hilo GS, SIN ningún lock tomado por el llamante: el join tiene
+	// que poder adquirir los mutex del worker (lo hace: el worker solo los sostiene
+	// en secciones cortas o duerme en el cv).
+	{
+		std::lock_guard lock(m_async_mutex);
+		if (!m_async_active)
+			return;
+		m_async_stop_requested = true;
+		m_async_cv.notify_all();
+	}
+	if (m_async_thread.joinable())
+		m_async_thread.join();
+
+	// El worker puede haberse ido con una compilación todavía en vuelo (parar =
+	// descartar cola, no interrumpir vkCreateGraphicsPipelines). Esperar aquí es
+	// lo que garantiza que NADIE compila ya cuando Destroy pasa a
+	// DestroyResources/VKShaderCache::Destroy. Publicar notifica; el predicate
+	// cubre la carrera de un notify perdido.
+	{
+		std::unique_lock lock(m_async_mutex);
+		m_async_cv.wait(lock, [this]() { return m_async_inflight == 0; });
+	}
+
+	// Último vuelco: lo compilado en el dreno y en la sesión no se pierde si el
+	// proceso muere justo después. (FlushPipelineCache ya mira la bandera dirty —
+	// sin cambios, no escribe.) Solo cuando la caché global sigue viva: Stop se
+	// llama desde Destroy ANTES de VKShaderCache::Destroy, pero también por un
+	// apagado de bandera en plena sesión, donde g_vulkan_shader_cache existe.
+	if (g_vulkan_shader_cache)
+	{
+		std::lock_guard compile_lock(m_pipeline_compile_mutex);
+		g_vulkan_shader_cache->FlushPipelineCache();
+	}
+
+	std::lock_guard lock(m_async_mutex);
+	// Resumen para medir (regla de la casa: ninguna mejora se afirma sin número).
+	// GetExtendedStats() no tiene llamador en este port de Android, así que la
+	// evidencia viaja por el emulog: enqueued = primitivos distintos pedidos al
+	// worker; compiled = pipelines publicados (buenos o fallidos); fallback =
+	// desbordes de cola que se compilaron en el hilo GS (pico pagado de todos
+	// modos). compiled ~= enqueued y fallback == 0 es el funcionamiento limpio.
+	Console.WriteLn("VK async pipeline compiler: parado (enqueued=%u compiled=%u fallback=%u)",
+		m_async_enqueued.load(std::memory_order_relaxed),
+		m_async_compiled.load(std::memory_order_relaxed),
+		m_async_dropped.load(std::memory_order_relaxed));
+	m_async_active = false;
+	m_async_stop_requested = false;
 }
 
 bool GSDeviceVK::BindDrawPipeline(const PipelineSelector& p)
@@ -6513,6 +6876,12 @@ GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config)
 	pipe.ps.blend_a = pipe.ps.blend_b = pipe.ps.blend_c = pipe.ps.blend_d = false;
 	pipe.ps.no_color = false;
 	pipe.ps.no_color1 = true;
+	// Cenit 0.6.24 (async): este es el UNICO de los cuatro sitios donde omitir el
+	// draw no deja "un primitivo de menos" sino información de oclusión rancia en
+	// la imagen primID — el pase de alpha de ESTE frame puede pintar de más o de
+	// menos. Se acepta igual: forzar aquí la compilación síncrona sería devolver el
+	// pico justo en el efecto que se está estrenando, y el error dura lo mismo que
+	// el worker en publicar (un frame, auto-corregido en el siguiente).
 	if (BindDrawPipeline(pipe))
 		Draw(config);
 

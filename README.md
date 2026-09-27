@@ -3,7 +3,7 @@
 [![Licencia: GPL v3](https://img.shields.io/badge/Licencia-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.en.html)
 [![Android](https://img.shields.io/badge/Android-8.0%20o%20superior-green.svg)](https://developer.android.com/)
 [![ARM64](https://img.shields.io/badge/Procesador-arm64--v8a-orange.svg)](https://developer.arm.com/)
-[![Última versión](https://img.shields.io/badge/versión%20actual-0.6.23-informational)](https://github.com/HUEVOMAN77/Cenit/releases/tag/base-0.6.23)
+[![Última versión](https://img.shields.io/badge/versión%20actual-0.6.24-informational)](https://github.com/HUEVOMAN77/Cenit/releases/tag/base-0.6.24)
 [![Driver](https://img.shields.io/badge/driver%20incluido-Turnip%2025.3.6-yellow)](https://github.com/HUEVOMAN77/Cenit/releases)
 
 **Cenit es mi emulador de PlayStation 2 para Android.** Lo diseño, lo programo, lo compilo y lo mantengo yo solo: [HUEVOMAN77](https://github.com/HUEVOMAN77). Empezó como bifurcación de [PSX2](https://github.com/izzy2lost/PSX2) (el adaptador Android de PCSX2 2.7), pero eso fue el punto de partida, no el proyecto: hoy Cenit es propiedad mía y todo lo que lo define —el motor de rendimiento adaptativo, los ajustes por juego, mi driver Vulkan propio, el guardarraya, la interfaz, la instrumentación del recompilador VU— es trabajo mío, pieza por pieza y en público. Cada decisión de este repositorio se toma aquí.
@@ -12,7 +12,7 @@ La meta es muy concreta: **que los juegos de PS2 se muevan fluidos en celulares 
 
 No es una copia con otro logo. Cada versión suma mejoras de rendimiento y de uso que no existen ni en PSX2 ni en PCSX2, y —salvo que yo mismo diga lo contrario— medidas sobre hardware real antes de publicarse.
 
-> **Versión actual: 0.6.23.** Mantengo una línea pública y continua (0.6.x), con su release, su verificación en teléfono real y mi registro de qué cambió y qué no. En [Historial versión por versión](#historial-versión-por-versión) está todo el camino recorrido, sin adornos.
+> **Versión actual: 0.6.24.** Mantengo una línea pública y continua (0.6.x), con su release, su verificación en teléfono real y mi registro de qué cambió y qué no. En [Historial versión por versión](#historial-versión-por-versión) está todo el camino recorrido, sin adornos.
 
 ---
 
@@ -20,8 +20,8 @@ No es una copia con otro logo. Cada versión suma mejoras de rendimiento y de us
 
 | | |
 |---|---|
-| **Versión actual** | 0.6.23 |
-| **Descarga** | [Lanzamientos](https://github.com/HUEVOMAN77/Cenit/releases) → `Cenit-0.6.23.apk` |
+| **Versión actual** | 0.6.24 |
+| **Descarga** | [Lanzamientos](https://github.com/HUEVOMAN77/Cenit/releases) → `Cenit-0.6.24.apk` |
 | **Driver incluido** | `Cenit-Turnip-25.3.6` (compilado por mi CI) |
 | **Requiere** | Android 8 o superior, procesador de 64 bits y tu propia BIOS de PS2 |
 | **No incluye** | BIOS, juegos ni ningún archivo con derechos de autor |
@@ -120,7 +120,7 @@ Lo digo claro: ningún truco hace correr *God of War* a 60 cuadros en un teléfo
 
 ## Cómo empezar
 
-1. Descarga `Cenit-0.6.23.apk` desde [Lanzamientos](https://github.com/HUEVOMAN77/Cenit/releases) e instálala (Android pedirá permitir apps de esta fuente la primera vez).
+1. Descarga `Cenit-0.6.24.apk` desde [Lanzamientos](https://github.com/HUEVOMAN77/Cenit/releases) e instálala (Android pedirá permitir apps de esta fuente la primera vez).
 2. Abre la app y sigue el asistente: coloca la **BIOS extraída de tu propia PS2** y elige la carpeta de tus juegos.
 3. Toca un juego de la biblioteca y listo. Con una partida abierta, el panel **Ajustes → Rendimiento** muestra todos los mandos de Cenit.
 4. **Si tu teléfono es Snapdragon/Adreno**: descarga también `Cenit-Turnip-25.3.6-*.zip` de la misma release, impórtalo en **Ajustes → Controlador gráfico personalizado** (no lo descomprimas), toca «Forzar otra vez el driver seleccionado» y juega normal. La segunda sesión de cada juego ya no recompila shaders; el diálogo del driver va llenando el medidor solo.
@@ -203,6 +203,12 @@ Todo mi camino, incluido lo que estuvo mal y corregí. Cada fila tiene su releas
 | Versión | Qué sumó |
 |---|---|
 | **0.6.23** | **El congelamiento de God of War tenía causa en Cenit, y ya está arreglada.** Con la evidencia que empezó a traer el reporte de 0.6.22 lo confirmé: el emulador **se cargaba su propio disco**. Cuando el juego ya estaba corriendo, cualquier consulta de datos del juego (identificador, CRC, ajustes por juego) **reabría y cerraba el ISO que el juego tenía abierto**, porque el lector de disco del núcleo es un único objeto compartido. A partir de ahí toda lectura del juego fallaba (`Block index is past the end of file!`) y el juego se quedaba esperando un dato que nunca llegaba: eso es la congelación. Lo mismo explica varios «se sale solito». El arreglo: **nunca tocar el disco con el juego delante** — la identidad del juego en marcha ya está en memoria, y para los demás juegos se usa solo la caché de la biblioteca. **Y los mandos en pantalla ahora se apartan solos:** si dejas de tocar la pantalla 10 segundos (por ejemplo porque jugabas con mando Bluetooth), desaparecen para dejar ver solo el juego; al volver a tocar, reaparecen. Con un dedo puesto sobre el joystick no se ocultan, y el botón de pausa y el de menú se quedan siempre a la mano. |
+
+### Los shaders dejan de frenar el cuadro: compilación en segundo plano (0.6.24)
+
+| Versión | Qué sumó |
+|---|---|
+| **0.6.24** | **La compilación de shaders de Vulkan se puede mover a un hilo de fondo. Experimental y APAGADA por defecto.** Lo medido antes de tocar nada: en la escena de lluvia de God of War el cuadro base venía en 16-17 ms y aparecían dos picos de ~21 ms al estrenarse efectos; la causa es que el emulador construye ahí el pipeline gráfico completo **en el mismo hilo que dibuja**. Con el interruptor nuevo («Compilar shaders en segundo plano», en Ajustes), ese trabajo se manda a un hilo propio y lo que se paga es distinto: el efecto que aún no tiene pipeline **parpadea uno o dos frames** en lugar de frenar todo el cuadro. Es un intercambio honesto y por eso no se enciende solo, y su beneficio real hay que confirmarlo en el teléfono comparando las dos visitas a la misma escena con el interruptor apagado y encendido. Acompañan dos cosas que hacen falta para que valga la pena: **la caché de pipelines se vuelca a disco cada 24 compilaciones** (antes solo se guardaba al cerrar limpio, así que una sesión matada o un reinicio tiraban todo el trabajo y el juego volvía a cortar en la misma escena), y **un tope de cola con respaldo**: si el hilo de fondo no da abasto, ese shader se compila en el sitio, con su pico, antes de dejar algo sin dibujar. Si crear el hilo no es posible, Cenit sigue compilando como siempre y lo avisa en el registro, que además deja los números para que esto se pueda medir y no creerse: `VK async pipeline compiler: parado (enqueued=… compiled=… fallback=…)`. Solo afecta a Vulkan, se activa y se quita sin reiniciar el emulador, y en un juego ya conocido de memoria los dos caminos deben verse iguales en pantalla. |
 
 ---
 

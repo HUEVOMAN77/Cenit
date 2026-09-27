@@ -2258,6 +2258,11 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         // misma razón que la sonda: el valor vive solo en la preferencia, y el
         // toggle nativo es lo que sincroniza el INI antes de arrancar el VM.
         NativeApp.setVUSuperblock(prefs.getBoolean("vu_superblock", false));
+        // Cenit 0.6.24: compilación asíncrona de pipelines TFX (Vulkan).
+        // EXPERIMENTAL y apagada por defecto; ningún perfil de hardware la
+        // toca, así que la preferencia guardada es la única fuente y se
+        // re-aplica aquí igual que las banderas de arriba.
+        NativeApp.setAsyncShaderCompile(prefs.getBoolean("async_shader_compile", false));
         if (mDynRes != null) mDynRes.reset();
         AudioOutputPreference.apply(this);
     }

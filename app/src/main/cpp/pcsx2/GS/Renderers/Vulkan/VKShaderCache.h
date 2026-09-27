@@ -7,8 +7,10 @@
 
 #include "common/HashCombine.h"
 
+#include <atomic>
 #include <cstdio>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -86,8 +88,20 @@ private:
 	void ClosePipelineCache();
 
 	std::optional<SPIRVCodeVector> GetShaderSPV(u32 type, std::string_view shader_code);
-	std::optional<SPIRVCodeVector> CompileAndAddShaderSPV(const CacheIndexKey& key, std::string_view shader_code);
+	std::optional<SPIRVCodeVector> CompileShaderSPV(const CacheIndexKey& key, std::string_view shader_code);
+	void AddShaderSPV(const CacheIndexKey& key, const SPIRVCodeVector& spv);
 	VkShaderModule GetShaderModule(u32 type, std::string_view shader_code);
+
+	/// Cenit 0.6.24 (async): instantánea de GSConfig.UseDebugDevice tomada en Open()
+	/// (hilo GS, con la caché ya creada). El worker de pipelines ya NO lee GSConfig:
+	/// GSUpdateConfig reasigna el struct entero (GS.cpp:911) en el hilo GS, y como
+	/// UseDebugDevice es un bit de un bitfield compartido con banderas que sí cambian
+	/// en caliente (la nuestra, AsyncTFXPipelineCompile), esa lectura concurrente era
+	/// una carrera real sobre la misma palabra. El valor solo puede cambiar con
+	/// reinicio del GS — UseDebugDevice está en RestartOptionsAreEqual — y ese camino
+	/// pasa por Destroy -> StopAsyncPipelineCompiler -> Open otra vez, así que la
+	/// instantánea nunca se queda desfasada.
+	bool m_debug_device = false;
 
 	std::FILE* m_index_file = nullptr;
 	std::FILE* m_blob_file = nullptr;
@@ -95,8 +109,15 @@ private:
 
 	CacheIndex m_index;
 
+	/// Cenit 0.6.24 (async): desde que el worker de compilación de pipelines llama
+	/// a GetVertexShader/GetFragmentShader en paralelo al hilo de dibujo, m_index y
+	/// las dos FILE* dejan de ser de un solo hilo. m_lock protege el par
+	/// (m_index, ficheros) — NUNCA se toma mientras se compila con shaderc, que es
+	/// lo lento y va fuera del lock.
+	std::mutex m_lock;
+
 	VkPipelineCache m_pipeline_cache = VK_NULL_HANDLE;
-	bool m_pipeline_cache_dirty = false;
+	std::atomic<bool> m_pipeline_cache_dirty{false};
 };
 
 extern std::unique_ptr<VKShaderCache> g_vulkan_shader_cache;

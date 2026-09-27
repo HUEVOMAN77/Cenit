@@ -294,6 +294,18 @@ public final class SettingsScreenController {
         toggle(R.id.set_sw_vu_superblock, "vu_superblock", false,
                 checked -> NativeApp.setVUSuperblockAsync(checked));
 
+        // Cenit 0.6.24: compilación asíncrona de pipelines TFX en Vulkan. El
+        // tirón que quita no es del recompiler de CPU: vkCreateGraphicsPipelines
+        // se estaba ejecutando en el hilo de dibujo cada vez que el juego
+        // estrenaba un efecto, y ese bloqueo es el pico de frame time medido.
+        // Encendido, el trabajo se va a un hilo de fondo y lo que se paga es un
+        // parpadeo de uno o dos frames en el primitivo que aún no tiene
+        // pipeline, en vez de parar todo el cuadro. Default apagado
+        // (experimental). No está entre las opciones que reinician el
+        // dispositivo, así que ApplySettings la aplica con la VM viva.
+        toggle(R.id.set_sw_async_shaders, "async_shader_compile", false,
+                checked -> NativeApp.setAsyncShaderCompileAsync(checked));
+
         // La posición del spinner ES el valor de la clave (ver arrays.xml). Como
         // con medio píxel y cuotas: el primer disparo del adaptador se ADOPTA sin
         // escribir, para no guardar "Óptima" en el teléfono de todo el mundo.
@@ -605,6 +617,7 @@ public final class SettingsScreenController {
         check(R.id.set_sw_mtvu, prefs.getBoolean("mtvu", NativeApp.defaultMTVU()));
         check(R.id.set_sw_vu_probe, prefs.getBoolean("vu_trace_probe", false));
         check(R.id.set_sw_vu_superblock, prefs.getBoolean("vu_superblock", false));
+        check(R.id.set_sw_async_shaders, prefs.getBoolean("async_shader_compile", false));
         setSpinner(R.id.set_sp_framequeue,
                 prefs.getInt("frame_queue", NativeApp.defaultFrameLatencyQueue()));
         setSpinner(R.id.set_sp_preload,

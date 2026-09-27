@@ -312,6 +312,17 @@ public class NativeApp {
         if (hasNoNativeBinary) return false;
         try { return getVUSuperblockEffective(); } catch (Throwable t) { return false; }
     }
+    // --- Cenit 0.6.24: compilación asíncrona de pipelines TFX (Vulkan) --------
+    // EXPERIMENTAL y APAGADA por defecto. Sin esta bandera, cada pipeline nuevo
+    // se compila en el hilo de dibujo (vkCreateGraphicsPipelines) y eso es el
+    // pico de frame time al aparecer efectos/shaders inéditos. Con ON, el
+    // trabajo se manda a un hilo de fondo y el primitivo afectado se omite uno
+    // o dos frames (parpadeo pequeño), en vez de frenar todo el frame. Se
+    // aplica sobre la VM viva, sin reiniciar el emulador.
+    public static native void setAsyncShaderCompile(boolean enabled);
+    public static void setAsyncShaderCompileAsync(boolean enabled) {
+        runNativeSettingAsync("setAsyncShaderCompile", () -> setAsyncShaderCompile(enabled));
+    }
     public static native String getLogDirectory();
     /** Carpeta de logs según el núcleo, o null si el binario nativo no está. */
     public static String safeGetLogDirectory() {

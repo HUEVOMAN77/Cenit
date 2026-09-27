@@ -803,6 +803,9 @@ struct Pcsx2Config
 					UseDebugBlend : 1,
 					UseBlitSwapChain : 1,
 					DisableShaderCache : 1,
+					// Cenit 0.6.24: compilación asíncrona de pipelines TFX en
+					// Vulkan (experimental, apagada por defecto).
+					AsyncTFXPipelineCompile : 1,
 					DisableFramebufferFetch : 1,
 					DisablePS2DepthQuantization : 1,
 					DisableVertexShaderExpand : 1,

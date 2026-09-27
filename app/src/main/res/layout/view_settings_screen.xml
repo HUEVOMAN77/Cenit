@@ -347,6 +347,15 @@
                                 style="@style/Cenit.Settings.Caption"
                                 android:text="Fusiona bloques VU1 calientes para saltarse la barrera de bloque. Apagado por defecto: puede cambiar el resultado gráfico en juegos concretos y se revierte solo si diverge." />
 
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/set_sw_async_shaders"
+                                style="@style/Cenit.Settings.Switch"
+                                android:text="Compilar shaders en segundo plano (experimental)" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Cuando el juego estrena un efecto nuevo, el gráfico se detiene un instante a construirlo y se nota como un tirón. Encendido, esa construcción pasa a un hilo de fondo y lo único que se ve es un parpadeo breve en el detalle que estaba apareciendo. Apagado por defecto: es una función experimental, solo se nota en Vulkan, y se activa o desactiva sin reiniciar el emulador." />
+
                             <TextView
                                 style="@style/Cenit.Settings.FieldLabel"
                                 android:text="Cola de cuadros" />

@@ -15,12 +15,14 @@
 #include <array>
 #include <atomic>
 #include <condition_variable>
+#include <deque>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 class VKSwapChain;
@@ -480,6 +482,71 @@ private:
 		m_tfx_fragment_shaders;
 	std::unordered_map<PipelineSelector, VkPipeline, PipelineSelectorHash> m_tfx_pipelines;
 
+	// --- Cenit 0.6.24: compilación asíncrona de pipelines TFX (experimental) -----
+	// El camino de siempre compila el pipeline EN el hilo de dibujo
+	// (CreateTFXPipeline -> GraphicsPipelineBuilder::Create ->
+	// vkCreateGraphicsPipelines, VKBuilders.cpp:286), y eso es
+	// exactamente el pico de frame time que se midió en God of War. Con la bandera
+	// AsyncTFXPipelineCompile ON, un selector desconocido se encola a un hilo de
+	// trabajo que compila (shaderc + driver) y publica el VkPipeline en
+	// m_tfx_pipelines; mientras no existe, ese primitivo se omite (BindDrawPipeline
+	// devuelve false, el mismo camino que ya toma cuando la compilación falla).
+	// Reglas del worker:
+	//  - Solo COMPILA y publica: no toca command buffers, texturas, descriptors ni
+	//    estado de draw; todo eso queda en el hilo GS.
+	//  - VkDevice/creación de objetos: la spec solo exige sincronización externa
+	//    cuando dos hilos usan la MISMA instancia de objeto (Vulkan §3.6), y aquí
+	//    cada hilo crea sus propios módulos/pipelines. Lo que SÍ serializamos
+	//    nosotros: el índice+FILE* de VKShaderCache (mutex propio ahí dentro), la
+	//    compilación shaderc (un mutex en VKShaderCache.cpp: su garantía de
+	//    threading NO cubre dos llamadas concurrentes sobre el mismo
+	//    shaderc_compiler_t), el VkPipelineCache compartido con
+	//    vkCreateGraphicsPipelines + su flush, y estos tres mapas, que hoy no
+	//    tienen ningún lock porque todo vivía en el hilo GS.
+	//  - Locks: cada mutex se toma SIEMPRE solo, nunca anidado con otro de estos.
+	//    No hay un "orden" que respetar porque no hay secciones críticas dobles:
+	//    cuando un camino necesita dos efectos (publicar en el mapa y luego
+	//    destruir el handle perdedor, o hacer erase de pending y luego notificar),
+	//    los bloques van encadenados, con el lock liberado en medio. El worker
+	//    tampoco sostiene ninguno durante CreateTFXPipeline. Sin anidamiento no
+	//    existe ciclo de deadlock, ni siquiera en teoría.
+	//  - Ciclo de vida: el hilo se levanta y se junta SOLO en el hilo GS
+	//    (GetTFXPipeline / StopAsyncPipelineCompiler desde Destroy, antes de
+	//    DestroyResources y VKShaderCache::Destroy), nunca con el VkDevice muerto.
+	//    Stop = pedir paro + notify + join + esperar a inflight==0, de modo que al
+	//    volver de Stop no queda NINGUNA compilación en vuelo.
+	std::mutex m_tfx_shader_mutex; // m_tfx_vertex_shaders + m_tfx_fragment_shaders
+	std::mutex m_tfx_pipeline_mutex; // m_tfx_pipelines
+	// Serializa vkCreateGraphicsPipelines + flush del VkPipelineCache entre el
+	// worker y el fallback síncrono del hilo GS: aunque el driver suele poner sus
+	// propios locks, la spec pide sincronización externa al usar el mismo
+	// VkPipelineCache desde dos hilos, y el flush escribe el archivo de disco.
+	std::mutex m_pipeline_compile_mutex;
+	std::mutex m_async_mutex;
+	std::condition_variable m_async_cv;
+	std::deque<PipelineSelector> m_async_queue;
+	std::unordered_set<PipelineSelector, PipelineSelectorHash> m_async_pending;
+	std::thread m_async_thread;
+	bool m_async_active = false;
+	bool m_async_stop_requested = false;
+	/// true tras un StartAsyncPipelineCompiler() que no pudo crear el hilo. La
+	/// borra solo el ciclo OFF->ON de la bandera (GetTFXPipeline, camino
+	/// síncrono). Solo el hilo GS la toca.
+	bool m_async_start_failed = false;
+	/// Selectores sacados de la cola y aún no publicados (lo que el worker está
+	/// compilando ahora mismo). Solo se toca con m_async_mutex tomado.
+	u32 m_async_inflight = 0;
+	// Acumulados de la sesión, para el resumen que se escribe al parar el worker
+	// (GetExtendedStats no tiene llamador en este port, así que la evidencia viaja
+	// por el emulog). Atómicos relajados a propósito: son tendencia, no contabilidad.
+	std::atomic<u32> m_async_compiled{0};
+	std::atomic<u32> m_async_enqueued{0};
+	std::atomic<u32> m_async_dropped{0};
+	// Último vertex shader compilado: la cola se reordena para sacar primero lo
+	// que lo comparte, así un primitivo (mismo VS, varios PS) se completa de una.
+	u32 m_async_last_vs_key = 0;
+	bool m_async_has_last_vs = false;
+
 	VkRenderPass m_utility_color_render_pass_load = VK_NULL_HANDLE;
 	VkRenderPass m_utility_color_render_pass_clear = VK_NULL_HANDLE;
 	VkRenderPass m_utility_color_render_pass_discard = VK_NULL_HANDLE;
@@ -517,10 +584,45 @@ private:
 	VkSampler GetSampler(GSHWDrawConfig::SamplerSelector ss);
 	void ClearSamplerCache() final;
 
+	// Cenit 0.6.24 (async): los getters TFX son ahora thread-safe (el mapa se mira
+	// bajo m_tfx_shader_mutex; en un miss el modulo se construye SIN lock porque
+	// shaderc es lento, y al re-lockear gana quien publico primero — el perdedor
+	// destruye su duplicado, que nunca estuvo en un command buffer). Con eso
+	// CreateTFXPipeline queda llamable desde el worker tal cual: es la unica
+	// funcion que necesita el hilo de compilacion, y no toca estado de draw.
+	// Verificado: CreateTFXPipeline NO mete manos en m_render_pass_cache — las
+	// VkRenderPass que usa salen de m_tfx_render_pass[] y
+	// m_primid_image_setup_render_passes[], ambos rellenos por CreateRenderPasses
+	// en el arranque y solo leidos aqui, asi que el worker no puede pisar el mapa
+	// de render passes (que sigue siendo de un solo hilo).
 	VkShaderModule GetTFXVertexShader(GSHWDrawConfig::VSSelector sel);
 	VkShaderModule GetTFXFragmentShader(const GSHWDrawConfig::PSSelector& sel);
 	VkPipeline CreateTFXPipeline(const PipelineSelector& p);
 	VkPipeline GetTFXPipeline(const PipelineSelector& p);
+
+	// Cenit 0.6.24 (async): hilo de compilacion de pipelines TFX. Start se llama
+	// con m_async_mutex tomado; Stop SOLO desde el hilo GS sin locks, y ANTES de
+	// DestroyResources y VKShaderCache::Destroy (paro + join + esperar inflight).
+	/// Devuelve false si no se pudo crear el hilo. El llamante DEBE respetarlo y
+	/// compilar de forma síncrona: encolar sin worker dejaría el primitivo sin
+	/// dibujar para siempre.
+	bool StartAsyncPipelineCompiler();
+	void StopAsyncPipelineCompiler();
+	void AsyncPipelineCompilerThread();
+	/// Saca el proximo selector, prefiriendo el que comparta vertex shader con el
+	/// ultimo completado: asi un primitivo (mismo VS, varios PS) se completa de una
+	/// y el draw-skip se concentra en pocos frames en vez de dispersarse.
+	/// Con m_async_mutex tomado y cola NO vacia (el predicate del wait lo garantiza,
+	/// y el lock no se suelta entre medio).
+	void TakeAsyncWorkLocked(PipelineSelector* sel);
+	/// Publica en m_tfx_pipelines (sustituye un fallo previo por un handle bueno,
+	/// y destruye el handle perdedor de la carrera). Devuelve el valor efectivo
+	/// del mapa tras la publicación. Lock de pipeline tomado SOLO; se usa desde
+	/// el hilo GS (camino síncrono y fallback) y desde el worker.
+	VkPipeline PublishTFXPipeline(const PipelineSelector& sel, VkPipeline pipeline);
+	/// Publica el resultado (VkPipeline o VK_NULL_HANDLE si fallo) en
+	/// m_tfx_pipelines y hace la contabilidad de pending/inflight. Solo el worker.
+	void PublishAsyncPipeline(const PipelineSelector& sel, VkPipeline pipeline);
 
 	VkShaderModule GetUtilityVertexShader(const std::string& source, const char* replace_main);
 	VkShaderModule GetUtilityFragmentShader(const std::string& source, const char* replace_main);

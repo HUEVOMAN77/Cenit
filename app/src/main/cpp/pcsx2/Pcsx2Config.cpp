@@ -737,6 +737,9 @@ Pcsx2Config::GSOptions::GSOptions()
 	UseDebugDevice = false;
 	UseBlitSwapChain = false;
 	DisableShaderCache = false;
+	// Cenit 0.6.24: compilación asíncrona de pipelines TFX. EXPERIMENTAL y APAGADA
+	// por defecto (ver el gate de cualquier feature nueva: primero medir).
+	AsyncTFXPipelineCompile = false;
 	DisableFramebufferFetch = false;
 	DisablePS2DepthQuantization = false;
 	DisableVertexShaderExpand = false;
@@ -986,6 +989,7 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
 	SettingsWrapBitBool(UseDebugDevice);
 	SettingsWrapBitBool(UseBlitSwapChain);
 	SettingsWrapBitBool(DisableShaderCache);
+	SettingsWrapBitBool(AsyncTFXPipelineCompile);
 	SettingsWrapBitBool(DisableFramebufferFetch);
 	SettingsWrapBitBool(DisablePS2DepthQuantization);
 	SettingsWrapBitBool(DisableVertexShaderExpand);

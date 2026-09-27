@@ -860,6 +860,26 @@ Java_com_izzy2lost_psx2_NativeApp_dumpVUSuperblockReport(JNIEnv* env, jclass, js
 #endif
 }
 
+// Cenit 0.6.24 — compilación asíncrona de pipelines TFX en Vulkan.
+// EXPERIMENTAL y APAGADA por defecto: hoy vkCreateGraphicsPipelines corre en el
+// hilo GS y cada pipeline nuevo es un pico de frame time (medido en God of War).
+// Con la bandera ON, el selector desconocido se encola a un hilo de trabajo y el
+// primitivo se omite uno o dos frames (mismo camino que un fallo de compilación),
+// en vez de congelar el dibujo. No está en RestartOptionsAreEqual (Pcsx2Config.cpp:
+// 937-948), así que ApplySettings la aplica sobre la VM viva sin tirar el
+// dispositivo; CheckForGSConfigChanges (VMManager.cpp:3438) ya manda el
+// MTGS::ApplySettings que lleva el valor al hilo GS. Sin getter expuesto: la
+// preferencia de Java es la única fuente (ningún perfil de hardware escribe esta
+// clave), igual que vu_superblock.
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setAsyncShaderCompile(JNIEnv* env, jclass, jboolean enabled)
+{
+    s_settings_interface.SetBoolValue("EmuCore/GS", "AsyncTFXPipelineCompile", enabled == JNI_TRUE);
+    if (VMManager::HasValidVM()) VMManager::ApplySettings();
+    (void)env;
+}
+
 // La misma condición que usa ApplyHardwarePerformanceProfile para decidir el
 // default de MTVU, expuesta a Java para que el default de la preferencia no
 // pueda divergir del del núcleo.

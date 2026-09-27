@@ -28,7 +28,9 @@
 
 std::unique_ptr<VKShaderCache> g_vulkan_shader_cache;
 
-static u32 s_next_bad_shader_id = 0;
+// Cenit 0.6.24 (async): con el worker de pipelines, DOS hilos pueden fallar un
+// shader a la vez; el id de vuelco pasa a atómico para que nunca choquen.
+static std::atomic<u32> s_next_bad_shader_id{0};
 
 namespace
 {
@@ -165,6 +167,23 @@ namespace dyn_shaderc
 
 } // namespace dyn_shaderc
 
+// Cenit 0.6.24 (async): el TODO de arriba ("NOT thread safe, yet") sí importa ahora.
+// Antes del worker, shaderc solo lo usaba el hilo GS y el comentario era decorativo;
+// ahora pueden compilar dos hilos. La garantía de shaderc (include/shaderc/shaderc.h
+// :259-268) es la "basic thread-safety guarantee": llamadas concurrentes sobre
+// OBJETOS DISTINTOS no necesitan lock, pero sobre el MISMO objeto sí si alguna toma
+// un argumento no-const — y shaderc_compile_into_spv recibe `const
+// shaderc_compiler_t`, que es un puntero a struct NO const, así que cae en el caso
+// que exige sincronización. A eso se suma que el inicializador de glslang solo
+// protege su contador de referencias (libshaderc_util/src/compiler.cc:115-134), no
+// la compilación en sí.
+// Decisión: un solo mutex alrededor de Open()+compile. El peor caso es que el hilo
+// de dibujo espere UNA compilación SPIR-V cuando los dos fallan a la vez (raro: los
+// misses son espaciados y con la caché caliente no se entra aquí); el beneficio es
+// que no hay dos glslang tocando estado de proceso a la par. Sería peor un crash.
+// Open() se llama dentro de este lock, así que no necesita mutex propio.
+static std::mutex s_shaderc_compile_mutex;
+
 bool dyn_shaderc::Open()
 {
 #ifdef __ANDROID__
@@ -271,6 +290,8 @@ static const char* compilation_status_to_string(shaderc_compilation_status statu
 
 std::optional<VKShaderCache::SPIRVCodeVector> VKShaderCache::CompileShaderToSPV(u32 stage, std::string_view source, bool debug)
 {
+	std::lock_guard shaderc_lock(s_shaderc_compile_mutex);
+
 	std::optional<VKShaderCache::SPIRVCodeVector> ret;
 	if (!dyn_shaderc::Open())
 		return ret;
@@ -357,6 +378,11 @@ void VKShaderCache::Destroy()
 
 void VKShaderCache::Open()
 {
+	// Cenit 0.6.24 (async): foto de la bandera de debug AHORA, en el hilo GS y antes
+	// de que el worker pueda existir. Es lo que lee el camino de compilación; ver el
+	// comentario del miembro en VKShaderCache.h.
+	m_debug_device = GSConfig.UseDebugDevice;
+
 	if (!GSConfig.DisableShaderCache)
 	{
 		m_pipeline_cache_filename = GetPipelineCacheBaseFileName(GSConfig.UseDebugDevice);
@@ -382,7 +408,11 @@ VkPipelineCache VKShaderCache::GetPipelineCache(bool set_dirty /*= true*/)
 	if (m_pipeline_cache == VK_NULL_HANDLE)
 		return VK_NULL_HANDLE;
 
-	m_pipeline_cache_dirty |= set_dirty;
+	// Cenit 0.6.24 (async): dirty pasó a atomic<bool> porque el worker de pipelines
+	// y el hilo GS marcan y limpian desde hilos distintos. (atomic<bool> no tiene
+	// |=: store condicional.)
+	if (set_dirty)
+		m_pipeline_cache_dirty.store(true, std::memory_order_relaxed);
 	return m_pipeline_cache;
 }
 
@@ -675,20 +705,39 @@ VKShaderCache::CacheIndexKey VKShaderCache::GetCacheKey(u32 type, const std::str
 
 std::optional<VKShaderCache::SPIRVCodeVector> VKShaderCache::GetShaderSPV(u32 type, std::string_view shader_code)
 {
+	// Cenit 0.6.24 (async): este camino lo llaman ahora DOS hilos (el de dibujo y
+	// el worker de pipelines). m_index y las FILE* van bajo m_lock, y ese lock NUNCA
+	// se sostiene durante la compilación: lo lento (shaderc) ocurre fuera, con su
+	// propio mutex (CompileShaderToSPV). Un hilo puede llegar a esperar a otro en
+	// shaderc — nunca en el índice ni en los ficheros. En un miss concurrente del
+	// mismo shader, ambos compilan y el segundo en publicar pierde (emplace no
+	// sobrescribe) — se paga una compilación duplicada en el peor caso, jamás un
+	// índice corrupto.
 	const auto key = GetCacheKey(type, shader_code);
-	auto iter = m_index.find(key);
-	if (iter == m_index.end())
-		return CompileAndAddShaderSPV(key, shader_code);
 
-	std::optional<SPIRVCodeVector> spv = SPIRVCodeVector(iter->second.blob_size);
-
-	if (std::fseek(m_blob_file, iter->second.file_offset, SEEK_SET) != 0 ||
-		std::fread(spv->data(), sizeof(SPIRVCodeType), iter->second.blob_size, m_blob_file) != iter->second.blob_size)
 	{
-		Console.Error("Read blob from file failed, recompiling");
-		spv = CompileShaderToSPV(type, shader_code, GSConfig.UseDebugDevice);
+		std::lock_guard lock(m_lock);
+		const auto iter = m_index.find(key);
+		if (iter != m_index.end())
+		{
+			if (m_blob_file)
+			{
+				std::optional<SPIRVCodeVector> spv = SPIRVCodeVector(iter->second.blob_size);
+				if (std::fseek(m_blob_file, iter->second.file_offset, SEEK_SET) == 0 &&
+					std::fread(spv->data(), sizeof(SPIRVCodeType), iter->second.blob_size, m_blob_file) ==
+						iter->second.blob_size)
+				{
+					return spv;
+				}
+
+				Console.Error("Read blob from file failed, recompiling");
+			}
+		}
 	}
 
+	std::optional<SPIRVCodeVector> spv = CompileShaderSPV(key, shader_code);
+	if (spv.has_value())
+		AddShaderSPV(key, *spv);
 	return spv;
 }
 
@@ -727,19 +776,28 @@ VkShaderModule VKShaderCache::GetComputeShader(std::string_view shader_code)
 	return GetShaderModule(shaderc_glsl_compute_shader, std::move(shader_code));
 }
 
-std::optional<VKShaderCache::SPIRVCodeVector> VKShaderCache::CompileAndAddShaderSPV(
+std::optional<VKShaderCache::SPIRVCodeVector> VKShaderCache::CompileShaderSPV(
 	const CacheIndexKey& key, std::string_view shader_code)
 {
-	std::optional<SPIRVCodeVector> spv = CompileShaderToSPV(key.shader_type, shader_code, GSConfig.UseDebugDevice);
-	if (!spv.has_value())
-		return {};
+	// Lock de shaderc tomado por CompileShaderToSPV (ver comentario allí). Fuera del
+	// lock de VKShaderCache: si dos hilos piden el MISMO shader a la vez, ambos lo
+	// compilan — se paga una compilación duplicada y nada más, jamás índice corrupto
+	// (AddShaderSPV gana por emplace).
+	// Ojo con el último argumento: usa la foto m_debug_device, NO GSConfig — el worker
+	// no debe tocar GSConfig (ver comentario del miembro en el header).
+	return CompileShaderToSPV(key.shader_type, shader_code, m_debug_device);
+}
 
-	if (!m_blob_file || std::fseek(m_blob_file, 0, SEEK_END) != 0)
-		return spv;
+void VKShaderCache::AddShaderSPV(const CacheIndexKey& key, const SPIRVCodeVector& spv)
+{
+	std::lock_guard lock(m_lock);
+
+	if (!m_index_file || !m_blob_file || std::fseek(m_blob_file, 0, SEEK_END) != 0)
+		return;
 
 	CacheIndexData data;
 	data.file_offset = static_cast<u32>(std::ftell(m_blob_file));
-	data.blob_size = static_cast<u32>(spv->size());
+	data.blob_size = static_cast<u32>(spv.size());
 
 	CacheIndexEntry entry = {};
 	entry.source_hash_low = key.source_hash_low;
@@ -749,14 +807,13 @@ std::optional<VKShaderCache::SPIRVCodeVector> VKShaderCache::CompileAndAddShader
 	entry.blob_size = data.blob_size;
 	entry.file_offset = data.file_offset;
 
-	if (std::fwrite(spv->data(), sizeof(SPIRVCodeType), entry.blob_size, m_blob_file) != entry.blob_size ||
+	if (std::fwrite(spv.data(), sizeof(SPIRVCodeType), entry.blob_size, m_blob_file) != entry.blob_size ||
 		std::fflush(m_blob_file) != 0 || std::fwrite(&entry, sizeof(entry), 1, m_index_file) != 1 ||
 		std::fflush(m_index_file) != 0)
 	{
 		Console.Error("Failed to write shader blob to file");
-		return spv;
+		return;
 	}
 
 	m_index.emplace(key, data);
-	return spv;
 }
