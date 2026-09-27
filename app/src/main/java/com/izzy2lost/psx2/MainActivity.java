@@ -2197,6 +2197,15 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
 
     private void applySavedSettings() {
         SharedPreferences prefs = getSharedPreferences("app_prefs", MODE_PRIVATE);
+        // Cenit 0.6.27 (governor v4): si un benchmark del sintonizador CPU/VU
+        // quedó a medias por un cierre brusco (un juego incompatible con MTVU se
+        // cuelga de verdad), su diario trae la receta exacta para revertir: el
+        // INI global con el que se empezó a ensayar y las claves por-juego que
+        // se escribieron. Procesarlo AQUÍ, antes de la primera escritura de
+        // speedhacks de abajo (líneas ee_cycle_rate/mtvu) y antes de que ningún
+        // juego arranque, porque el CycleSkip global no tiene preferencia que lo
+        // re-crie: sin esto, un -1 de ensayo se quedaría puesto para siempre.
+        CpuVUTuner.recoverAtBoot(this, prefs);
         // Primer arranque: la escala inicial sigue al hardware (2x en gama alta
         // Snapdragon como el 778G, 1x en Mali). En cuanto el usuario toca la
         // escala en los ajustes, ese valor manda para siempre.

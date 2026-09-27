@@ -147,12 +147,23 @@ final class DynamicResolutionGovernor {
     private int turboCooldown = 0;    // no re-entrar inmediatamente tras soltar
     // Contadores para el perfil.
     private int cpuBoundTicks = 0;
+    // 0.6.27 (governor v4): el sintonizador CPU/VU por juego — la parte del
+    // regidor que ACTÚA cuando el cuello no es la GPU (benchmark conservador de
+    // EECycleRate/EECycleSkip/MTVU, rollback y memoria). Vive de este reloj de
+    // 1 s: el regidor le pasa el contexto que ya midió y él responde si manda
+    // (CONTINUE = mantener la escala quieta mientras ensaya) o no (IDLE).
+    private final CpuVUTuner tuner;
+
+    // 0.6.27: el sintonizador CPU/VU pide reentrar YA cuando cambia de fase en
+    // este mismo tick. Un retry corto sobre el MISMO reloj: nunca dos relojes.
+    private boolean wantRetry = false;
 
     private final Runnable tick = new Runnable() {
         @Override public void run() {
             if (!active) return;
             evaluate();
-            main.postDelayed(this, TICK_MS);
+            main.postDelayed(this, wantRetry ? 250L : TICK_MS);
+            wantRetry = false;
         }
     };
 
@@ -161,6 +172,7 @@ final class DynamicResolutionGovernor {
         this.appContext = app;
         this.prefs = app.getSharedPreferences("app_prefs", Context.MODE_PRIVATE);
         this.host = host;
+        this.tuner = new CpuVUTuner(app, this.prefs);
         android.os.PowerManager pm = null;
         try { pm = (android.os.PowerManager) app.getSystemService(Context.POWER_SERVICE); }
         catch (Throwable ignored) {}
@@ -247,6 +259,11 @@ final class DynamicResolutionGovernor {
         preclimsUsed = 0;
         loadTicks = 0; turboOn = false; turboSeconds = 0; turboCooldown = 0;
         cpuBoundTicks = 0;
+        // 0.6.27: procesar el diario de un benchmark que el cierre de la app
+        // dejó a medias ANTES de tocar la escala (revertir speedhacks globales
+        // colgados es lo único urgente; el benchmark nuevo, si viene, empieza
+        // con su propia evidencia).
+        tuner.startSession();
         reset();
         main.postDelayed(tick, TICK_MS);
     }
@@ -261,6 +278,9 @@ final class DynamicResolutionGovernor {
         applied = 0f;
         releaseTurbo("game stopped");
         detachThermalListener();
+        // 0.6.27: un ensayo a medias se revierte y el veredicto del último se
+        // anota en el perfil ANTES de salvarlo (mismo hilo, mismo instante).
+        tuner.onGameStop(profile);
         // v3: el aprendizaje de esta partida se guarda con el juego.
         if (profile != null && profile.known()) profile.save();
     }
@@ -300,6 +320,17 @@ final class DynamicResolutionGovernor {
         try { return NativeApp.isPaused(); } catch (Throwable t) { return true; }
     }
 
+    /**
+     * Umbral de "esto no es de píxeles" (0.6.27: era un cálculo en línea dentro
+     * de la regla GPU-bound; el sintonizador CPU/VU necesita la MISMA pregunta
+     * antes de esa regla, así que pasa a ser una función con un solo criterio).
+     * Si el perfil ya aprendió que ESTE juego es CPU-bound, el umbral se suaviza
+     * un 20% porque la evidencia es de la partida anterior, no de este segundo.
+     */
+    private float boundThreshold() {
+        return (profile != null && profile.cpuBound) ? GPU_BOUND_MIN * 0.8f : GPU_BOUND_MIN;
+    }
+
     private void evaluate() {
         // ¿El último paso llegó realmente a la resolución en uso? Si no, es que los
         // ajustes por juego fijan su propia escala y mandan sobre el INI global:
@@ -321,7 +352,11 @@ final class DynamicResolutionGovernor {
                 return;
             }
         }
-        if (selfDisabled) return;
+        if (selfDisabled) {
+            // 0.6.27: sin reloj no hay benchmark posible: abortar con reversión.
+            tuner.halt("governor self-disabled");
+            return;
+        }
         // Con la CPU emulada a otra velocidad, medir "porcentaje de velocidad" deja
         // de significar "el teléfono no da abasto": el juego va lento porque el
         // usuario lo pidió. Congelar el regidor hasta que vuelva al 100%.
@@ -330,9 +365,21 @@ final class DynamicResolutionGovernor {
         // y un 0 por-juego que anule un global viejo no puede dejar esto dormido.
         // La lectura nativa es barata (un entero); el fallback ante cualquier fallo
         // es la preferencia global de siempre.
+        // 0.6.27 (governor v4): el congelamiento ahora distingue QUIÉN movió el
+        // rate. Si el sintonizador CPU/VU está midiendo ahora mismo, un rate != 0
+        // es SU ensayo: congelarse aquí congelaría su propio benchmark (y el
+        // governor quedaría dormido justo cuando más se le necesita). Con el
+        // sintonizador en vuelo se salta el congelamiento; el tick() de abajo
+        // devuelve CONTINUE y las reglas clásicas no tocan la escala mientras se
+        // mide. Cuando el ensayo termina pasa una de dos cosas: el global vuelve
+        // a la línea base del usuario (rate 0: el regidor retoma solo), o el
+        // perfil adoptado queda en el INI por-juego (rate != 0: el regidor se
+        // congela por una decisión consciente — medir speed% con cuotas puestas
+        // es mentira, como siempre se dijo).
+        final boolean tunerActive = tuner.isActive();
         final int effectiveRate = NativeApp.safeGetEffectiveEECycleRate();
-        if (effectiveRate != 0 || (NativeApp.hasNoNativeBinary
-                && prefs.getInt("ee_cycle_rate", 0) != 0)) {
+        if (!tunerActive && (effectiveRate != 0 || (NativeApp.hasNoNativeBinary
+                && prefs.getInt("ee_cycle_rate", 0) != 0))) {
             if (applied > 0f) {
                 host.applyUpscale(ceiling());
                 applied = 0f;
@@ -342,6 +389,10 @@ final class DynamicResolutionGovernor {
             return;
         }
         if (!prefs.getBoolean("dynamic_res", true)) {
+            // 0.6.27: "dynamic_res" apagado manda sobre todo el regidor, y el
+            // sintonizador corre en su reloj: cerrar cualquier ensayo con
+            // reversión antes de quedarse en calma.
+            tuner.halt("dynamic_res switched off");
             // Apagado a mitad de partida: devolver el techo y quedarse en calma,
             // listo para retomar si el interruptor vuelve.
             if (applied > 0f) {
@@ -357,9 +408,12 @@ final class DynamicResolutionGovernor {
             // Con mando de velocidad o con el juego en pausa la medición pierde
             // sentido: congelar. Soltar el turbo regidor si estuviera enganchado:
             // el usuario (o la pausa) mandan sobre nuestra decisión.
+            // 0.6.27: la pausa también congela el ensayo del sintonizador — y si
+            // se alarga demasiado, él solo aborta y revierte (onFrozen).
             slowTicks = 0;
             fastTicks = 0;
             releaseTurbo("input/ pause froze governor");
+            tuner.onFrozen();
             return;
         }
         final float ceiling = ceiling();
@@ -398,6 +452,29 @@ final class DynamicResolutionGovernor {
         final float gpu = NativeApp.safeGetGPUUsage();
 
         // ---------------------------------------------------------------
+        // 0.6.27 (governor v4): el sintonizador CPU/VU se consulta AQUÍ, con el
+        // contexto que el regidor ya midió y DELANTE de las contadoras de
+        // aprendizaje: un ensayo con Ciclo EE -1 o cuota baja el speed% a ~75
+        // POR DISEÑO (el objetivo de framerate no se re-escala), así que si
+        // esas lecturas entraran en heldScale/slowFloorTicks/tendencia
+        // contaminarían la memoria del juego con datos de prueba. Mientras el
+        // ensayo dura (CONTINUE) el regidor no aprende, no sube y no baja.
+        // ---------------------------------------------------------------
+        final boolean behind = speed > 0f && speed < DROP_BELOW_PCT;
+        final boolean atFloor = applied <= STEPS[0] + 0.001f;
+        final boolean metricsAlive = speed > 0f && gpu > GPU_METRIC_MIN;
+        final boolean cpuBoundNow = metricsAlive && gpu < boundThreshold();
+        final int tunerAction = tuner.tick(profile, hostCurrentUri(), applied,
+                behind, atFloor, cpuBoundNow, metricsAlive,
+                turboOn, pendingApply > 0f, thermalLimited());
+        if (tunerAction == CpuVUTuner.RETRY) wantRetry = true;
+        if (tunerAction == CpuVUTuner.CONTINUE) {
+            slowTicks = 0;
+            fastTicks = 0;
+            return;
+        }
+
+        // ---------------------------------------------------------------
         // v3: contadores de aprendizaje y tendencia (corren en todo tick
         // con métricas válidas, pase lo que pase con las reglas de subir/bajar)
         // ---------------------------------------------------------------
@@ -417,6 +494,7 @@ final class DynamicResolutionGovernor {
                 }
             }
         }
+
 
         // ---------------------------------------------------------------
         // v3: TURBO DE CARGAS. Carga = GPU muerta + velocidad clavada. Con
@@ -495,8 +573,7 @@ final class DynamicResolutionGovernor {
             // resolución: justo lo contrario de la intención, recortando imagen de
             // gratis en un juego CPU-bound. Ahora, métrica inválida = mantener la
             // escala en neutral (no subir ni bajar), hasta que llegue un dato real.
-            final float bound = (profile != null && profile.cpuBound)
-                    ? GPU_BOUND_MIN * 0.8f : GPU_BOUND_MIN;
+            final float bound = boundThreshold();
             if (gpu <= GPU_METRIC_MIN) {
                 // Estado desconocido: no fiarse para recortar. Dejar slowTicks en
                 // cero para que, cuando la métrica despierte, se necesiten los

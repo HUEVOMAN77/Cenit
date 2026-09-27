@@ -303,6 +303,16 @@
                                 android:text="Detecta las cargas (pantalla quieta, GPU sin usar) y acelera solo esos segundos. Se apaga cuando vuelve el juego." />
 
                             <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/set_sw_cpu_tuner"
+                                style="@style/Cenit.Settings.Switch"
+                                android:text="Sintonizador CPU/VU por juego (experimental)" />
+
+                            <TextView
+                                android:id="@+id/set_tv_cpu_tuner_note"
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Cuando un juego va atrasado con la GPU holgada y ya en su resolución más baja, Cenit prueba una vez —solo para ese juego— una escalera conservadora: MTVU al revés, Ciclo EE -1 o cuota suave. Mide con FPS reales y solo se queda con lo que gana de verdad; si nada gana, lo devuelve. Los ensayos usan los ajustes globales y se revierten: lo adoptado queda guardado en los ajustes por juego del núcleo, tus valores no se tocan. Apagado por defecto: es experimental." />
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
                                 android:id="@+id/set_sw_pinning"
                                 style="@style/Cenit.Settings.Switch"
                                 android:text="Fijar emulación al núcleo rápido" />

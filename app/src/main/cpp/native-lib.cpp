@@ -1140,6 +1140,60 @@ Java_com_izzy2lost_psx2_NativeApp_setGameUserHackInt(JNIEnv* env, jclass,
     return WriteGameLayerInt(game_path, "EmuCore/GS", key, (int)p_value) ? JNI_TRUE : JNI_FALSE;
 }
 
+// Cenit 0.6.27 (governor v4): BORRAR una clave de la capa por-juego. El núcleo
+// ya tiene DeleteValue en INISettingsInterface; esta es la misma ruta de
+// WriteGameLayerInt (cargar, tocar, guardar, recargar en caliente si ese juego
+// corre) pero sin escribir valor: la clave desaparece y con ella la prioridad de
+// la capa por-juego, así el GameDB / el INI global vuelven a mandar. Es la
+// marcha atrás limpia de una adopción del sintonizador CPU/VU (o de un "recupe-
+// rar" tras un benchmark cortado por un cierre), sin dejar un 0 huérfano que
+// pise un -1 que pusiera el usuario a mano. No siembra UserHacks: solo borra.
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_izzy2lost_psx2_NativeApp_deleteGameSettingKey(JNIEnv* env, jclass,
+                                                       jstring p_gameUri,
+                                                       jstring p_section,
+                                                       jstring p_key)
+{
+    const std::string game_path = GetJavaString(env, p_gameUri);
+    const std::string section = GetJavaString(env, p_section);
+    const std::string key = GetJavaString(env, p_key);
+    const std::string path = ResolveGameSettingsPathForUri(game_path);
+    if (path.empty() || key.empty() || section.empty())
+        return JNI_FALSE;
+
+    INISettingsInterface game_settings(path);
+    if (!game_settings.Load())
+        return JNI_TRUE; // no hay archivo: no hay clave que borrar, objetivo cumplido
+    if (!game_settings.ContainsValue(section.c_str(), key.c_str()))
+        return JNI_TRUE; // ya estaba limpia
+
+    game_settings.DeleteValue(section.c_str(), key.c_str());
+    if (!game_settings.Save())
+    {
+        Console.Error("Per-game settings: NO se pudo borrar %s [%s/%s]",
+            path.c_str(), section.c_str(), key.c_str());
+        return JNI_FALSE;
+    }
+    Console.WriteLn("Per-game settings: deleted INI key %s [%s/%s]",
+        path.c_str(), section.c_str(), key.c_str());
+
+    if (VMManager::HasValidVM())
+    {
+        const std::string edited_serial = GetGameSerialForPath(game_path);
+        if (!edited_serial.empty())
+        {
+            Host::RunOnCPUThread([edited_serial]() {
+                if (VMManager::GetState() != VMState::Running && VMManager::GetState() != VMState::Paused)
+                    return;
+                if (StringUtil::Strcasecmp(VMManager::GetDiscSerial().c_str(), edited_serial.c_str()) == 0)
+                    VMManager::ReloadGameSettings();
+            });
+        }
+    }
+    return JNI_TRUE;
+}
+
 // Cenit 0.6.5: variante con sección explícita para claves que NO son user hacks
 // y viven en otra sección (EmuCore/Speedhacks: EECycleSkip/EECycleRate del modo
 // cuotas). Mismo ciclo siembra/recarga que arriba, pero sin activar UserHacks
@@ -1159,6 +1213,29 @@ Java_com_izzy2lost_psx2_NativeApp_setGameSettingInt(JNIEnv* env, jclass,
 }
 
 // Lectura genérica por sección (la específica de user hacks sigue abajo).
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getGlobalSettingInt(JNIEnv* env, jclass,
+                                                      jstring p_section,
+                                                      jstring p_key,
+                                                      jint p_fallback)
+{
+    // Cenit 0.6.27 (governor v4): el sintonizador CPU/VU necesita conocer el
+    // valor GLOBAL de EECycleSkip antes de ensayar con él, para poder devolverse
+    // exacto (y para registrarlo en el diario anti-cierre). A diferencia de la
+    // Rate y de MTVU, el CycleSkip global no tiene preferencia Java: vive solo
+    // en el INI, así que aquí es donde se lee. Sin VM corriendo esto ES el
+    // valor operativo; con VM, la cascada ya la da getEffectiveEECycleSkip.
+    const std::string section = GetJavaString(env, p_section);
+    const std::string key = GetJavaString(env, p_key);
+    if (section.empty() || key.empty())
+        return p_fallback;
+    int value = 0;
+    if (s_settings_interface.GetIntValue(section.c_str(), key.c_str(), &value))
+        return (jint)value;
+    return p_fallback;
+}
+
 extern "C"
 JNIEXPORT jint JNICALL
 Java_com_izzy2lost_psx2_NativeApp_getGameSettingInt(JNIEnv* env, jclass,
@@ -1674,6 +1751,59 @@ Java_com_izzy2lost_psx2_NativeApp_getEffectiveEECycleRate(JNIEnv *env, jclass cl
     int rate = 0;
     s_settings_interface.GetIntValue("EmuCore/Speedhacks", "EECycleRate", &rate);
     return (jint)rate;
+}
+
+// Cenit 0.6.27 (governor v4): los otros dos speedhacks que toca el sintonizador
+// CPU/VU, leídos igual que arriba — con VM válida, EmuConfig ya es la cascada
+// completa (perfil -> INI global -> GameDB -> INI por-juego), así que el
+// sintonizador puede (a) anotar la línea base REAL del juego antes de ensayar y
+// (b) comprobar después de cada escritura que el valor candidato llegó de verdad
+// a la emulación; si el usuario movió el spinner en pleno benchmark, eso se ve
+// aquí y el ensayo se abandona sin tocar la capa por-juego.
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getEffectiveEECycleSkip(JNIEnv *env, jclass clazz) {
+    if (VMManager::HasValidVM())
+        return (jint)EmuConfig.Speedhacks.EECycleSkip;
+    int skip = 0;
+    s_settings_interface.GetIntValue("EmuCore/Speedhacks", "EECycleSkip", &skip);
+    return (jint)skip;
+}
+
+// Cenit 0.6.27 (governor v4): ¿el retraso es del EE o del VU1? Cuando MTVU está
+// encendido, el hilo EE publica trabajo en el VU1 y a veces se queda BLOQUEADO
+// esperándolo. PerformanceMetrics ya mide esa ventana (wait_ms = milisegundos
+// bloqueados y wait_calls = cuántas veces, renovados cada 0.5 s, y en ceros con
+// MTVU apagado — ver PerformanceMetrics.cpp, el else de THREAD_VU1). Con esto el
+// sintonizador puede decir "VU_BOUND" en vez de todo "CPU_BOUND": un EE que
+// espera al VU1 se beneficia de QUITARLE el hilo al VU1 (o de no habérselo
+// puesto), y un EE que trabaja solo se beneficia de cedérselo. Es la parte de
+// "distinguir CPU de VU" que la métrica de GPU sola no puede responder.
+// Lectura pura: no suma, no fuerza, no toca el hilo. Cero riesgo para el motor.
+extern "C"
+JNIEXPORT jfloat JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getMtvuWaitMs(JNIEnv *env, jclass clazz) {
+    return (jfloat)PerformanceMetrics::GetMtvuSyncStats().wait_ms;
+}
+
+extern "C"
+JNIEXPORT jlong JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getMtvuWaitCalls(JNIEnv *env, jclass clazz) {
+    return (jlong)PerformanceMetrics::GetMtvuSyncStats().wait_calls;
+}
+
+// El INI por-juego guarda vuThread como entero ("0"/"1"); la capa del núcleo lo
+// lee con GetBoolValue y StringUtil::FromChars<bool> acepta explícitamente "0"
+// y "1" (StringUtil.h, la sobrescritura para bool), así que el viaje de ida y
+// vuelta está cerrado. Sin VM, el valor operativo es lo que el arranque va a
+// re-aplicar desde el INI global (MainActivity escribe siempre "mtvu" ahí).
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getEffectiveMTVU(JNIEnv *env, jclass clazz) {
+    if (VMManager::HasValidVM())
+        return EmuConfig.Speedhacks.vuThread ? JNI_TRUE : JNI_FALSE;
+    return s_settings_interface.GetBoolValue("EmuCore/Speedhacks", "vuThread", false)
+        ? JNI_TRUE : JNI_FALSE;
 }
 
 // Cenit 0.6.4 (plan del inge §5): porcentaje de uso de GPU (misma métrica que

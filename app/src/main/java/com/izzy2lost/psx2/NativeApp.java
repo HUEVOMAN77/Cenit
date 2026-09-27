@@ -104,6 +104,14 @@ public class NativeApp {
 	public static void setEECycleRateAsync(int value) {
 		runNativeSettingAsync("speedhackEecyclerate", () -> speedhackEecyclerate(value));
 	}
+	// Cenit 0.6.27 (governor v4): el CycleSkip global existía como native suelto
+	// pero la UI solo lo usa por juego, así que nadie lo llamaba en caliente. El
+	// sintonizador CPU/VU sí escribe el global durante sus ensayos y lo devuelve
+	// al terminar: mismo executor serie-a-serie que el Rate, para que dos
+	// ApplySettings no se pisen entre hilos.
+	public static void setEECycleSkipAsync(int value) {
+		runNativeSettingAsync("speedhackEecycleskip", () -> speedhackEecycleskip(value));
+	}
 	// Velocidad real de emulación en % (100 = a tiempo). Barata, lectura pura.
 	public static native float getEmulationSpeed();
 	public static float safeGetEmulationSpeed() {
@@ -126,6 +134,44 @@ public class NativeApp {
 	public static int safeGetEffectiveEECycleRate() {
 		if (hasNoNativeBinary) return 0;
 		try { return getEffectiveEECycleRate(); } catch (Throwable t) { return 0; }
+	}
+	// Cenit 0.6.27 (governor v4): las otras dos lecturas efectivas que el
+	// sintonizador CPU/VU necesita para (a) anotar la línea base real del juego
+	// y (b) verificar que cada ensayo llegó de verdad a la emulación. Misma
+	// semántica que arriba: con VM válida es la cascada completa (incluida la
+	// capa por-juego y el GameDB); sin VM, lo que se va a aplicar al arrancar.
+	// El fallback ante cualquier fallo es -1 ("sin dato"), nunca un valor que se
+	// parezca a una decisión: el governor trata -1 como "no medir, no insistir".
+	public static native int getEffectiveEECycleSkip();
+	public static int safeGetEffectiveEECycleSkip() {
+		if (hasNoNativeBinary) return -1;
+		try { return getEffectiveEECycleSkip(); } catch (Throwable t) { return -1; }
+	}
+	public static native boolean getEffectiveMTVU();
+	/** -1 = sin dato (binario ausente o fallo), 0/1 = el valor operativo real. */
+	public static int safeGetEffectiveMTVU() {
+		if (hasNoNativeBinary) return -1;
+		try { return getEffectiveMTVU() ? 1 : 0; } catch (Throwable t) { return -1; }
+	}
+	// Valor de una clave del INI GLOBAL (s_settings_interface). El CycleSkip
+	// global no tiene preferencia Java, así que esta es su única lectura.
+	public static native int getGlobalSettingInt(String section, String key, int fallback);
+	public static int safeGetGlobalSettingInt(String section, String key, int fallback) {
+		if (hasNoNativeBinary) return fallback;
+		try { return getGlobalSettingInt(section, key, fallback); } catch (Throwable t) { return fallback; }
+	}
+	// --- evidencia para clasificar el cuello: ¿espera el EE al VU1? ---------
+	// Ventana de 0.5 s del núcleo, en ceros con MTVU apagado. Con binario ausente
+	// o fallo devuelven 0, que es "sin evidencia", nunca "sí espera".
+	public static native float getMtvuWaitMs();
+	public static float safeGetMtvuWaitMs() {
+		if (hasNoNativeBinary) return 0f;
+		try { return getMtvuWaitMs(); } catch (Throwable t) { return 0f; }
+	}
+	public static native long getMtvuWaitCalls();
+	public static long safeGetMtvuWaitCalls() {
+		if (hasNoNativeBinary) return 0L;
+		try { return getMtvuWaitCalls(); } catch (Throwable t) { return 0L; }
 	}
 	// Cenit 0.6.4 (regidor v2): uso de GPU como fracción (1.0 = GPU justo a
 	// tiempo) y milisegundos medios de GPU por cuadro. Con esto el regidor
@@ -481,6 +527,18 @@ public class NativeApp {
         if (hasNoNativeBinary || gameUri == null || gameUri.isEmpty()) return fallback;
         synchronized (CDVD_LOCK) {
             try { return getGameSettingInt(gameUri, section, key, fallback); } catch (Throwable t) { return fallback; }
+        }
+    }
+    // Cenit 0.6.27 (governor v4): borra UNA clave de la capa por-juego. Es la
+    // marcha atrás limpia de una adopción del sintonizador CPU/VU: la clave
+    // desaparece y con ella la prioridad de la capa, así el GameDB / el INI
+    // global vuelven a mandar sin dejar un 0 huérfano que pise un -1 manual.
+    // El nativo recarga la capa en caliente si ese juego está corriendo.
+    public static native boolean deleteGameSettingKey(String gameUri, String section, String key);
+    public static boolean safeDeleteGameSettingKey(String gameUri, String section, String key) {
+        if (hasNoNativeBinary || gameUri == null || gameUri.isEmpty()) return false;
+        synchronized (CDVD_LOCK) {
+            try { return deleteGameSettingKey(gameUri, section, key); } catch (Throwable t) { return false; }
         }
     }
     public static boolean safeSetGameUserHackInt(String gameUri, String key, int value) {

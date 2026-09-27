@@ -3,7 +3,7 @@
 [![Licencia: GPL v3](https://img.shields.io/badge/Licencia-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.en.html)
 [![Android](https://img.shields.io/badge/Android-8.0%20o%20superior-green.svg)](https://developer.android.com/)
 [![ARM64](https://img.shields.io/badge/Procesador-arm64--v8a-orange.svg)](https://developer.arm.com/)
-[![Última versión](https://img.shields.io/badge/versión%20actual-0.6.26-informational)](https://github.com/HUEVOMAN77/Cenit/releases/tag/base-0.6.26)
+[![Última versión](https://img.shields.io/badge/versión%20actual-0.6.27-informational)](https://github.com/HUEVOMAN77/Cenit/releases/tag/base-0.6.27)
 [![Driver](https://img.shields.io/badge/driver%20incluido-Turnip%2025.3.6-yellow)](https://github.com/HUEVOMAN77/Cenit/releases)
 
 **Cenit es mi emulador de PlayStation 2 para Android.** Lo diseño, lo programo, lo compilo y lo mantengo yo solo: [HUEVOMAN77](https://github.com/HUEVOMAN77). Empezó como bifurcación de [PSX2](https://github.com/izzy2lost/PSX2) (el adaptador Android de PCSX2 2.7), pero eso fue el punto de partida, no el proyecto: hoy Cenit es propiedad mía y todo lo que lo define —el motor de rendimiento adaptativo, los ajustes por juego, mi driver Vulkan propio, el guardarraya, la interfaz, la instrumentación del recompilador VU— es trabajo mío, pieza por pieza y en público. Cada decisión de este repositorio se toma aquí.
@@ -12,7 +12,7 @@ La meta es muy concreta: **que los juegos de PS2 se muevan fluidos en celulares 
 
 No es una copia con otro logo. Cada versión suma mejoras de rendimiento y de uso que no existen ni en PSX2 ni en PCSX2, y —salvo que yo mismo diga lo contrario— medidas sobre hardware real antes de publicarse.
 
-> **Versión actual: 0.6.26.** Mantengo una línea pública y continua (0.6.x), con su release, su verificación en teléfono real y mi registro de qué cambió y qué no. En [Historial versión por versión](#historial-versión-por-versión) está todo el camino recorrido, sin adornos.
+> **Versión actual: 0.6.27.** Mantengo una línea pública y continua (0.6.x), con su release, su verificación en teléfono real y mi registro de qué cambió y qué no. En [Historial versión por versión](#historial-versión-por-versión) está todo el camino recorrido, sin adornos.
 
 ---
 
@@ -20,8 +20,8 @@ No es una copia con otro logo. Cada versión suma mejoras de rendimiento y de us
 
 | | |
 |---|---|
-| **Versión actual** | 0.6.26 |
-| **Descarga** | [Lanzamientos](https://github.com/HUEVOMAN77/Cenit/releases) → `Cenit-0.6.26.apk` |
+| **Versión actual** | 0.6.27 |
+| **Descarga** | [Lanzamientos](https://github.com/HUEVOMAN77/Cenit/releases) → `Cenit-0.6.27.apk` |
 | **Driver incluido** | `Cenit-Turnip-25.3.6` (compilado por mi CI) |
 | **Requiere** | Android 8 o superior, procesador de 64 bits y tu propia BIOS de PS2 |
 | **No incluye** | BIOS, juegos ni ningún archivo con derechos de autor |
@@ -50,6 +50,7 @@ Es el corazón del proyecto y lo que no existe en ningún otro port.
 - **Memoria por juego.** Cenit recuerda qué resolución sostuvo cada juego *en tu teléfono*. La próxima partida arranca directo ahí, sin pelear desde el máximo. Si un juego resultó limitado por CPU, deja de recortarle píxeles que no le sirven. Se borra manteniendo pulsado el interruptor de memoria.
 - **Recorte térmico anticipado.** Muchos celulares bajan su potencia por calor sin avisar. Cenit detecta la caída silenciosa y baja un paso *antes* de que sientas el tirón, con un tope por partida para no pasarse de listo.
 - **Cuotas de CPU con evidencia.** Hay juegos que nunca llegan al 100 % aunque todo esté al máximo (Shadow of the Colossus es el clásico). Si Cenit nota que tu juego se quedó clavado, te lo dice con los segundos que midió y te sugiere probar las cuotas; si no, te recomienda dejarlas en Normal. Se guardan solo para el juego que tienes delante y se aplican al instante.
+- **Sintonizador CPU/VU por juego (0.6.27, experimental).** Cuando el regidor detecta que un juego va atrasado con la GPU holgada y ya en su resolución más baja, Cenit ya no se queda de brazos cruzados: prueba una vez —solo para ese juego— una escalera conservadora (MTVU al revés, Ciclo EE −1, cuota suave), mide con cuadros reales por segundo, y solo se queda con lo que gana de verdad. Distingue si el cuello es del CPU emulado o del VU1 usando la métrica de espera del propio motor, revierte cualquier ensayo que no gane, y si la app se cierra a mitad el siguiente arranque deshace el ensayo solo. Apagado por defecto: es experimental y hay que encenderlo en Ajustes.
 - **Hilos anclados al núcleo rápido.** Mantiene el motor del juego y la gráfica en los núcleos potentes, sin que el sistema los mueva a los economizados a mitad de frame. Apagable para diagnosticar.
 - **Ritmo de cuadro según tu gama.** En media/alta usa el ritmo óptimo (el mando responde antes); en baja deja dos cuadros de amortiguación, que es como absorbe los picos sin perder fluidez.
 - **Carga de texturas por gama.** En gama baja solo sube a la gráfica las texturas que se van a ver: cientos de megas de memoria compartida libres y menos microcortes al entrar a zonas nuevas.
@@ -120,7 +121,7 @@ Lo digo claro: ningún truco hace correr *God of War* a 60 cuadros en un teléfo
 
 ## Cómo empezar
 
-1. Descarga `Cenit-0.6.26.apk` desde [Lanzamientos](https://github.com/HUEVOMAN77/Cenit/releases) e instálala (Android pedirá permitir apps de esta fuente la primera vez).
+1. Descarga `Cenit-0.6.27.apk` desde [Lanzamientos](https://github.com/HUEVOMAN77/Cenit/releases) e instálala (Android pedirá permitir apps de esta fuente la primera vez).
 2. Abre la app y sigue el asistente: coloca la **BIOS extraída de tu propia PS2** y elige la carpeta de tus juegos.
 3. Toca un juego de la biblioteca y listo. Con una partida abierta, el panel **Ajustes → Rendimiento** muestra todos los mandos de Cenit.
 4. **Si tu teléfono es Snapdragon/Adreno**: descarga también `Cenit-Turnip-25.3.6-*.zip` de la misma release, impórtalo en **Ajustes → Controlador gráfico personalizado** (no lo descomprimas), toca «Forzar otra vez el driver seleccionado» y juega normal. La segunda sesión de cada juego ya no recompila shaders; el diálogo del driver va llenando el medidor solo.
@@ -221,6 +222,12 @@ Todo mi camino, incluido lo que estuvo mal y corregí. Cada fila tiene su releas
 | Versión | Qué sumó |
 |---|---|
 | **0.6.26** | **0.6.25 prometió reconstrucción sub-nativa y no la cumplió: en un teléfono normal EASU nunca ejecutó. Esta versión lo arregla, y lo dice con números.** Detección honesta de la falla: en 0.6.25 condicioné EASU a que la nitidez CAS estuviera encendida (la «opción b» que diseñé). Pero el default de CAS es «Desactivado», y nada la encendía — así que en la práctica la pantalla seguía mostrando el estirado bilinear de siempre, borroso y pixelado, y el HUD no dejaba verlo: confundí «reconstruye mal» con «no ejecuta nunca», y eso costó un ciclo de medición completo. Tres arreglos. **Uno: la cadena es autocontenida.** Cuando pides reconstrucción y la imagen interna es más chica que la salida, Cenit arma él mismo el EASU → enfoque RCAS (el segundo paso que AMD exige textualmente después del primero), con un piso de nitidez propio — ya no necesita que toques CAS, y no te toca tu preferencia. **Dos: ya no basta una sola pasada EASU.** Verificado contra el propio código de AMD: EASU está diseñado para «1x to 4x area range» — hasta 2x lineal por pasada. God of War a 0.5x entrega 256x224 y el panel pide ~960x720: 3.75x lineal, ~14x de área, más del triple del rango declarado. Estirar en una sola pasada *fuera de especificación* es lo que sale borroso aunque el filtro esté activo. Desde ahora la reconstrucción encadena pasadas de <=2x cada una (dos en ese caso), cada una dentro del rango para el que AMD escribió el filtro. **Tres: el HUD muestra la evidencia.** Con el HUD de resolución activo aparece la línea `PRESENT 256x224 -> 960x720 x3.75 EASU ON x2` (verde cuando corre, blanca con OFF cuando no): se puede leer, con números, qué se manda, dónde se presenta y si la reconstrucción está viva. Y **la opción queda ENCENDIDA por defecto** desde 0.6.26 — con la evidencia visible en el HUD, dejarla apagada por defecto era repetir el error. Lo que no cambia: FSR1 no inventa detalle que nunca se renderizó; a 0.5x se ve claramente mejor que estirado y mucho peor que 1x nativo. Los escalones 0.5x/0.75x, el governor y todo lo demás de 0.6.25 quedan igual. |
+
+### El regidor ya no se queda de brazos cruzados: sintonizador CPU/VU por juego con benchmark y memoria (0.6.27)
+
+| Versión | Qué sumó |
+|---|---|
+| **0.6.27** | **El governor v4: cuando el cuello no es de píxeles, Cenit ahora puede actuar.** Desde 0.6.3 el regidor detectaba el problema —GPU holgada, juego atrasado, resolución ya en el suelo: el cuello es la CPU emulada o el VU1—, lo anunciaba en el log y no hacía nada, porque recortar emulación gratis no era lo nuestro. Esta versión le da manos con un sintonizador CPU/VU por juego, **experimental y apagado por defecto**. Cómo decide: clasifica con evidencia del propio motor — la métrica de sincronía EE↔VU1 (milisegundos y llamadas en que el EE queda bloqueado esperando al VU1, ventana de 0,5 s) separa CPU-bound (el EE trabaja solo: ofrecer MTVU o un paso conservador) de VU-bound (el EE espera al VU1: ofrecer quitarle el hilo, no añadirle carga). Qué prueba: una escalera conservadora —invertir MTVU, Ciclo EE −1 con cuota 0, cuota suave 1— nunca turbo. Cómo mide: cuadros reales por segundo (nunca el % de velocidad: con cuotas el objetivo no se re-escala y el % miente por diseño), ventana de asentamiento + muestra, decisión por mediana con piso de estabilidad; gana MTVU con +6 %, un recorte con +10 %. Qué guarda: lo ganador se escribe SOLO en los ajustes por juego del núcleo (tu configuración global queda intacta), y el veredicto vive en la memoria del juego — un adoptado no se re-prueba nunca, un "nada ganó" caduca a la semana. Seguridad: cada ensayo escribe el INI global con verificación por lectura efectiva antes de medir; un diario anti-cierre registrado ANTES de cada escritura permite que el arranque siguiente deshaga exacto un ensayo cortado por un cierre brusco; si la adopción no aterriza, se borra lo escrito; si el usuario mueve un spinner a mitad, el ensayo se aborta y revierte; el regidor y el sintonizador negocian quién es dueño del Ciclo EE para no congelarse el uno al otro. El "Recordar rendimiento por juego" (mantener pulsado) ahora también deshace la adopción en el INI del juego. Honestidad: el benchmark cuesta entre uno y tres minutos la primera vez por juego, y necesita resolución dinámica + memoria por juego + el interruptor del sintonizador encendidos. Nada del motor fue tocado — la sincronía EE↔VU1, los superbloques y la semántica de las cuotas se dejaron como estaban; el sintonizador usa únicamente la plomería de aplicación en caliente que ya existía. |
 
 ---
 

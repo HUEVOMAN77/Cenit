@@ -263,6 +263,22 @@ public final class SettingsScreenController {
         toggle(R.id.set_sw_adaptive, "adaptive_perf", true, null);
         toggle(R.id.set_sw_autoturbo, "auto_turbo", false, null);
 
+        // 0.6.27 (governor v4): sintonizador CPU/VU. EXPERIMENTAL y apagado por
+        // defecto: cuando el juego va atrasado CON la GPU holgada y ya en su
+        // resolución más baja, el regidor bencha una vez por juego una escalera
+        // conservadora (MTVU invertido, Ciclo EE -1, cuota suave), mide con FPS
+        // reales — nunca con el % de velocidad, que con cuotas miente —, y solo
+        // adopta lo que gana de verdad, guardándolo en los ajustes POR JUEGO del
+        // núcleo (tus valores globales no se tocan). Si nada gana, se revierte
+        // todo. Sin "Recordar rendimiento por juego" encendido no arranca: el
+        // veredicto necesita dónde vivir. El regidor de resolución también tiene
+        // que estar encendido (es su reloj el que lo hace tic-tac).
+        toggle(R.id.set_sw_cpu_tuner, "cpu_tuner", false, null);
+        // Guardar la explicación general del layout: readValuesIntoUi() la pisa
+        // con el veredicto del juego en curso y necesita poder restaurarla.
+        TextView tunerNoteView = root.findViewById(R.id.set_tv_cpu_tuner_note);
+        if (tunerNoteView != null) tunerNoteDefault = tunerNoteView.getText().toString();
+
         // 0.6.6 (bloques 1-3): pinning, cola de cuadros y precarga. El pinning
         // vive en EmuCore del INI base, que en este port es memoria rellena por
         // ApplyHardwarePerformanceProfile en cada arranque — por eso Java debe
@@ -353,6 +369,12 @@ public final class SettingsScreenController {
             adaptiveSw.setOnLongClickListener(v -> {
                 final String uri = host.runningGamePath();
                 if (uri == null || uri.isEmpty()) return false;
+                // 0.6.27: borrar la memoria también DESHACE la adopción que el
+                // sintonizador CPU/VU escribió en el INI del juego (leyendo la
+                // máscara guardada antes de eliminarla): un -1 huérfano sin su
+                // explicación es justo lo que este proyecto no deja existir.
+                final AdaptiveProfile old = new AdaptiveProfile(context, uri);
+                CpuVUTuner.deleteAdoptedKeys(uri, old.tunerAdoptado);
                 AdaptiveProfile.forget(context, uri);
                 android.widget.Toast.makeText(context, "Memoria borrada para este juego",
                         android.widget.Toast.LENGTH_SHORT).show();
@@ -620,6 +642,9 @@ public final class SettingsScreenController {
     // Estado -> interfaz
     // ------------------------------------------------------------------
 
+    /** Texto original de la nota del sintonizador (del layout), para poder volver a el. */
+    private String tunerNoteDefault;
+
     private void readValuesIntoUi() {
         int renderer = prefs.getInt("renderer", -1);
         MaterialButtonToggleGroup tg = root.findViewById(R.id.set_tg_renderer);
@@ -633,6 +658,33 @@ public final class SettingsScreenController {
         check(R.id.set_sw_dynres, prefs.getBoolean("dynamic_res", true));
         check(R.id.set_sw_adaptive, prefs.getBoolean("adaptive_perf", true));
         check(R.id.set_sw_autoturbo, prefs.getBoolean("auto_turbo", false));
+        check(R.id.set_sw_cpu_tuner, prefs.getBoolean("cpu_tuner", false));
+        // (la nota del sintonizador usa tunerNoteDefault, capturada al inflar)
+        // 0.6.27: el sintonizador CPU/VU cuenta aquí su veredicto real del juego
+        // que está delante (o el último bencheado), no promesas. Con el juego
+        // apagado y sin veredicto, la nota del layout (la explicación general).
+        final TextView tunerNote = root.findViewById(R.id.set_tv_cpu_tuner_note);
+        if (tunerNote != null) {
+            final String tUri = host.runningGamePath();
+            final AdaptiveProfile tProf = (tUri != null && !tUri.isEmpty())
+                    ? new AdaptiveProfile(context, tUri) : null;
+            final String verdict = tProf == null ? "" : tProf.tunerVerdict;
+            if (tProf != null && tProf.tunerAplicado) {
+                tunerNote.setText("Este juego: adoptado " + verdict + ". Cenit lo guardó "
+                        + "en sus ajustes por juego y ya no lo vuelve a probar. Mantén "
+                        + "pulsado 'Recordar rendimiento por juego' para deshacerlo.");
+            } else if ("ninguno".equals(verdict)) {
+                tunerNote.setText("Este juego: Cenit lo probó y ningún perfil le ganó a "
+                        + "su estado actual, así que no tocó nada. Vuelve a mirar en una "
+                        + "semana o tras cambiar de driver.");
+            } else if ("recuperado".equals(verdict)) {
+                tunerNote.setText("Este juego: una prueba de Cenit se cortó de golpe (el "
+                        + "juego se cerró a mitad). Cenit revirtió todo solo; la próxima "
+                        + "vez que dé la señal lo vuelve a intentar.");
+            } else if (tunerNoteDefault != null) {
+                tunerNote.setText(tunerNoteDefault);
+            }
+        }
         check(R.id.set_sw_pinning, prefs.getBoolean("thread_pinning", true));
         check(R.id.set_sw_fastcdvd, prefs.getBoolean("fast_cdvd", false));
         check(R.id.set_sw_mtvu, prefs.getBoolean("mtvu", NativeApp.defaultMTVU()));
