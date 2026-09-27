@@ -30,7 +30,6 @@
 #include <limits>
 #include <mutex>
 #include <sstream>
-#include <system_error> // std::system_error del std::thread del worker async
 
 #ifdef __ANDROID__
 #include <sys/resource.h> // setpriority para el hilo de compilación async
@@ -5918,26 +5917,20 @@ bool GSDeviceVK::StartAsyncPipelineCompiler()
 	m_async_last_vs_key = 0;
 	m_async_has_last_vs = false;
 
-	// Crear el hilo puede fallar (std::system_error con EAGAIN si el sistema ya no da
-	// más threads). Eso NO puede tirar el juego: se reporta y la bandera queda como
-	// si estuviera apagada — GetTFXPipeline compila en el hilo GS, con sus picos, y
-	// lo intenta otra vez en el siguiente miss.
-	std::thread thread;
-	try
+	// Crear el hilo puede fallar (EAGAIN si el sistema ya no da más threads). Eso
+	// NO puede tirar el juego: Threading::Thread::Start() devuelve bool (no
+	// std::thread, que lanza y este build va con -fno-exceptions), se reporta y la
+	// bandera queda como si estuviera apagada — GetTFXPipeline compila en el hilo
+	// GS, con sus picos, y el latch evita reintentar en cada miss.
+	if (!m_async_thread.Start([this]() { AsyncPipelineCompilerThread(); }))
 	{
-		thread = std::thread(&GSDeviceVK::AsyncPipelineCompilerThread, this);
-	}
-	catch (const std::system_error& ex)
-	{
-		Console.Error("VK async pipeline compiler: no se pudo crear el hilo (%s); "
-		              "se compila de forma síncrona",
-			ex.what());
+		Console.Error("VK async pipeline compiler: no se pudo crear el hilo; "
+		              "se compila de forma síncrona");
 		return false;
 	}
 
 	m_async_stop_requested = false;
 	m_async_active = true;
-	m_async_thread = std::move(thread);
 	Console.WriteLn("VK async pipeline compiler: worker iniciado (experimental)");
 	return true;
 }
@@ -5954,8 +5947,8 @@ void GSDeviceVK::StopAsyncPipelineCompiler()
 		m_async_stop_requested = true;
 		m_async_cv.notify_all();
 	}
-	if (m_async_thread.joinable())
-		m_async_thread.join();
+	if (m_async_thread.Joinable())
+		m_async_thread.Join();
 
 	// El worker puede haberse ido con una compilación todavía en vuelo (parar =
 	// descartar cola, no interrumpir vkCreateGraphicsPipelines). Esperar aquí es

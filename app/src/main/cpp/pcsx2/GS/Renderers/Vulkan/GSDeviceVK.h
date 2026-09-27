@@ -11,6 +11,7 @@
 
 #include "common/HashCombine.h"
 #include "common/ReadbackSpinManager.h"
+#include "common/Threading.h"
 
 #include <array>
 #include <atomic>
@@ -21,7 +22,6 @@
 #include <memory>
 #include <mutex>
 #include <string>
-#include <thread>
 #include <unordered_set>
 #include <vector>
 
@@ -526,7 +526,11 @@ private:
 	std::condition_variable m_async_cv;
 	std::deque<PipelineSelector> m_async_queue;
 	std::unordered_set<PipelineSelector, PipelineSelectorHash> m_async_pending;
-	std::thread m_async_thread;
+	/// Threading::Thread y no std::thread: el portable se compila con
+	/// -fno-exceptions, asi que std::thread (que lanza std::system_error si
+	/// pthread_create falla) ni siquiera compila aqui. Threading::Thread::Start()
+	/// devuelve bool, que es justo lo que necesita el fallback.
+	Threading::Thread m_async_thread;
 	bool m_async_active = false;
 	bool m_async_stop_requested = false;
 	/// true tras un StartAsyncPipelineCompiler() que no pudo crear el hilo. La
