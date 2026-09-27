@@ -570,6 +570,9 @@ final class CpuVUTuner {
         final String mask = adoptedMask();
         if (mask.isEmpty()) {
             deleteWrittenKeys(mJournalUri);
+            // La receta del diario ya se consumió: sin borrarla, el próximo
+            // arranque marcaría el perfil como "recuperado" por un muerto.
+            removeJournal();
             finishRecord("ninguno", "");
             return;
         }
