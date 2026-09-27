@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <deque>
 #include <thread>
 #include <mutex>
@@ -686,15 +687,34 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
 				GetVideoMode() == GSVideoMode::SDTV_480P);
 			s_last_draw_rect = draw_rect;
 
+			// Cenit 0.6.25: reconstruccion EASU (opcional, apagada por defecto). Solo
+			// cuando el usuario la pidio, el renderer la soporta, HAY CAS delante (opcion
+			// b: EASU reconstruye y CAS afila; sin CAS no la activamos, porque dejaria el
+			// frame sin afilar detras del upscale) y la imagen interna es MAS CHICA que
+			// el destino (escala sub-nativa; EASU es upscale-only, nunca downscales).
+			// Si EASU falla en runtime, current queda intacta y CAS hace lo de siempre.
+			bool easu_ran = false;
+			if (GSConfig.EASUReconstruct && GSConfig.CASMode != GSCASMode::Disabled &&
+				g_gs_device->Features().easu_reconstruct)
+			{
+				const int out_w = static_cast<int>(std::ceil(draw_rect.z - draw_rect.x));
+				const int out_h = static_cast<int>(std::ceil(draw_rect.w - draw_rect.y));
+				if (current->GetWidth() < out_w && current->GetHeight() < out_h)
+					easu_ran = g_gs_device->EASU(current, src_rect, src_uv, draw_rect);
+			}
+
 			if (GSConfig.CASMode != GSCASMode::Disabled)
 			{
 				static bool cas_log_once = false;
 				if (g_gs_device->Features().cas_sharpening)
 				{
 					// sharpen only if the IR is higher than the display resolution
-					const bool sharpen_only = (GSConfig.CASMode == GSCASMode::SharpenOnly ||
-					                           (current->GetWidth() > g_gs_device->GetWindowWidth() &&
-					                            current->GetHeight() > g_gs_device->GetWindowHeight()));
+					// Cenit 0.6.25: si EASU ya corrio, current esta a resolucion de
+					// salida: forzar sharpen_only (no queda nada que estirar).
+					const bool sharpen_only = easu_ran ||
+						(GSConfig.CASMode == GSCASMode::SharpenOnly ||
+						 (current->GetWidth() > g_gs_device->GetWindowWidth() &&
+						  current->GetHeight() > g_gs_device->GetWindowHeight()));
 					g_gs_device->CAS(current, src_rect, src_uv, draw_rect, sharpen_only);
 				}
 				else if (!cas_log_once)

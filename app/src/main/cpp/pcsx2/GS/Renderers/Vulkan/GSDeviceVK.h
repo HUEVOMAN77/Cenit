@@ -565,6 +565,11 @@ private:
 	VkDescriptorSetLayout m_cas_ds_layout = VK_NULL_HANDLE;
 	VkPipelineLayout m_cas_pipeline_layout = VK_NULL_HANDLE;
 	std::array<VkPipeline, NUM_CAS_PIPELINES> m_cas_pipelines = {};
+	// Cenit 0.6.25: pipeline compute de EASU. Un solo pipeline (no tiene variante
+	// sharpen_only: siempre escribe a resolucion de destino).
+	VkDescriptorSetLayout m_easu_ds_layout = VK_NULL_HANDLE;
+	VkPipelineLayout m_easu_pipeline_layout = VK_NULL_HANDLE;
+	VkPipeline m_easu_pipeline = VK_NULL_HANDLE;
 	VkPipeline m_imgui_pipeline = VK_NULL_HANDLE;
 
 	GSHWDrawConfig::VSConstantBuffer m_vs_cb_cache;
@@ -584,6 +589,10 @@ private:
 
 	bool DoCAS(
 		GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants) final;
+
+	// Cenit 0.6.25: EASU en Vulkan. Solo existe si CompileEASUPipelines() tuvo exito
+	// (m_easu_pipeline != VK_NULL_HANDLE); por eso GSDevice::EASU mira su retorno.
+	bool DoEASU(GSTexture* sTex, GSTexture* dTex, const std::array<u32, NUM_EASU_CONSTANTS>& constants) final;
 
 	VkSampler GetSampler(GSHWDrawConfig::SamplerSelector ss);
 	void ClearSamplerCache() final;
@@ -644,6 +653,11 @@ private:
 	bool CompileMergePipelines();
 	bool CompilePostProcessingPipelines();
 	bool CompileCASPipelines();
+	// Cenit 0.6.25: el pipeline compute de EASU. A diferencia de CAS, su fallo NO
+	// tumba la creacion del device: es una feature opcional y aditiva
+	// (m_features.easu_reconstruct queda false y GSRenderer::Present toma el camino
+	// de siempre).
+	bool CompileEASUPipelines();
 
 	bool CompileImGuiPipeline();
 	void RenderImGui();

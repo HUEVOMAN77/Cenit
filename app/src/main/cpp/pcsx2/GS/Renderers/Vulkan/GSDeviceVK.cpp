@@ -51,6 +51,11 @@ enum : u32
 	// size to match the draw budget rather than the old CAS-only value of 4.
 	MAX_STORAGE_IMAGE_DESCRIPTORS_PER_FRAME = 2 * MAX_DRAW_CALLS_PER_FRAME,
 	MAX_INPUT_ATTACHMENT_IMAGE_DESCRIPTORS_PER_FRAME = 2 * MAX_DRAW_CALLS_PER_FRAME,
+	// Cenit 0.6.25: EASU necesita un sampler explicito (lee con textureGather, y en
+	// Vulkan sampler y texture van en descriptors separados). Es UNO por frame,
+	// igual que el storage image de CAS; se pone holgura pequena, no el presupuesto
+	// de draws, porque un pool de 8192 samplers seria memoria reservada de balde.
+	MAX_SAMPLER_DESCRIPTORS_PER_FRAME = 4,
 	MAX_DESCRIPTOR_SETS_PER_FRAME = MAX_DRAW_CALLS_PER_FRAME * 2,
 
 	VERTEX_BUFFER_SIZE = 32 * 1024 * 1024,
@@ -1057,6 +1062,8 @@ bool GSDeviceVK::CreateCommandBuffers()
 				{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, MAX_SAMPLED_IMAGE_DESCRIPTORS_PER_FRAME},
 				{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, MAX_STORAGE_IMAGE_DESCRIPTORS_PER_FRAME},
 				{VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, MAX_INPUT_ATTACHMENT_IMAGE_DESCRIPTORS_PER_FRAME},
+				// Cenit 0.6.25: el descriptor de sampler que solo usa EASU.
+				{VK_DESCRIPTOR_TYPE_SAMPLER, MAX_SAMPLER_DESCRIPTORS_PER_FRAME},
 			};
 
 			VkDescriptorPoolCreateInfo dp_info = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, nullptr, 0,
@@ -2456,6 +2463,12 @@ bool GSDeviceVK::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 	if (!CompileCASPipelines())
 		return false;
+
+	// Cenit 0.6.25: EASU es aditivo. Si aqui algo falla (el .glsl no llego al
+	// directorio de recursos, el driver no pasa el compute), NO se tumba el device:
+	// m_features.easu_reconstruct queda false y Present toma el camino de siempre.
+	if (!CompileEASUPipelines())
+		Console.WriteLn("VK: EASU unavailable, sub-native scaling will use the normal path");
 
 	if (!CompileImGuiPipeline())
 		return false;
@@ -4993,6 +5006,58 @@ bool GSDeviceVK::CompileCASPipelines()
 	return true;
 }
 
+// Cenit 0.6.25: pipeline compute de EASU. Copia la forma de CompileCASPipelines con
+// dos diferencias de peso:
+//  - Hay un tercer binding, de SAMPLER. CAS lee con texelFetch y no necesita; EASU
+//    lee con textureGather, que en Vulkan pide sampler y texture como descriptors
+//    separados (por eso tambien hace falta MAX_SAMPLER_DESCRIPTORS_PER_FRAME en el
+//    pool por frame).
+//  - No hay variantes por specialization constant: EASU siempre escribe a resolucion
+//    de destino, no existe un "sharpen only".
+// El retorno NO se enlaza con `if (!...) return false` en Create: si el driver no
+// puede con este compute, Cenit sigue funcionando exactamente como antes.
+bool GSDeviceVK::CompileEASUPipelines()
+{
+	VkDevice dev = m_device;
+	Vulkan::DescriptorSetLayoutBuilder dslb;
+	Vulkan::PipelineLayoutBuilder plb;
+
+	if (m_optional_extensions.vk_khr_push_descriptor)
+		dslb.SetPushFlag();
+	dslb.AddBinding(0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT);
+	dslb.AddBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT);
+	dslb.AddBinding(2, VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT);
+	if ((m_easu_ds_layout = dslb.Create(dev)) == VK_NULL_HANDLE)
+		return false;
+	Vulkan::SetObjectName(dev, m_easu_ds_layout, "EASU descriptor layout");
+
+	plb.AddPushConstants(VK_SHADER_STAGE_COMPUTE_BIT, 0, NUM_EASU_CONSTANTS * sizeof(u32));
+	plb.AddDescriptorSet(m_easu_ds_layout);
+	if ((m_easu_pipeline_layout = plb.Create(dev)) == VK_NULL_HANDLE)
+		return false;
+	Vulkan::SetObjectName(dev, m_easu_pipeline_layout, "EASU pipeline layout");
+
+	std::optional<std::string> easu_source = ReadShaderSource("shaders/vulkan/easu.glsl");
+	if (!easu_source.has_value() || !GetEASUShaderSource(&easu_source.value()))
+		return false;
+
+	VkShaderModule mod = g_vulkan_shader_cache->GetComputeShader(easu_source->c_str());
+	ScopedGuard mod_guard = [this, &mod]() { vkDestroyShaderModule(m_device, mod, nullptr); };
+	if (mod == VK_NULL_HANDLE)
+		return false;
+
+	Vulkan::ComputePipelineBuilder cpb;
+	cpb.SetPipelineLayout(m_easu_pipeline_layout);
+	cpb.SetShader(mod, "main");
+	m_easu_pipeline = cpb.Create(dev, g_vulkan_shader_cache->GetPipelineCache(true), false);
+	if (!m_easu_pipeline)
+		return false;
+
+	Vulkan::SetObjectName(dev, m_easu_pipeline, "EASU pipeline");
+	m_features.easu_reconstruct = true;
+	return true;
+}
+
 bool GSDeviceVK::CompileImGuiPipeline()
 {
 	const std::optional<std::string> glsl = ReadShaderSource("shaders/vulkan/imgui.glsl");
@@ -5265,6 +5330,63 @@ bool GSDeviceVK::DoCAS(
 	return true;
 }
 
+// Cenit 0.6.25: EASU. Es DoCAS recortado a un solo camino, con dos diferencias
+// reales: un binding mas (el sampler, porque textureGather no existe sin sampler y
+// texelFetch tampoco lo pide) y el sampler se lee EN el momento del dispatch
+// (m_point_sampler), no guardado: ClearSamplerCache reasigna ese handle, y un alias
+// capturado en Create quedaria colgado despues de la primera limpieza.
+bool GSDeviceVK::DoEASU(GSTexture* sTex, GSTexture* dTex, const std::array<u32, NUM_EASU_CONSTANTS>& constants)
+{
+	if (m_easu_pipeline == VK_NULL_HANDLE)
+		return false;
+
+	g_perfmon.Put(GSPerfMon::TextureCopies, 1);
+
+	EndRenderPass();
+
+	GSTextureVK* const sTexVK = static_cast<GSTextureVK*>(sTex);
+	GSTextureVK* const dTexVK = static_cast<GSTextureVK*>(dTex);
+	VkCommandBuffer cmdbuf = GetCurrentCommandBuffer();
+
+	sTexVK->TransitionToLayout(cmdbuf, GSTextureVK::Layout::ShaderReadOnly);
+	dTexVK->TransitionToLayout(cmdbuf, GSTextureVK::Layout::ComputeReadWriteImage);
+
+	Vulkan::DescriptorSetUpdateBuilder dsub;
+	if (m_optional_extensions.vk_khr_push_descriptor)
+	{
+		dsub.AddImageDescriptorWrite(VK_NULL_HANDLE, 0, sTexVK->GetView(), sTexVK->GetVkLayout());
+		dsub.AddStorageImageDescriptorWrite(VK_NULL_HANDLE, 1, dTexVK->GetView(), dTexVK->GetVkLayout());
+		dsub.AddSamplerDescriptorWrite(VK_NULL_HANDLE, 2, m_point_sampler);
+		dsub.PushUpdate(cmdbuf, VK_PIPELINE_BIND_POINT_COMPUTE, m_easu_pipeline_layout, 0, false);
+	}
+	else
+	{
+		VkDescriptorSet ds = AllocateDescriptorSetFromFramePool(m_easu_ds_layout);
+		if (ds == VK_NULL_HANDLE) [[unlikely]]
+			return false; // una reserva por cuadro tras EndRenderPass; el sampler del pool va holgado
+		dsub.AddImageDescriptorWrite(ds, 0, sTexVK->GetView(), sTexVK->GetVkLayout());
+		dsub.AddStorageImageDescriptorWrite(ds, 1, dTexVK->GetView(), dTexVK->GetVkLayout());
+		dsub.AddSamplerDescriptorWrite(ds, 2, m_point_sampler);
+		dsub.Update(m_device);
+		vkCmdBindDescriptorSets(cmdbuf, VK_PIPELINE_BIND_POINT_COMPUTE, m_easu_pipeline_layout, 0, 1, &ds, 0, nullptr);
+	}
+
+	// EASU escribe un bloque 16x16 por workgroup, igual que CAS: el dispatch se
+	// dimensiona por el DESTINO (resolucion de salida, mas grande que la entrada).
+	static const int threadGroupWorkRegionDim = 16;
+	const int dispatchX = (dTex->GetWidth() + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
+	const int dispatchY = (dTex->GetHeight() + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
+
+	vkCmdPushConstants(cmdbuf, m_easu_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+		NUM_EASU_CONSTANTS * sizeof(u32), constants.data());
+	vkCmdBindPipeline(cmdbuf, VK_PIPELINE_BIND_POINT_COMPUTE, m_easu_pipeline);
+	vkCmdDispatch(cmdbuf, dispatchX, dispatchY, 1);
+
+	dTexVK->TransitionToLayout(GSTextureVK::Layout::ShaderReadOnly);
+
+	return true;
+}
+
 void GSDeviceVK::DestroyResources()
 {
 	if (m_tfx_ubo_descriptor_set != VK_NULL_HANDLE)
@@ -5328,6 +5450,18 @@ void GSDeviceVK::DestroyResources()
 		vkDestroyPipelineLayout(m_device, m_cas_pipeline_layout, nullptr);
 	if (m_cas_ds_layout != VK_NULL_HANDLE)
 		vkDestroyDescriptorSetLayout(m_device, m_cas_ds_layout, nullptr);
+	// Cenit 0.6.25: EASU, mismo orden que arriba (pipeline, layout, layout de
+	// descriptores). Todos pueden estar nulos si CompileEASUPipelines fallo: por eso
+	// cada uno se mira antes de destruir.
+	if (m_easu_pipeline != VK_NULL_HANDLE)
+		vkDestroyPipeline(m_device, m_easu_pipeline, nullptr);
+	m_easu_pipeline = VK_NULL_HANDLE;
+	if (m_easu_pipeline_layout != VK_NULL_HANDLE)
+		vkDestroyPipelineLayout(m_device, m_easu_pipeline_layout, nullptr);
+	m_easu_pipeline_layout = VK_NULL_HANDLE;
+	if (m_easu_ds_layout != VK_NULL_HANDLE)
+		vkDestroyDescriptorSetLayout(m_device, m_easu_ds_layout, nullptr);
+	m_easu_ds_layout = VK_NULL_HANDLE;
 	if (m_imgui_pipeline != VK_NULL_HANDLE)
 		vkDestroyPipeline(m_device, m_imgui_pipeline, nullptr);
 

@@ -1007,6 +1007,7 @@ void GSDevice::ClearCurrent()
 	delete m_mad;
 	delete m_target_tmp;
 	delete m_cas;
+	delete m_easu;
 
 	m_merge = nullptr;
 	m_weavebob = nullptr;
@@ -1014,6 +1015,7 @@ void GSDevice::ClearCurrent()
 	m_mad = nullptr;
 	m_target_tmp = nullptr;
 	m_cas = nullptr;
+	m_easu = nullptr;
 }
 
 void GSDevice::Merge(GSTexture* sTex[3], GSVector4* sRect, GSVector4* dRect, const GSVector2i& fs, const GSRegPMODE& PMODE, const GSRegEXTBUF& EXTBUF, u32 c)
@@ -1219,6 +1221,11 @@ void GSDevice::EndDSAsRT()
 #define A_CPU 1
 #include "shaders/common/ffx_a.h"
 #include "shaders/common/ffx_cas.h"
+// Cenit 0.6.25: misma receta de arriba para el setup de constantes de EASU
+// (FsrEasuCon/FsrEasuConOffset), que funciona en CPU y en GPU. El header esta
+// recortado a la seccion EASU (ver la nota de procedencia en su interior), asi que
+// no introduce las macros que faltan en el ffx_a.h de 2019 de este proyecto.
+#include "shaders/common/ffx_fsr1.h"
 
 #if defined(__clang__)
 #pragma clang diagnostic pop
@@ -1236,6 +1243,19 @@ bool GSDevice::GetCASShaderSource(std::string* source)
 	// Since our shader compilers don't support includes, and OpenGL doesn't at all... we'll do a really cheeky string replace.
 	StringUtil::ReplaceAll(source, "#include \"ffx_a.h\"", ffx_a_source.value());
 	StringUtil::ReplaceAll(source, "#include \"ffx_cas.h\"", ffx_cas_source.value());
+	return true;
+}
+
+// Cenit 0.6.25: misma receta de inlineado para el compute de EASU.
+bool GSDevice::GetEASUShaderSource(std::string* source)
+{
+	std::optional<std::string> ffx_a_source = ReadShaderSource("shaders/common/ffx_a.h");
+	std::optional<std::string> ffx_fsr1_source = ReadShaderSource("shaders/common/ffx_fsr1.h");
+	if (!ffx_a_source.has_value() || !ffx_fsr1_source.has_value())
+		return false;
+
+	StringUtil::ReplaceAll(source, "#include \"ffx_a.h\"", ffx_a_source.value());
+	StringUtil::ReplaceAll(source, "#include \"ffx_fsr1.h\"", ffx_fsr1_source.value());
 	return true;
 }
 
@@ -1275,6 +1295,58 @@ void GSDevice::CAS(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, con
 	tex = m_cas;
 	src_rect = GSVector4i(0, 0, dst_width, dst_height);
 	src_uv = GSVector4(0.0f, 0.0f, 1.0f, 1.0f);
+}
+
+// Cenit 0.6.25: reconstruccion EASU (AMD FidelityFX Super Resolution 1).
+//
+// Misma forma que `CAS()` arriba, deliberadamente: decide el tamano de destino por
+// draw_rect, reusa la scratch solo si coincide, arma constantes en CPU con el
+// propio FsrEasuConOffset del header, y al exito reasigna tex/src_rect/src_uv. La
+// diferencia es que EASU SIEMPRE escribe a resolucion de destino (no tiene modo
+// sharpen_only) y que aqui la entrada puede venir recortada, por eso se pasa el
+// offset (src_rect.x/y) al setup de constantes.
+bool GSDevice::EASU(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect)
+{
+	const int dst_width = static_cast<int>(std::ceil(draw_rect.z - draw_rect.x));
+	const int dst_height = static_cast<int>(std::ceil(draw_rect.w - draw_rect.y));
+	if (dst_width <= 0 || dst_height <= 0)
+		return false;
+
+	GSTexture* src_tex = tex;
+	if (!m_easu || m_easu->GetWidth() != dst_width || m_easu->GetHeight() != dst_height)
+	{
+		delete m_easu;
+		m_easu = CreateSurface(GSTexture::ShaderWriteTexture, dst_width, dst_height, 1, GSTexture::Format::Color);
+		if (!m_easu)
+		{
+			Console.Error("Failed to allocate EASU RW texture.");
+			return false;
+		}
+	}
+
+	// FsrEasuCon/FsrEasuConOffset escriben bits de float en cada slot (AU1_AF1), asi
+	// que el array viaja como u32 y el shader lo reinterpreta a su vuelta.
+	std::array<u32, NUM_EASU_CONSTANTS> consts;
+	AU1* con0 = &consts[0];
+	AU1* con1 = &consts[4];
+	AU1* con2 = &consts[8];
+	AU1* con3 = &consts[12];
+	FsrEasuConOffset(con0, con1, con2, con3,
+		static_cast<AF1>(src_rect.width()), static_cast<AF1>(src_rect.height()),
+		static_cast<AF1>(src_tex->GetWidth()), static_cast<AF1>(src_tex->GetHeight()),
+		static_cast<AF1>(dst_width), static_cast<AF1>(dst_height),
+		static_cast<AF1>(static_cast<int>(src_rect.x)), static_cast<AF1>(static_cast<int>(src_rect.y)));
+
+	if (!DoEASU(src_tex, m_easu, consts))
+	{
+		Console.Warning("Applying EASU failed.");
+		return false;
+	}
+
+	tex = m_easu;
+	src_rect = GSVector4i(0, 0, dst_width, dst_height);
+	src_uv = GSVector4(0.0f, 0.0f, 1.0f, 1.0f);
+	return true;
 }
 
 bool GSHWDrawConfig::BlendState::IsEffective(ColorMaskSelector colormask) const

@@ -323,6 +323,20 @@ public class NativeApp {
     public static void setAsyncShaderCompileAsync(boolean enabled) {
         runNativeSettingAsync("setAsyncShaderCompile", () -> setAsyncShaderCompile(enabled));
     }
+
+    // --- Cenit 0.6.25: reconstrucción EASU de FSR1 (Vulkan) -----------------
+    // EXPERIMENTAL y APAGADA por defecto. Cuando el governor baja la resolución
+    // interna por debajo de 1x (0.5x / 0.75x), la imagen llegaría al panel
+    // estirada. EASU la reconstruye a la resolución de salida antes del realce,
+    // y CAS pasa a modo "solo enfocar" sobre esa imagen (no vuelve a escalar).
+    // Requiere CAS encendido: si CAS está apagado, EASU simplemente no corre.
+    // No inventa detalle que nunca se renderizó: se nota mucho mejor que
+    // estirar, no idéntico a nativo. Solo Vulkan; se aplica en caliente.
+    public static native void setEASUReconstruct(boolean enabled);
+    public static void setEASUReconstructAsync(boolean enabled) {
+        runNativeSettingAsync("setEASUReconstruct", () -> setEASUReconstruct(enabled));
+    }
+
     public static native String getLogDirectory();
     /** Carpeta de logs según el núcleo, o null si el binario nativo no está. */
     public static String safeGetLogDirectory() {

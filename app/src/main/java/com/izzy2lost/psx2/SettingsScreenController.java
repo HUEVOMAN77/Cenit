@@ -37,8 +37,16 @@ import com.google.android.material.slider.Slider;
  */
 public final class SettingsScreenController {
 
-    /** Escalas disponibles, de 1x a 8x. El texto vive en scale_entries_cenit. */
-    static final float[] SCALE_VALUES = {1f, 1.25f, 1.5f, 2f, 2.5f, 3f, 4f, 5f, 6f, 8f};
+    /**
+     * Escalas disponibles, de 0.5x a 8x. El texto vive en scale_entries_cenit.
+     * Cenit 0.6.25: los dos primeros escalones son sub-nativos (0.5x/0.75x).
+     * Los usa el gobernador de resolución dinámica cuando el juego no llega a
+     * 1x; por debajo de nativo la imagen se reconstruye con EASU si el usuario
+     * lo enciende (y CAS está puesto), o se estira como antes si no. El techo
+     * que respeta el governor sigue siendo el valor que elija el usuario:
+     * quien no baje de 1x en el menú jamás verá estos escalones en pantalla.
+     */
+    static final float[] SCALE_VALUES = {0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 2.5f, 3f, 4f, 5f, 6f, 8f};
 
     public interface Host {
         void onBack();
@@ -305,6 +313,28 @@ public final class SettingsScreenController {
         // dispositivo, así que ApplySettings la aplica con la VM viva.
         toggle(R.id.set_sw_async_shaders, "async_shader_compile", false,
                 checked -> NativeApp.setAsyncShaderCompileAsync(checked));
+
+        // Cenit 0.6.25: reconstrucción EASU (FSR1) para los escalones sub-nativos
+        // del gobernador (0.5x/0.75x). Opción b pactada: EASU NO fuerza CAS; la
+        // cadena real es EASU -> CAS en modo "solo enfocar", y el gate de C++
+        // (GSRenderer.cpp) la rechaza si CAS está apagado. Aquí se avisa con un
+        // toast al encenderla con CAS en "Apagada", para que el "no hace nada"
+        // no se sienta como un bug. Default apagado (experimental); no está entre
+        // las opciones que reinician el dispositivo, así que ApplySettings la
+        // aplica con la VM viva.
+        MaterialSwitch easuSw = root.findViewById(R.id.set_sw_easu);
+        if (easuSw != null) {
+            easuSw.setOnCheckedChangeListener((b, checked) -> {
+                if (checked == prefs.getBoolean("easu_reconstruct", false)) return;
+                prefs.edit().putBoolean("easu_reconstruct", checked).apply();
+                NativeApp.setEASUReconstructAsync(checked);
+                if (checked && prefs.getInt("cas_mode", 0) == 0) {
+                    android.widget.Toast.makeText(context,
+                            "EASU necesita la nitidez CAS encendida: sin CAS no reconstruye nada.",
+                            android.widget.Toast.LENGTH_LONG).show();
+                }
+            });
+        }
 
         // La posición del spinner ES el valor de la clave (ver arrays.xml). Como
         // con medio píxel y cuotas: el primer disparo del adaptador se ADOPTA sin
@@ -618,6 +648,7 @@ public final class SettingsScreenController {
         check(R.id.set_sw_vu_probe, prefs.getBoolean("vu_trace_probe", false));
         check(R.id.set_sw_vu_superblock, prefs.getBoolean("vu_superblock", false));
         check(R.id.set_sw_async_shaders, prefs.getBoolean("async_shader_compile", false));
+        check(R.id.set_sw_easu, prefs.getBoolean("easu_reconstruct", false));
         setSpinner(R.id.set_sp_framequeue,
                 prefs.getInt("frame_queue", NativeApp.defaultFrameLatencyQueue()));
         setSpinner(R.id.set_sp_preload,

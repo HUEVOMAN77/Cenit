@@ -853,10 +853,17 @@ public class GamesCoverDialogFragment extends DialogFragment {
             if (adapter != null) {
                 float savedScale = prefs.getFloat("upscale_multiplier", PerfProfile.defaultUpscale(requireContext()));
                 int scaleIndex = Math.max(0, Math.min(adapter.getCount() - 1, Math.round(savedScale) - 1));
+                // 0.6.25: mismo anti-eco que en MainActivity/QuickActions — con el
+                // governor en un escalón sub-nativo este cajón muestra 1x, y sin la
+                // tag su disparo reflejo lo escribiría de vuelta encima del regidor.
+                spScale.setTag(scaleIndex);
                 spScale.setSelection(scaleIndex, false);
             }
             spScale.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
                 @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {
+                    Object shown = parent.getTag();
+                    if (shown instanceof Integer && (Integer) shown == position) return;
+                    parent.setTag(position);
                     float scale = Math.max(1, Math.min(8, position + 1));
                     if (Math.abs(prefs.getFloat("upscale_multiplier", PerfProfile.defaultUpscale(requireContext())) - scale) < 0.001f) return;
                     prefs.edit().putFloat("upscale_multiplier", scale).apply();
@@ -1856,6 +1863,7 @@ public class GamesCoverDialogFragment extends DialogFragment {
                 float savedScale = prefs.getFloat("upscale_multiplier", PerfProfile.defaultUpscale(requireContext()));
                 android.widget.ArrayAdapter<?> scaleAdapter = (android.widget.ArrayAdapter<?>) spScale.getAdapter();
                 int scaleIndex = Math.max(0, Math.min(scaleAdapter.getCount() - 1, Math.round(savedScale) - 1));
+                spScale.setTag(scaleIndex);  // 0.6.25: anti-eco, igual que en la creación
                 spScale.setSelection(scaleIndex);
             }
 

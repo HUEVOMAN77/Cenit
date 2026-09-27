@@ -880,6 +880,23 @@ Java_com_izzy2lost_psx2_NativeApp_setAsyncShaderCompile(JNIEnv* env, jclass, jbo
     (void)env;
 }
 
+// Cenit 0.6.25 — reconstruccion EASU (AMD FidelityFX FSR1) para escala sub-nativa.
+// EXPERIMENTAL y APAGADA por defecto. Opcion b elegida por el usuario: EASU solo
+// corre si CAS esta encendido, porque la cadena real es EASU -> CAS forzado a
+// sharpen_only; sin CAS no hay quien reenfoque el resultado y el gate de C++ lo
+// rechaza (GSRenderer.cpp Present). Tampoco se fuerza el CAS desde aqui: la
+// preferencia manda, y el aviso lo da la UI. Tampoco esta en
+// RestartOptionsAreEqual, asi que se aplica en caliente. Sin getter expuesto: la
+// preferencia de Java es la unica fuente, igual que async_shader_compile.
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setEASUReconstruct(JNIEnv* env, jclass, jboolean enabled)
+{
+    s_settings_interface.SetBoolValue("EmuCore/GS", "EASUReconstruct", enabled == JNI_TRUE);
+    if (VMManager::HasValidVM()) VMManager::ApplySettings();
+    (void)env;
+}
+
 // La misma condición que usa ApplyHardwarePerformanceProfile para decidir el
 // default de MTVU, expuesta a Java para que el default de la preferencia no
 // pueda divergir del del núcleo.
@@ -1678,7 +1695,14 @@ extern "C"
 JNIEXPORT void JNICALL
 Java_com_izzy2lost_psx2_NativeApp_renderUpscalemultiplier(JNIEnv *env, jclass clazz,
                                                              jfloat p_value) {
-    if (p_value < 1.0f) p_value = 1.0f;  // Ensure minimum 1x
+    // Cenit 0.6.25: antes se clampaba al minimo 1.0x, lo que convertia los
+    // sub-nativos del gobernador (0.5x/0.75x) en un no-op silencioso. Ahora el
+    // piso es 0.5x. Riesgo conocido: por debajo de 1x el propio nucleo avisa
+    // "Upscale multiplier is below native, this will break rendering."
+    // (VMManager.cpp) — por eso la reconstruccion EASU (que exige CAS encendido)
+    // existe: deja de ser un estiramiento bilinear y pasa a ser una
+    // reconstruccion. El default del governor sigue siendo 1x.
+    if (p_value < 0.5f) p_value = 0.5f;   // Minimum sub-native step
     if (p_value > 12.0f) p_value = 12.0f; // Cap at maximum 12x
     
     s_settings_interface.SetFloatValue("EmuCore/GS", "upscale_multiplier", p_value);
@@ -2068,7 +2092,10 @@ Java_com_izzy2lost_psx2_NativeApp_applyGlobalSettingsBatch(JNIEnv* env, jclass,
 {
 	renderer = NormalizeAndroidRenderer(renderer);
     // Clamp/normalize
-    if (upscaleMultiplier < 1.0f) upscaleMultiplier = 1.0f;
+    // Cenit 0.6.25: el piso coincide con el de renderUpscalemultiplier (0.5x).
+    // Si no, un telefono que se apago con el governor en 0.5x volvia a arrancar
+    // el lote global con 1.0x escrito en el INI, sin aviso.
+    if (upscaleMultiplier < 0.5f) upscaleMultiplier = 0.5f;
     if (upscaleMultiplier > 12.0f) upscaleMultiplier = 12.0f;
     if (blendingAccuracy < 0) blendingAccuracy = 0; if (blendingAccuracy > 5) blendingAccuracy = 5;
     if (aspectRatio < 0) aspectRatio = 0; if (aspectRatio > 4) aspectRatio = 4; // 0..4 valid

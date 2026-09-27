@@ -740,6 +740,10 @@ Pcsx2Config::GSOptions::GSOptions()
 	// Cenit 0.6.24: compilación asíncrona de pipelines TFX. EXPERIMENTAL y APAGADA
 	// por defecto (ver el gate de cualquier feature nueva: primero medir).
 	AsyncTFXPipelineCompile = false;
+	// Cenit 0.6.25: reconstrucción EASU para escalas internas sub-nativas.
+	// EXPERIMENTAL y APAGADA por defecto, y además inocua si CAS está apagado
+	// (ver GSRenderer::Present): sin CAS no hay afilado detrás de EASU.
+	EASUReconstruct = false;
 	DisableFramebufferFetch = false;
 	DisablePS2DepthQuantization = false;
 	DisableVertexShaderExpand = false;
@@ -990,6 +994,7 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
 	SettingsWrapBitBool(UseBlitSwapChain);
 	SettingsWrapBitBool(DisableShaderCache);
 	SettingsWrapBitBool(AsyncTFXPipelineCompile);
+	SettingsWrapBitBool(EASUReconstruct);
 	SettingsWrapBitBool(DisableFramebufferFetch);
 	SettingsWrapBitBool(DisablePS2DepthQuantization);
 	SettingsWrapBitBool(DisableVertexShaderExpand);

@@ -19,7 +19,8 @@ import android.os.Looper;
  * Reglas base (desde 0.6.3/0.6.4):
  *  - "upscale_multiplier" del usuario es el TECHO; nunca se sube de ahí.
  *  - Baja rápido (2 s de tirones), sube lento (8 s holgados), enfriamiento 2 s.
- *  - Los pasos usan exactamente la escala del menú (1x ... 8x).
+ *  - Los pasos usan exactamente la escala del menú (desde 0.6.25: 0.5x ... 8x,
+ *    los dos primeros escalones son sub-nativos).
  *  - Mando de velocidad, pausa o techo movido: congelar/olvidar medición.
  *  - Solo baja píxeles si el cuello ES la GPU (GPU-bound). GPU holgada + juego
  *    atrasado = CPU-bound: bajar resolución solo empeora la imagen gratis.
@@ -286,7 +287,11 @@ final class DynamicResolutionGovernor {
     }
 
     private float ceiling() {
-        return Math.max(1f, prefs.getFloat("upscale_multiplier", 1f));
+        // Cenit 0.6.25: el piso del techo deja de ser 1x. Si el usuario eligió
+        // 0.5x o 0.75x en el menú, ese es su techo: con Math.max(1f, ...) el
+        // governor podía subirle la resolución por encima de lo que él puso.
+        // STEPS[0] es el escalón más bajo de la lista compartida con Ajustes.
+        return Math.max(STEPS[0], prefs.getFloat("upscale_multiplier", 1f));
     }
 
     private static boolean isVmPaused() {
@@ -372,7 +377,10 @@ final class DynamicResolutionGovernor {
             // baja, se parte de ella (el usuario puede subir a mano y el reset
             // de techo manda). Sin perfil conocido, se parte del techo como antes.
             float startAt = ceiling;
-            if (profile != null && profile.heldScale > 1.001f && profile.heldScale < ceiling - 0.001f)
+            // 0.6.25: el umbral del perfil aprendido deja de ser 1x literal —
+            // ahora es el escalón más bajo de la lista, para que un juego
+            // aprendido en 0.75x también arranque directo en esa escala.
+            if (profile != null && profile.heldScale > STEPS[0] + 0.001f && profile.heldScale < ceiling - 0.001f)
                 startAt = profile.heldScale;
             applied = startAt;
             if (startAt < ceiling - 0.001f) {
@@ -400,7 +408,10 @@ final class DynamicResolutionGovernor {
                     if (profile.heldScale <= 0f || applied < profile.heldScale)
                         profile.heldScale = applied;
                 }
-                if (applied <= 1.001f && speed < DROP_BELOW_PCT) {
+                if (applied <= STEPS[0] + 0.001f && speed < DROP_BELOW_PCT) {
+                    // "En el suelo de la lista y sigue atrasado": con los
+                    // escalones sub-nativos el suelo ya no es 1x, pero la
+                    // intentación (modo cuotas) sigue siendo la misma.
                     profile.slowFloorTicks++;
                 }
             }
@@ -605,9 +616,15 @@ final class DynamicResolutionGovernor {
         return count == 0 ? 0f : sum / count;
     }
 
-    /** Paso inmediatamente menor al actual, sin bajar de 1x ni subir del techo. */
+    /**
+     * Paso inmediatamente menor al actual, sin bajar del escalón más bajo de la
+     * lista ni subir del techo. Cenit 0.6.25: el piso ya no es 1x sino STEPS[0]
+     * (0.5x), así que el governor puede seguir recortando por debajo de nativo;
+     * por eso existe la reconstrucción EASU, para que eso no sea solo un
+     * estiramiento.
+     */
     static float nextStepDown(float current, float ceiling) {
-        float best = 1f;
+        float best = STEPS[0];
         for (float s : STEPS) {
             if (s < current - 0.001f && s <= ceiling + 0.001f && s > best) best = s;
         }

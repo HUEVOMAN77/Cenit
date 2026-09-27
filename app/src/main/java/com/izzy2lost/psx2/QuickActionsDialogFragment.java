@@ -165,9 +165,16 @@ public class QuickActionsDialogFragment extends DialogFragment {
             float savedScale = requireContext().getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
                     .getFloat("upscale_multiplier", 1.0f);
             int scaleIndex = Math.max(0, Math.min(scaleAdapter.getCount() - 1, Math.round(savedScale) - 1));
+            // 0.6.25: con el governor en 0.5x/0.75x la lista entera (1x..8x) muestra
+            // 1x; sin esta tag el disparo reflejo del spinner escribiría 1x encima del
+            // escalón sub-nativo y pelearía con el regidor cada vez que se abre el cajón.
+            spResolution.setTag(scaleIndex);
             spResolution.setSelection(scaleIndex);
             spResolution.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
                 @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view1, int position, long id) {
+                    Object shown = parent.getTag();
+                    if (shown instanceof Integer && (Integer) shown == position) return;
+                    parent.setTag(position);
                     float scale = Math.max(1, Math.min(8, position + 1));
                     float current = requireContext().getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
                             .getFloat("upscale_multiplier", 1.0f);

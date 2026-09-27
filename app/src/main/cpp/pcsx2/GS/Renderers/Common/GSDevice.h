@@ -1413,6 +1413,7 @@ public:
 		bool framebuffer_fetch    : 1; ///< Can sample from the framebuffer without texture barriers.
 		bool stencil_buffer       : 1; ///< Supports stencil buffer, and can use for DATE.
 		bool cas_sharpening       : 1; ///< Supports sufficient functionality for contrast adaptive sharpening.
+		bool easu_reconstruct     : 1; ///< Cenit 0.6.25: Vulkan compute capable of the EASU upscaler (see DoEASU).
 		bool test_and_sample_depth: 1; ///< Supports concurrently binding the depth-stencil buffer for sampling and depth testing.
 		bool no_ps2_z_quantization: 1; ///< Skip PS2 32-bit-fixed Z floor (saves SPIR-V DepthReplacing → re-enables early-ZS on tilers).
 		bool depth_feedback       : 1; ///< Depth feedback loops can be done with DS directly (otherwise need to copy to separate RT).  Implies `feedback_loops`.
@@ -1490,6 +1491,8 @@ protected:
 	static constexpr u32 MAX_POOLED_TEXTURES = 300;
 	static constexpr u32 MAX_TEXTURE_AGE = 10;
 	static constexpr u32 NUM_CAS_CONSTANTS = 12; // 8 plus src offset x/y, 16 byte alignment
+	// Cenit 0.6.25: EASU necesita cuatro uvec4 (con0..con3) = 64 bytes.
+	static constexpr u32 NUM_EASU_CONSTANTS = 16; // 4 x uvec4, empujados como push constants
 	static constexpr u32 EXPAND_BUFFER_SIZE = sizeof(u16) * 16383 * 6;
 
 	WindowInfo m_window_info;
@@ -1504,6 +1507,11 @@ protected:
 	GSTexture* m_target_tmp = nullptr;
 	GSTexture* m_current = nullptr;
 	GSTexture* m_cas = nullptr;
+	// Cenit 0.6.25: scratch de EASU, a la derecha de m_cas y con su misma politica
+	// (se recrea solo si cambia el tamano de destino). Despues de EASU el frame ya
+	// esta a resolucion de salida y CAS corre encima en modo sharpen_only, escribiendo
+	// en m_cas como siempre: dos buffers distintos es lo que rompe el doble-upscale.
+	GSTexture* m_easu = nullptr;
 	GSTexture* m_colclip_rt = nullptr; ///< Temp hw colclip texture
 	GSTexture* m_ds_as_rt = nullptr; ///< Depth as color
 
@@ -1519,8 +1527,25 @@ protected:
 	/// Resolves CAS shader includes for the specified source.
 	static bool GetCASShaderSource(std::string* source);
 
+	/// Cenit 0.6.25: lo mismo para el compute de EASU (ffx_a.h + ffx_fsr1.h, que en
+	/// este proyecto esta recortado a la seccion EASU).
+	static bool GetEASUShaderSource(std::string* source);
+
 	/// Applies CAS and writes to the destination texture, which should be a shader writeable texture.
 	virtual bool DoCAS(GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants) = 0;
+
+	/// Cenit 0.6.25: EASU (AMD FidelityFX FSR1) upscales a sub-native internal image to
+	/// the target size. Virtual con default `false` a proposito: hoy solo GSDeviceVK lo
+	/// implementa, y los demas backends (OpenGL ES tambien compila en este port) siguen
+	/// construyendo la clase sin tocar una linea. Quien no lo soporta devuelve false y
+	/// GSRenderer::Present deja el frame como estaba (ver `Features().easu_reconstruct`).
+	virtual bool DoEASU(GSTexture* sTex, GSTexture* dTex, const std::array<u32, NUM_EASU_CONSTANTS>& constants)
+	{
+		return false;
+	}
+
+	/// Cenit 0.6.25: la entrada publica que hace la mecanica de scratch es `EASU()`,
+	/// declarada mas abajo, junto a `CAS()`.
 
 	/// Perform texture operations for ImGui
 	void UpdateImGuiTextures();
@@ -1753,6 +1778,13 @@ public:
 	void Resize(int width, int height);
 
 	void CAS(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect, bool sharpen_only);
+
+	/// Cenit 0.6.25: reconstruye la imagen sub-nativa a la resolucion de destino con
+	/// EASU (FSR1) y reasigna tex/src_rect/src_uv a la scratch `m_easu`; misma
+	/// mecanica de `CAS()` de arriba, con buffer propio: eso es lo que permite
+	/// encadenar EASU -> CAS(sharpen_only) sin duplicar manejos intermedios.
+	/// Devuelve false sin tocar nada si el compute falla y el llamante decide.
+	bool EASU(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect);
 
 	bool ResizeRenderTarget(GSTexture** t, int w, int h, bool preserve_contents, bool recycle);
 

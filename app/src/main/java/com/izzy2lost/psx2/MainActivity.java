@@ -2263,6 +2263,13 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         // toca, así que la preferencia guardada es la única fuente y se
         // re-aplica aquí igual que las banderas de arriba.
         NativeApp.setAsyncShaderCompile(prefs.getBoolean("async_shader_compile", false));
+        // Cenit 0.6.25: reconstrucción EASU (FSR1) para escala sub-nativa.
+        // EXPERIMENTAL y apagada por defecto; ningún perfil de hardware toca
+        // esta clave, así que la preferencia es la única fuente. Se re-aplica
+        // aquí por el mismo motivo que las banderas de arriba: es lo que
+        // sincroniza el INI antes de arrancar la VM. El gate real (requiere CAS
+        // encendido y resolución interna menor que la de salida) vive en C++.
+        NativeApp.setEASUReconstruct(prefs.getBoolean("easu_reconstruct", false));
         if (mDynRes != null) mDynRes.reset();
         AudioOutputPreference.apply(this);
     }
@@ -3459,10 +3466,18 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
             if (adapter != null) {
                 float savedScale = prefs.getFloat("upscale_multiplier", PerfProfile.defaultUpscale(this));
                 int scaleIndex = Math.max(0, Math.min(adapter.getCount() - 1, Math.round(savedScale) - 1));
+                // 0.6.25: la lista del cajón es entera (1x..8x); con el governor en
+                // un escalón sub-nativo (0.5x/0.75x) se muestra 1x y el eco del
+                // spinner lo reescribiría todo, peleándose con el regidor. La tag
+                // guarda la posición ya mostrada y el listener la ignora.
+                spScale.setTag(scaleIndex);
                 spScale.setSelection(scaleIndex, false);
             }
             spScale.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
                 @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {
+                    Object shown = parent.getTag();
+                    if (shown instanceof Integer && (Integer) shown == position) return;
+                    parent.setTag(position);
                     float scale = Math.max(1, Math.min(8, position + 1));
                     if (Math.abs(prefs.getFloat("upscale_multiplier", PerfProfile.defaultUpscale(MainActivity.this)) - scale) < 0.001f) return;
                     prefs.edit().putFloat("upscale_multiplier", scale).apply();
@@ -3686,6 +3701,7 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                     float savedScale = prefs.getFloat("upscale_multiplier", PerfProfile.defaultUpscale(this));
                     ArrayAdapter<?> scaleAdapter = (ArrayAdapter<?>) spScale.getAdapter();
                     int scaleIndex = Math.max(0, Math.min(scaleAdapter.getCount() - 1, Math.round(savedScale) - 1));
+                    spScale.setTag(scaleIndex);  // 0.6.25: mismo anti-eco que arriba
                     spScale.setSelection(scaleIndex, false);
                 }
             } catch (Exception e) {

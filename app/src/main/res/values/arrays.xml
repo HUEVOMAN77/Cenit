@@ -48,8 +48,13 @@
         <item>Software (Slow, accurate)</item>
     </string-array>
 
-    <!-- Opciones GS nuevas de Cenit (valores verificados contra Config.h) -->
+    <!-- Opciones GS nuevas de Cenit (valores verificados contra Config.h).
+         Cenit 0.6.25: las dos primeras entradas son sub-nativas y coinciden con
+         los dos primeros valores de SCALE_VALUES (0.5x/0.75x); el spinner y el
+         gobernador leen la misma lista. -->
     <string-array name="scale_entries_cenit">
+        <item>0.5x (sub-nativo, reconstruido)</item>
+        <item>0.75x (sub-nativo, reconstruido)</item>
         <item>1x (Nativo ~480p)</item>
         <item>1.25x (~600p)</item>
         <item>1.5x (~720p HD)</item>
