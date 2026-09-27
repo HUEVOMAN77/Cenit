@@ -725,12 +725,15 @@ public final class SettingsScreenController {
                 csNote.setText("Ajuste por juego: abre un juego para cambiarlo.");
             } else {
                 final AdaptiveProfile prof = new AdaptiveProfile(context, hpUri);
-                // ~16 ticks = en torno a 15 s clavado por debajo del 95% en 1x
-                // (el regidor mide una vez por segundo).
+                // ~16 ticks = en torno a 15 s clavado por debajo del 95% en el
+                // escalón más bajo de la lista (el regidor mide una vez por
+                // segundo). 0.6.25: ese suelo ya no es 1x, ahora es 0.5x, así
+                // que el aviso se escribe sin nombrar una escala concreta.
                 if (prof.slowFloorTicks >= 16) {
                     csNote.setText("Cenit notó este juego atrasado "
-                            + (prof.slowFloorTicks / 16) + " s en 1x. Aquí es donde las "
-                            + "cuotas pueden ayudar: prueba Suave con el HUD puesto.");
+                            + (prof.slowFloorTicks / 16) + " s en su resolución más "
+                            + "baja. Aquí es donde las cuotas pueden ayudar: prueba "
+                            + "Suave con el HUD puesto.");
                 } else {
                     csNote.setText("Solo ayuda en juegos que nunca llegan a tiempo (SOTC). "
                             + "En todo lo demás quita velocidad real — este juego no muestra "

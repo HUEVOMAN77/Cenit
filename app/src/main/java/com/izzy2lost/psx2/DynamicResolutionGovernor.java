@@ -43,7 +43,8 @@ import android.os.Looper;
  *     de fast-forward, con restauración) y se suelta al volver el juego real.
  *     Solo con "auto turbo" encendido y con el juego ya aprendido (turbo>0 en
  *     su perfil, o tras la primera detección de la sesión).
- *  4) EVIDENCIA de cuotas: si en 1x el juego sigue atrasado muchos segundos, se
+ *  4) EVIDENCIA de cuotas: si en el escalón más bajo de la lista (1x antes de
+ *     0.6.25, hoy 0.5x) el juego sigue atrasado muchos segundos, se
  *     cuenta (slowFloorTicks en el perfil) y la pantalla de Ajustes ofrece el
  *     "modo cuotas" (EECycleSkip por-juego) con datos, no a ciegas.
  */
