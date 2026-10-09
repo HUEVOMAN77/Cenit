@@ -112,6 +112,18 @@ public:
 	const std::string& GetFilename() const { return m_filename; }
 	u32 GetBlockSize() const { return m_blocksize; }
 
+	/// Cenit 0.6.28: suelo del tamaño de buffer de streaming. Antes era una
+	/// constante (128 KB) igual para todo el mundo; en este puerto la URI del
+	/// disco es un documento SAF/Content resolve por JNI en cada ida, así que
+	/// con juegos enormes que NO caben en RAM (God of War: 4.4 GB de capa doble)
+	/// el número de viajes al archivo manda. Se deja en 128 KB por defecto —
+	/// comportamiento idéntico al de siempre — y el arranque lo sube desde la
+	/// preferencia del usuario. Máximo 4 MB: dos buffers por lector, y esto NO
+	/// es caché de contenido sino ventana de lectura; más grande no se aprovecha
+	/// porque el ChunkForOffset de cada formato sigue marcando el bloque.
+	static void SetReadBufferFloor(u32 bytes);
+	static u32 ReadBufferFloor();
+
 	virtual u32 GetBlockCount() const = 0;
 
 

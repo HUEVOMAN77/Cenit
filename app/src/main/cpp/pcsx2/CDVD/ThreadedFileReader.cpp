@@ -15,7 +15,30 @@
 
 // Make sure buffer size is bigger than the cutoff where PCSX2 emulates a seek
 // If buffers are smaller than that, we can't keep up with linear reads
-static constexpr u32 MINIMUM_SIZE = 128 * 1024;
+//
+// Cenit 0.6.28: este suelo era fijo (128 KB). Ahora lo fija el arranque según
+// la preferencia del usuario (setIsoReadBufferKb), con el mismo valor por
+// defecto — 128 KB — para que sin tocar nada el comportamiento sea idéntico al
+// de siempre. No puede bajar de ese mínimo histórico por el comentario de
+// arriba; el techo (4 MB) lo pone el setter.
+static std::atomic<u32> s_buffer_floor_bytes{128 * 1024};
+
+void ThreadedFileReader::SetReadBufferFloor(u32 bytes)
+{
+	// 0 y valores absurdos no son una opción: la interfaz manda KB del usuario
+	// y aquí se blindan los bordes, no en Java (el nativo es el que abre el
+	// disco, el que sabe lo que puede doler).
+	if (bytes < 128 * 1024)
+		bytes = 128 * 1024;
+	if (bytes > 4 * 1024 * 1024)
+		bytes = 4 * 1024 * 1024;
+	s_buffer_floor_bytes.store(bytes, std::memory_order_relaxed);
+}
+
+u32 ThreadedFileReader::ReadBufferFloor()
+{
+	return s_buffer_floor_bytes.load(std::memory_order_relaxed);
+}
 
 ThreadedFileReader::ThreadedFileReader()
 {
@@ -162,7 +185,7 @@ ThreadedFileReader::Buffer* ThreadedFileReader::GetBlockPtr(const Chunk& block)
 		std::unique_lock<std::mutex> lock(m_mtx, std::defer_lock);
 		if (std::this_thread::get_id() == m_readThread.get_id())
 			lock.lock();
-		u32 size = std::max(block.length, MINIMUM_SIZE);
+		u32 size = std::max(block.length, ReadBufferFloor());
 		if (buf.cap < size)
 		{
 			buf.ptr = realloc(buf.ptr, size);

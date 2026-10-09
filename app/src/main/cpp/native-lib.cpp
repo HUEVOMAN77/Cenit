@@ -7,11 +7,13 @@
 #include "AchievementsJNI.h"
 #include "common/StringUtil.h"
 #include "common/FileSystem.h"
+#include "common/HostSys.h" // Cenit 0.6.28: GetAvailablePhysicalMemory para la sonda de precache
 #include "common/Error.h"
 #include "common/ZipHelpers.h"
 #include "pcsx2/GS.h"
 #include "pcsx2/VMManager.h"
 #include "CDVD/CDVD.h"
+#include "CDVD/ThreadedFileReader.h" // Cenit 0.6.28: ventana de streaming del ISO
 #include "PerformanceMetrics.h"
 #include "GameList.h"
 #include "GameDatabase.h"
@@ -739,6 +741,144 @@ Java_com_izzy2lost_psx2_NativeApp_setMTVU(JNIEnv* env, jclass, jboolean enabled)
 {
     s_settings_interface.SetBoolValue("EmuCore/Speedhacks", "vuThread", enabled == JNI_TRUE);
     if (VMManager::HasValidVM()) VMManager::ApplySettings();
+}
+
+// ===========================================================================
+// Cenit 0.6.28 — Cargar el juego en memoria (precache de disco).
+//
+// El núcleo ya tenía EmuCore/CdvdPrecache, pero en este puerto era inservible:
+// la ruta de arranque la invoca con el ProgressCallback nulo que el host de
+// Android devuelve (mina de SIGSEGV, desactivada en VMManager::PrecacheCDVD-
+// File) y la interfaz no tenía forma de saber ANTES si la imagen cabe. Aquí se
+// pone la pieza que faltaba: una sonda que responde con la MISMA política que
+// va a regir el intento real (ThreadedFileReader::CheckAvailableMemoryFor-
+// Precaching: los últimos 2 GB disponibles no son para la imagen) y el tamaño
+// que cada lector reserva de verdad:
+//   .iso/.bin y compañía -> FlatFileReader::Precache2  = tamaño en disco
+//   .cso/.zso            -> CsoFileReader::Precache2   = tamaño en disco
+//   .chd                 -> ChdFileReader::GetPrecacheSize = tamaño en disco
+//                            (sin contar padres enlazados, rarísimos en PS2)
+//   .gz/.dump            -> el lector base responde "formato no soportado"
+//
+// La sonda abre UN fd nuevo sobre la URI (FileSystem::OpenCFile ya traduce
+// saf:// y content:// a un fd real y buscable) y solo pregunta su tamaño con
+// FSize64: jamás toca el InputIsoFile global ni el lector del disco puesto.
+// Esa es la lección de la 0.6.23 y se respeta incluso con el VM vivo — medir
+// tamaño no es abrir el disco.
+// ===========================================================================
+extern "C"
+JNIEXPORT jlongArray JNICALL
+Java_com_izzy2lost_psx2_NativeApp_precacheProbe(JNIEnv* env, jclass, jstring p_gameUri)
+{
+    // [0] veredicto: 0=no hay URI, 1=formato no soportado, 2=no se pudo medir,
+    //              3=cabe, 4=no cabe (con la memoria disponible AHORA)
+    // [1] bytes que el lector va a reservar
+    // [2] limite de precache = disponibles - 2 GB (piso 0)
+    // [3] memoria física disponible
+    jlong result[4] = { 0, 0, 0, 0 };
+
+    const std::string game_path = GetJavaString(env, p_gameUri);
+    if (game_path.empty())
+    {
+        jlongArray out = env->NewLongArray(4);
+        env->SetLongArrayRegion(out, 0, 4, result);
+        return out;
+    }
+
+    // Extensión -> soporte, replicando InputIsoFile::GetFileReader (línea 64).
+    const std::string_view ext = Path::GetExtension(Path::GetFileName(game_path));
+    const bool supported =
+        !StringUtil::compareNoCase(ext, "gz") &&
+        !StringUtil::compareNoCase(ext, "dump") &&
+        !VMManager::isArcadeManifest(game_path);
+    if (!supported)
+    {
+        result[0] = 1;
+        jlongArray out = env->NewLongArray(4);
+        env->SetLongArrayRegion(out, 0, 4, result);
+        return out;
+    }
+
+    Error error;
+    std::FILE* fp = FileSystem::OpenCFile(game_path.c_str(), "rb", &error);
+    if (!fp)
+    {
+        result[0] = 2;
+        jlongArray out = env->NewLongArray(4);
+        env->SetLongArrayRegion(out, 0, 4, result);
+        return out;
+    }
+    const s64 size = FileSystem::FSize64(fp);
+    std::fclose(fp);
+    if (size <= 0)
+    {
+        result[0] = 2;
+        jlongArray out = env->NewLongArray(4);
+        env->SetLongArrayRegion(out, 0, 4, result);
+        return out;
+    }
+
+    // Misma cuenta que CheckAvailableMemoryForPrecaching: reserva de 2 GB y
+    // piso en cero. Si mañana el core mueve la reserva, esto debe moverse con él.
+    const u64 available = GetAvailablePhysicalMemory();
+    constexpr u64 kReserve = 2147483648;
+    const u64 limit = available > kReserve ? available - kReserve : 0;
+    const u64 required = static_cast<u64>(size);
+
+    result[1] = static_cast<jlong>(required);
+    result[2] = static_cast<jlong>(limit);
+    result[3] = static_cast<jlong>(available);
+    result[0] = (required <= limit) ? 3 : 4;
+
+    jlongArray out = env->NewLongArray(4);
+    env->SetLongArrayRegion(out, 0, 4, result);
+    return out;
+}
+
+// Capa base: la DECISION que Cenit toma en cada arranque cuando el modo
+// automático está puesto. La capa por-juego (WriteGameLayerInt, clave
+// EmuCore/CdvdPrecache) queda por encima si el usuario la fijó a mano, así que
+// este seter nunca pisa una orden explícita del juego.
+//
+// A diferencia de setMTVU/setFastCDVD, aquí NO se llama ApplySettings: el
+// núcleo lee CdvdPrecache una sola vez, al inicializar la VM
+// (VMManager.cpp:2038, justo después de abrir el disco), y Precache2 cierra el
+// FILE* del lector al terminar — intentar aplicarlo con el juego corriendo no
+// solo sería inútil, sería un use-after-free para el IOP y el MTGS, que siguen
+// leyendo. Por eso la interfaz dice "se aplica al reiniciar el juego".
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setCdvdPrecacheGlobal(JNIEnv* env, jclass, jboolean enabled)
+{
+    s_settings_interface.SetBoolValue("EmuCore", "CdvdPrecache", enabled == JNI_TRUE);
+    // Trazabilidad para el diagnóstico remoto: la decisión vive en logcat por
+    // Java, pero el usuario nos manda emulog.txt. Sin esta línea, "¿por qué no
+    // cargó?" no se respondería.
+    Console.WriteLn("Precache: base layer CdvdPrecache=%d", enabled == JNI_TRUE ? 1 : 0);
+}
+
+// ===========================================================================
+// Cenit 0.6.28 — Ventana de streaming del disco.
+//
+// Para los juegos que NO caben en RAM (God of War: 4.4 GB de capa doble,
+// inprecargables en cualquier teléfono), la única palanca es lo que el lector
+// tiene en sus buffers mientras se lee. ThreadedFileReader tenía un suelo fijo
+// de 128 KB por buffer y dos buffers: 256 KB de ventana. Con un ISO en
+// documento SAF (cada lectura es syscall contra un fd del proveedor), eso se
+// agota en cuanto el juego salta de un sitio a otro.
+//
+// El suelo se puede subir por preferencia hasta 4 MB (ventana de 8 MB). Es
+// memoria fija por lector — hay UN lector de ISO — y NO es caché de contenido
+// acumulativa: los chunks siguen teniendo el tamaño que marca cada formato.
+// Default 128 KB: sin tocar nada, comportamiento idéntico al de siempre.
+// ===========================================================================
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setIsoReadBufferKb(JNIEnv* env, jclass, jint p_kb)
+{
+    ThreadedFileReader::SetReadBufferFloor(static_cast<u32>(p_kb) * 1024u);
+    Console.WriteLn("Streaming ISO: ventana de buffer = %u KB",
+        ThreadedFileReader::ReadBufferFloor() / 1024u);
 }
 
 // Cenit 0.6.15 — Fase 1 del motor de superbloques VU: sonda de trazas.

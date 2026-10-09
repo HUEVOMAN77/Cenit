@@ -316,6 +316,80 @@ public class NativeApp {
         try { return coresAllowMTVU(); } catch (Throwable t) { return false; }
     }
     public static native boolean coresAllowMTVU();
+
+    // --- Cenit 0.6.28: cargar el juego en memoria (precache de disco) ---------
+    // EmuCore/CdvdPrecache existía en el núcleo pero era inutilizable en este
+    // puerto (arranque con ProgressCallback nulo = SIGSEGV; ya desactivado en
+    // VMManager::PrecacheCDVDFile) y sin forma de saber antes si la imagen
+    // cabe. Este par de llamadas pone lo que faltaba:
+    //
+    //   setCdvdPrecacheGlobal  -> escribe la decisión de Cenit en la capa base.
+    //   precacheProbe          -> pregunta, con la política real del núcleo
+    //                             (reserva de 2 GB) y el tamaño que cada lector
+    //                             reserva de verdad, si la imagen cabe en la RAM
+    //                             disponible AHORA. Mide el archivo por su propia
+    //                             URI: no toca el disco puesto ni InputIsoFile,
+    //                             así que es seguro llamarla con el VM vivo
+    //                             (lección 0.6.23).
+    //
+    // Como CdvdPrecache se lee al inicializar el VM, el efecto es para el
+    // PRÓXIMO arranque del juego. La preferencia "cdvd_precache" guarda el modo
+    // automático; la capa por-juego (clave EmuCore/CdvdPrecache) manda encima
+    // cuando el usuario fija Sí o No a mano.
+    public static native void setCdvdPrecacheGlobal(boolean enabled);
+    /**
+     * Variante SÍNCRONA, para el hilo del arranque: la decisión medida se
+     * escribe en la capa base justo antes de runVMThread, y ahí no vale el
+     * executor (la escritura podría caer después de que el núcleo ya aplicó los
+     * ajustes). Sin binario nativo es no-op en vez de UnsatisfiedLinkError.
+     */
+    public static void safeSetCdvdPrecacheGlobal(boolean enabled) {
+        if (hasNoNativeBinary) return;
+        try { setCdvdPrecacheGlobal(enabled); } catch (Throwable t) {
+            android.util.Log.e("NativeApp", "setCdvdPrecacheGlobal failed", t);
+        }
+    }
+
+    /**
+     * Cenit 0.6.28: ventana de streaming del disco, en KB por buffer (el lector
+     * tiene dos). 128 KB = el valor histórico del núcleo, que es el default
+     * también aquí: sin tocar nada, el comportamiento es idéntico al de siempre.
+     * Subirla ayuda a los juegos que NO caben en RAM (God of War), donde cada
+     * salto del lector es un viaje al archivo por el canal SAF. El nativo blinda
+     * los bordes (128 KB..4 MB): aquí solo se pasa la voluntad del usuario.
+     * Se aplica en cada arranque (applySavedSettings) y vale para el PRÓXIMO
+     * juego: un lector ya abierto tiene sus buffers puestos.
+     */
+    public static native void setIsoReadBufferKb(int kb);
+    public static void safeSetIsoReadBufferKb(int kb) {
+        if (hasNoNativeBinary) return;
+        try { setIsoReadBufferKb(kb); } catch (Throwable t) {
+            android.util.Log.e("NativeApp", "setIsoReadBufferKb failed", t);
+        }
+    }
+    /**
+     * Veredicto de precache para una imagen. Posiciones del arreglo:
+     *   [0] 0=sin URI, 1=formato no soportado (.gz/.dump/manifiesto arcade),
+     *       2=no se pudo medir, 3=cabe, 4=no cabe
+     *   [1] bytes que el lector va a reservar   [2] tope de precache
+     *   [3] memoria física disponible
+     * Devuelve null si el nativo no está o la llamada falla (sin binario, o
+     * URI vacía): la UI lo trata como "no se puede prometer nada".
+     */
+    public static native long[] precacheProbe(String gameUri);
+    public static long[] safePrecacheProbe(String gameUri) {
+        if (hasNoNativeBinary || gameUri == null || gameUri.isEmpty()) return null;
+        // Deliberadamente FUERA de CDVD_LOCK, a diferencia de las lecturas de
+        // identidad: la sonda abre un descriptor nuevo sobre la URI y pregunta
+        // solo su tamaño (fseek a END + tell), sin pasar por InputIsoFile ni por
+        // el lector del disco puesto, así que no hay nada global que serializar.
+        // meterla bajo el candado significaría que un proveedor de documentos
+        // lento bloquearía la escritura de ajustes desde la interfaz.
+        try {
+            long[] r = precacheProbe(gameUri);
+            return (r != null && r.length >= 4) ? r : null;
+        } catch (Throwable t) { return null; }
+    }
     // --- Cenit 0.6.15: Fase 1 del motor de superbloques VU (sonda de trazas) --
     // Medición pura: entradas al dispatcher, ejecuciones de bloques VU1 y
     // secuencias repetidas. Apagada por defecto; encenderla pausa la caché de

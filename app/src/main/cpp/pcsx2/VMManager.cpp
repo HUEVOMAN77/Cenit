@@ -53,6 +53,7 @@
 #include "common/ARCADE.h"
 #include "common/Error.h"
 #include "common/FileSystem.h"
+#include "common/ProgressCallback.h" // Cenit 0.6.28: NullProgressCallback para el precache
 #include "common/FPControl.h"
 #include "common/Perf.h"
 #include "common/ScopedGuard.h"
@@ -1697,9 +1698,19 @@ void VMManager::PrecacheCDVDFile()
 {
 	Error error;
 	std::unique_ptr<ProgressCallback> progress = Host::CreateHostProgressCallback();
-	if (!DoCDVDprecache(progress.get(), &error))
+	// Cenit 0.6.28 (mina del precache): en el puerto Android CreateHostProgress-
+	// Callback() devuelve nullptr (native-lib.cpp) y DoCDVDprecache desrefencia
+	// el puntero sin guarda (CDVDcommon.cpp: SetTitle), igual que toda la cadena
+	// de lectura con progreso (FileSystem::ReadFileWithProgress) y que los
+	// DisplayError/ModalError de las cadenas CSO/CHD. Activar CdvdPrecache era
+	// un SIGSEGV garantizado a mitad de arranque. Se cae a la instancia nula
+	// global del propio core —sin dueña, no se destruye aquí—, que lo que hace
+	// es tragar el progreso y mandar los avisos al consola. La señal para la
+	// interfaz la dan los OSD messages de abajo, que siguen funcionando.
+	ProgressCallback* prog = progress ? progress.get() : ProgressCallback::NullProgressCallback;
+	if (!DoCDVDprecache(prog, &error))
 	{
-		if (progress->IsCancelled())
+		if (prog->IsCancelled())
 		{
 			Host::AddIconOSDMessage("PrecacheCDVDFile", ICON_FA_COMPACT_DISC,
 				TRANSLATE_STR("VMManager", "CDVD precaching was cancelled."),
@@ -1711,6 +1722,14 @@ void VMManager::PrecacheCDVDFile()
 				fmt::format(TRANSLATE_FS("VMManager", "CDVD precaching failed: {}"), error.GetDescription()),
 				Host::OSD_ERROR_DURATION);
 		}
+	}
+	else
+	{
+		// Cenit 0.6.28: el éxito también se registra. Sin esta línea, "lo cargué
+		// o no" depende de mirar cuánta RAM quedó libre; con ella, el emulog del
+		// usuario responde solo.
+		Console.WriteLn("CDVD precaching completed for '%s'",
+			std::string(Path::GetFileName(CDVDsys_GetFile(CDVDsys_GetSourceType()))).c_str());
 	}
 }
 
