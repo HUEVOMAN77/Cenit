@@ -658,9 +658,37 @@ public class GameSettingsDialogFragment extends DialogFragment {
             sb.append("EnablePatches=").append(enablePatches).append('\n');
             sb.append("EnableCheats=").append(enableCheats).append('\n');
 
+            // Cenit 0.6.28: antes este bloque ESCRIBIA EL INI DESDE CERO, y con
+            // eso borraba las claves que no gestiona: EmuCore/CdvdPrecache (el
+            // "cargar en memoria" por-juego de esta versión) y las tres de
+            // EmuCore/Speedhacks que adoptó el sintonizador CPU/VU en 0.6.27.
+            // Un usuario que guardara el aspecto de God of War por este diálogo
+            // perdía en silencio su cuota adoptada. Ahora el contenido que ya
+            // estaba en el archivo se respeta línea por línea: solo se
+            // sobrescriben las claves de ESTE diálogo y lo demás (secciones,
+            // claves ajenas y sus comentarios) queda intacto.
+            String existing = null;
+            try {
+                if (ini.exists()) {
+                    java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+                    java.io.FileInputStream fis = new java.io.FileInputStream(ini);
+                    try {
+                        byte[] buf = new byte[8192];
+                        int n;
+                        while ((n = fis.read(buf)) > 0) bos.write(buf, 0, n);
+                    } finally {
+                        fis.close();
+                    }
+                    existing = new String(bos.toByteArray(), "UTF-8");
+                }
+            } catch (Exception ignored) {
+                existing = null; // ilegible: se escribe la tabla sola, como antes
+            }
+            final String content = mergeGameIni(existing, sb.toString());
+
             try {
                 java.io.FileOutputStream fos = new java.io.FileOutputStream(ini, false);
-                byte[] data = sb.toString().getBytes("UTF-8");
+                byte[] data = content.getBytes("UTF-8");
                 fos.write(data);
                 fos.flush();
                 fos.close();
@@ -672,13 +700,96 @@ public class GameSettingsDialogFragment extends DialogFragment {
                 try {
                     androidx.documentfile.provider.DocumentFile target = SafManager.createChild(ctx, new String[]{"gamesettings"}, fileName, "application/octet-stream");
                     if (target != null) {
-                        byte[] data = sb.toString().getBytes("UTF-8");
+                        byte[] data = content.getBytes("UTF-8");
                         SafManager.writeBytes(ctx, target.getUri(), data);
                     }
                 } catch (Exception ignored) {}
             }
         } catch (Throwable ignored) {
         }
+    }
+
+    /**
+     * Mezcla el INI por-juego que ya existía con la tabla que este diálogo
+     * escribe. Reglas: una clave de la tabla nueva reemplaza a su par en el
+     * archivo viejo (en su propia sección); una clave del archivo viejo que
+     * este diálogo no conoce se conserva tal cual; una clave nueva cuya sección
+     * no existe se añade al final con su cabecera. Los comentarios y las líneas
+     * en blanco del archivo original no se tocan.
+     *
+     * visible-for-testing: el arnés de /tmp la ejercita con INIs reales.
+     */
+    static String mergeGameIni(String existing, String table) {
+        // 1) Tabla nueva -> sección -> claves, en orden.
+        final java.util.LinkedHashMap<String, java.util.List<String[]>> wanted =
+                new java.util.LinkedHashMap<>();
+        String wSection = "";
+        for (String line : table.split("\n")) {
+            final String t = line.trim();
+            if (t.isEmpty()) continue;
+            if (t.startsWith("[")) { wSection = t; continue; }
+            final int eq = t.indexOf('=');
+            if (eq <= 0) continue;
+            java.util.List<String[]> list = wanted.get(wSection);
+            if (list == null) wanted.put(wSection, list = new java.util.ArrayList<>());
+            list.add(new String[] { t.substring(0, eq).trim(), t.substring(eq + 1).trim() });
+        }
+
+        // 2) Nada que mezclar (archivo viejo vacío o igual de secciones): la tabla.
+        if (existing == null || existing.trim().isEmpty()) return table;
+
+        // 3) Cabeceras del archivo viejo y su sección, para saber qué clave
+        //    pertenece a qué sección y dónde insertar las que falten.
+        final java.util.List<String> lines = new java.util.ArrayList<>();
+        for (String l : existing.split("\r\n|\r|\n")) lines.add(l);
+        final java.util.LinkedHashMap<String, Integer> headerAt =
+                new java.util.LinkedHashMap<>();
+        String section = "";
+        for (int i = 0; i < lines.size(); i++) {
+            final String t = lines.get(i).trim();
+            if (t.startsWith("[")) {
+                section = t;
+                if (!headerAt.containsKey(section)) headerAt.put(section, i);
+                continue;
+            }
+            if (t.startsWith(";") || t.startsWith("#")) continue;
+            final int eq = t.indexOf('=');
+            if (eq <= 0) continue;
+            final String key = t.substring(0, eq).trim();
+            final java.util.List<String[]> list = wanted.get(section);
+            if (list == null) continue; // sección que este diálogo no escribe: intacta
+            for (int k = 0; k < list.size(); k++) {
+                if (list.get(k)[0].equalsIgnoreCase(key)) {
+                    lines.set(i, key + "=" + list.get(k)[1]);
+                    list.remove(k); // ya aplicada: no hay que añadirla
+                    break;
+                }
+            }
+        }
+
+        // 4) Las claves que no estaban en el archivo: meterlas en su sección
+        //    (justo debajo de su cabecera) o crear la sección al final.
+        final StringBuilder out = new StringBuilder();
+        final java.util.Set<Integer> insertAfter = new java.util.HashSet<>();
+        for (String s : new java.util.ArrayList<>(wanted.keySet())) {
+            final java.util.List<String[]> list = wanted.get(s);
+            if (list.isEmpty()) { wanted.remove(s); continue; }
+            if (headerAt.containsKey(s)) insertAfter.add(headerAt.get(s));
+        }
+        int i = 0;
+        for (; i < lines.size(); i++) {
+            out.append(lines.get(i)).append('\n');
+            if (insertAfter.contains(i)) {
+                final String s = lines.get(i).trim();
+                for (String[] kv : wanted.get(s)) out.append(kv[0]).append('=').append(kv[1]).append('\n');
+                wanted.remove(s);
+            }
+        }
+        for (java.util.Map.Entry<String, java.util.List<String[]>> e : wanted.entrySet()) {
+            out.append('\n').append(e.getKey()).append('\n');
+            for (String[] kv : e.getValue()) out.append(kv[0]).append('=').append(kv[1]).append('\n');
+        }
+        return out.toString();
     }
 
     private static void deleteGameSettingsIni(Context ctx, String gameSerial, String gameCrc) {
