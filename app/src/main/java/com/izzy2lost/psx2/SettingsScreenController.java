@@ -92,6 +92,31 @@ public final class SettingsScreenController {
     // escribirse solos al inflar la vista (el primer disparo es siempre posición 0).
     private int frameQueueShown = -1;
     private int preloadShown = -1;
+    // Cenit 0.6.28: orden por-juego de cargar-en-memoria (misma guardia de
+    // adopción que cuotas) y contador para descartar medidas atrasadas en la nota.
+    private int precacheGameShown = -1;
+    private int precacheProbeToken = 0;
+    // Cenit 0.6.28: ventana de streaming del ISO — última posición mostrada, con
+    // la guardia de adopción de siempre (el primer disparo del spinner es 0).
+    private int isoBufferShown = -1;
+
+    /** Índice del desplegable -> KB por buffer. 128 << posición. */
+    static int isoBufferKbFor(int position) {
+        if (position < 0) position = 0;
+        if (position > 4) position = 4;
+        return 128 << position;
+    }
+
+    /** KB guardados -> índice del desplegable (valores raros caen al estándar). */
+    static int isoBufferPositionFor(int kb) {
+        switch (kb) {
+            case 256: return 1;
+            case 512: return 2;
+            case 1024: return 3;
+            case 2048: return 4;
+            default: return 0; // 128 y cualquier otro: estándar
+        }
+    }
 
     public SettingsScreenController(@NonNull Context context, @NonNull ViewGroup parent,
                                     @NonNull Host host) {
@@ -251,8 +276,29 @@ public final class SettingsScreenController {
             float value = SCALE_VALUES[position];
             if (Math.abs(prefs.getFloat("upscale_multiplier", 1f) - value) < 0.001f) return;
             prefs.edit().putFloat("upscale_multiplier", value).apply();
+            // Cenit 0.6.28: la escala es la clave más visible del paquete de
+            // máxima jugabilidad, así que con el modo encendido también pasa a
+            // ser lo que hay que devolver al apagarlo.
+            PlayabilityBundle.rebaseline(prefs, PlayabilityBundle.KEY_UPSCALE);
             NativeApp.renderUpscalemultiplierAsync(value);
         });
+
+        // Cenit 0.6.28: el interruptor maestro. No usa toggle() porque no es un
+        // booleano simple: apaga y enciende un paquete y devuelve la fotografía
+        // del estado anterior. Va enlazado aquí y pintado en readValuesIntoUi.
+        MaterialSwitch master = root.findViewById(R.id.set_sw_max_playability);
+        if (master != null) {
+            master.setOnCheckedChangeListener((b, checked) -> {
+                if (checked == PlayabilityBundle.isOn(prefs)) return;
+                if (checked) PlayabilityBundle.turnOn(prefs, PerfProfile.tier(context));
+                else PlayabilityBundle.turnOff(prefs, PerfProfile.tier(context));
+                // El paquete escribe en claves que tienen su propio interruptor y
+                // su propio spinner en esta pantalla: se vuelven a pintar para que
+                // el tablero refleje lo que el modo acaba de hacer, no lo que
+                // estaba cuando se infló la vista.
+                readValuesIntoUi();
+            });
+        }
 
         // Resolución dinámica: el regidor lee la preferencia en cada tick y solo
         // necesita que le devuelvan el techo cuando se apaga con el juego corriendo.
@@ -295,6 +341,36 @@ public final class SettingsScreenController {
         // preferencia se re-aplica en cada arranque (MainActivity).
         toggle(R.id.set_sw_fastcdvd, "fast_cdvd", false,
                 checked -> NativeApp.setFastCDVDAsync(checked));
+
+        // Cenit 0.6.28: cargar el juego en memoria. Es la casilla EmuCore/
+        // CdvdPrecache del núcleo, que en este puerto no servía (arranque con
+        // ProgressCallback nulo = cierre brusco; ya desactivado en el core) y no
+        // estaba en ninguna pantalla. Apagado por defecto: experimental.
+        // El interruptor solo GUARDA la voluntad: la capa base se escribe en el
+        // hilo del arranque con la decisión MEDIDA (¿cabe este juego en la RAM
+        // libre de ahora?), no con un true a ciegas — y así no hay carrera entre
+        // el executor de ajustes y el VM. Se aplica al reiniciar cada juego.
+        toggle(R.id.set_sw_precache, PrecachePolicy.PREF_AUTO, false, null);
+
+        // Cenit 0.6.28: ventana de streaming del ISO. La posición es un exponente
+        // (128 << posición KB), no el valor: la tabla de encima (iso_buffer_entries)
+        // empieza en el 128 KB histórico del núcleo, así que la posición 0 ES el
+        // default y no se escribe nada al inflar (misma guardia de adopción que
+        // medio píxel y cuotas). El nativo sube a 128 KB un valor que bajara de
+        // ahí, y el lector ya abierto no cambia de buffers hasta el próximo juego:
+        // por eso no se aplica en caliente — se guarda y el arranque lo escribe.
+        spinner(R.id.set_sp_iso_buffer, R.array.iso_buffer_entries, position -> {
+            if (isoBufferShown < 0) { isoBufferShown = position; return; }
+            if (position == isoBufferShown) return;
+            prefs.edit().putInt("iso_buffer_kb", isoBufferKbFor(position)).apply();
+            // Cenit 0.6.28: con el modo maestro encendido esta preferencia viene
+            // BORRADA a propósito (para que hable la regla de fábrica de tamaño);
+            // si el usuario la elige a mano, deja de estar borrada y la
+            // fotografía debe decirlo, o apagar el modo la borraría otra vez.
+            PlayabilityBundle.rebaseline(prefs, PlayabilityBundle.KEY_ISO_BUFFER);
+            isoBufferShown = position;
+        });
+
         toggle(R.id.set_sw_mtvu, "mtvu", NativeApp.defaultMTVU(),
                 checked -> NativeApp.setMTVUAsync(checked));
 
@@ -463,6 +539,19 @@ public final class SettingsScreenController {
                 cycleSkipShown = position;
         });
 
+        // Cenit 0.6.28: orden por-juego de cargar-en-memoria. Auto borra la clave
+        // EmuCore/CdvdPrecache del INI del juego (deja que la decisión automática
+        // de la capa base vuelva a mandar); Sí/No la fijan, y esa capa va por
+        // encima de lo global. No es en caliente: el núcleo la lee al abrir el
+        // disco, así que se aplica al reiniciar el juego — la nota lo dice.
+        spinner(R.id.set_sp_precache_game, R.array.precache_game_entries, position -> {
+            if (precacheGameShown < 0) { precacheGameShown = position; return; }
+            if (position == precacheGameShown) return;
+            final String uri = host.runningGamePath();
+            if (uri == null || uri.isEmpty()) return;
+            if (PrecachePolicy.applyPerGame(uri, position)) precacheGameShown = position;
+        });
+
         spinner(R.id.set_sp_cas, R.array.cas_entries, position -> {
             if (position == prefs.getInt("cas_mode", 0)) return;
             prefs.edit().putInt("cas_mode", position).apply();
@@ -617,6 +706,12 @@ public final class SettingsScreenController {
         sw.setOnCheckedChangeListener((b, checked) -> {
             if (checked == prefs.getBoolean(key, fallback)) return;
             prefs.edit().putBoolean(key, checked).apply();
+            // Cenit 0.6.28: con el modo "máxima jugabilidad" encendido, lo que el
+            // usuario mueva aquí es SU voluntad y pasa a ser lo que hay que
+            // restaurar al apagar el modo. Sin esta línea, apagar el modo ganaría
+            // sobre un cambio hecho a mano después de encenderlo. Fuera del modo
+            // (o para una clave que el paquete no photographia) es un no-op.
+            PlayabilityBundle.rebaseline(prefs, key);
             if (apply != null) apply.accept(checked);
         });
     }
@@ -655,10 +750,49 @@ public final class SettingsScreenController {
         if (tg != null && target != null) tg.check(target.getId());
 
         setSpinner(R.id.set_sp_scale, scaleIndexFor(prefs.getFloat("upscale_multiplier", 1f)));
+        // Cenit 0.6.28: el interruptor maestro refleja el estado real y su nota
+        // dice lo que hace en ESTE teléfono (gama), no una promesa genérica. El
+        // guard de la escucha (checked == isOn) evita que pintarlo re-dispare el
+        // paquete.
+        check(R.id.set_sw_max_playability, PlayabilityBundle.isOn(prefs));
+        final TextView masterNote = root.findViewById(R.id.set_tv_max_playability_note);
+        if (masterNote != null)
+            masterNote.setText(PlayabilityBundle.describe(PerfProfile.tier(context)));
         check(R.id.set_sw_dynres, prefs.getBoolean("dynamic_res", true));
         check(R.id.set_sw_adaptive, prefs.getBoolean("adaptive_perf", true));
         check(R.id.set_sw_autoturbo, prefs.getBoolean("auto_turbo", false));
         check(R.id.set_sw_cpu_tuner, prefs.getBoolean("cpu_tuner", false));
+        // Cenit 0.6.28: la nota del precache dice el modo y lo que significa, no
+        // una medida: las sondas no corren en el hilo de la interfaz. La medida
+        // concreta del juego que está delante vive más abajo, en el grupo
+        // "Cargar en memoria (por juego)".
+        check(R.id.set_sw_precache, PrecachePolicy.autoEnabled(prefs));
+        final TextView precacheNote = root.findViewById(R.id.set_tv_precache_note);
+        if (precacheNote != null) precacheNote.setText(PrecachePolicy.describe(prefs));
+        // Ventana de streaming: se muestra lo guardado; la nota explica el caso
+        // de uso (los juegos que NO caben, que es donde esta palanca existe).
+        final int isoKb = prefs.contains("iso_buffer_kb")
+                ? prefs.getInt("iso_buffer_kb", 128) : -1;
+        isoBufferShown = isoBufferPositionFor(isoKb);
+        setSpinner(R.id.set_sp_iso_buffer, isoBufferShown);
+        // Cenit 0.6.28: sin elección del usuario, la decisión la toma la regla de
+        // fábrica por tamaño de disco, y decirlo aquí es lo que impide que la
+        // pantalla mienta: el spinner marcaría 128 KB mientras un DVD-9 está
+        // corriendo con 512 KB. Con preferencia puesta, se dice el valor fijo.
+        final TextView isoNote = root.findViewById(R.id.set_tv_iso_buffer_note);
+        if (isoNote != null) {
+            isoNote.setText(isoKb < 0
+                    ? "Sin elección tuya: Cenit la fija por el tamaño medido del "
+                      + "disco — 512 KB para los ISOs de más de 2,5 GB (los que no "
+                      + "caben en memoria, que son los que necesitan streaming más "
+                      + "ancho) y 128 KB, la histórica del motor, para el resto. "
+                      + "Elegir aquí manda sobre eso. Vale para el próximo juego "
+                      + "que abras, no para el que está delante."
+                    : "Fijada por ti en " + isoKb + " KB por golpe para todos los "
+                      + "juegos. Para dejar que Cenit decida por tamaño de disco, "
+                      + "enciende «Máxima jugabilidad». Vale para el próximo juego "
+                      + "que abras, no para el que está delante.");
+        }
         // (la nota del sintonizador usa tunerNoteDefault, capturada al inflar)
         // 0.6.27: el sintonizador CPU/VU cuenta aquí su veredicto real del juego
         // que está delante (o el último bencheado), no promesas. Con el juego
@@ -782,6 +916,37 @@ public final class SettingsScreenController {
                             + "En todo lo demás quita velocidad real — este juego no muestra "
                             + "ese patrón, así que lo normal es dejarlo en Normal.");
                 }
+            }
+        }
+        // Cenit 0.6.28: orden por-juego de cargar-en-memoria. La posición sale del
+        // INI del juego (sin clave = Auto); la nota quiere el número real de
+        // "cabe o no cabe", y esa medida se toma en un hilo aparte: un stat sobre
+        // un proveedor de documentos puede tardar y el hilo de la interfaz no es
+        // lugar para esperar a un disco nube. El contador descarta medidas viejas
+        // si la pantalla se refresca dos veces seguidas.
+        precacheGameShown = hpAvailable ? PrecachePolicy.readPerGame(hpUri) : 0;
+        setSpinner(R.id.set_sp_precache_game, precacheGameShown);
+        Spinner pgSp = root.findViewById(R.id.set_sp_precache_game);
+        if (pgSp != null) pgSp.setEnabled(hpAvailable);
+        final TextView pgNote = root.findViewById(R.id.set_tv_precache_game_note);
+        if (pgNote != null) {
+            if (!hpAvailable) {
+                pgNote.setText("Ajuste por juego: abre un juego para cambiarlo. "
+                        + "Se aplica al reiniciar el juego.");
+            } else {
+                final String uri = hpUri;
+                pgNote.setText("Midiendo este juego… (se aplica al reiniciar el juego)");
+                final int token = ++precacheProbeToken;
+                new Thread(() -> {
+                    final long[] probe = PrecachePolicy.probeBounded(uri);
+                    final String text = PrecachePolicy.describeProbe(uri, probe);
+                    root.post(() -> {
+                        // La nota solo vale si sigue siendo la misma pantalla y el
+                        // mismo juego; si no, la medida vieja se tira a la basura.
+                        if (token != precacheProbeToken) return;
+                        if (uri.equals(host.runningGamePath())) pgNote.setText(text);
+                    });
+                }, "cenit-probe-ui").start();
             }
         }
         int casMode = prefs.getInt("cas_mode", 0);

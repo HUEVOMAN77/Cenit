@@ -2258,6 +2258,13 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         // el de MTVU pregunta al núcleo, no a Java, para no divergir del perfil.
         NativeApp.setFastCDVD(prefs.getBoolean("fast_cdvd", false));
         NativeApp.setMTVU(prefs.getBoolean("mtvu", NativeApp.defaultMTVU()));
+        // Cenit 0.6.28: ventana de streaming del ISO. Se re-aplica en cada
+        // arranque porque el suelo de buffer lo lee el lector CUANDO SE ABRE el
+        // disco: un cambio a mitad de partida no reabre nada, así que la voluntad
+        // del usuario tiene que estar escrita antes de que runVMThread abra la
+        // unidad. El default es el 128 KB histórico del núcleo: sin tocar la
+        // pantalla de ajustes, esto no cambia nada.
+        NativeApp.safeSetIsoReadBufferKb(prefs.getInt("iso_buffer_kb", 128));
         // Cenit 0.6.15: sonda de trazas VU (Fase 1). Default apagado y sin
         // perfil que la encienda: es un ajuste de diagnóstico explícito.
         NativeApp.setVUTraceProbe(prefs.getBoolean("vu_trace_probe", false));
@@ -2851,6 +2858,37 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
 
             Thread emulationThread = new Thread(() -> {
                 try {
+                    // Cenit 0.6.28: UNA medida, dos decisiones. La sonda pregunta
+                    // el tamaño del archivo al proveedor de documentos (con cota
+                    // de 1,5 s: si no responde, "no precargar" y el juego arranca
+                    // igual), y el mismo número decide si el disco cabe en RAM y
+                    // si la ventana de streaming debe subir de fábrica. Se hace
+                    // AQUÍ, en el hilo de la VM y no en applySavedSettings,
+                    // porque en el hilo de la interfaz eso sería una pantalla
+                    // congelada. applySavedSettings ya corrió arriba, así que la
+                    // fábrica escribe DESPUÉS de las preferencias del usuario y
+                    // solo donde él no opinó; lo que va al INI por-juego manda
+                    // por encima de todo esto.
+                    final SharedPreferences bootPrefs =
+                            getSharedPreferences("app_prefs", MODE_PRIVATE);
+                    // El tamaño del disco no cambia solo: se anota la primera vez
+                    // que se mide, así que un ISO en la nube espera al proveedor
+                    // UNA vez y no en cada arranque. Con el modo automático
+                    // apagado y la ventana de streaming ya elegida por el
+                    // usuario, la medida no hace falta para nada y no se paga.
+                    final long cachedSize = PrecachePolicy.cachedSize(bootPrefs, gameFile);
+                    final long[] bootProbe = PrecachePolicy.needsBootProbe(bootPrefs, cachedSize)
+                            ? PrecachePolicy.probeBounded(gameFile) : null;
+                    PrecachePolicy.noteSize(bootPrefs, gameFile, bootProbe);
+                    final long sizeForRules = (bootProbe != null && bootProbe.length >= 2
+                            && bootProbe[1] > 0L) ? bootProbe[1] : Math.max(cachedSize, -1L);
+                    NativeApp.safeSetCdvdPrecacheGlobal(
+                            PrecachePolicy.decideForBoot(bootPrefs, gameFile, bootProbe));
+                    final String factoryNote = FactoryRules.applyForBoot(this, bootPrefs, gameFile,
+                            sizeForRules);
+                    if (factoryNote != null && !factoryNote.isEmpty()) {
+                        bootPrefs.edit().putString("factory:" + gameFile, factoryNote).apply();
+                    }
                     final boolean started = NativeApp.runVMThread(gameFile);
                     if (!started && !TextUtils.isEmpty(gameFile)) {
                         final String startupError = NativeApp.getLastVMError();
@@ -4069,6 +4107,17 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                 // garantizan ver la señal nativa antes de que Android la borre.
                 any |= appendCrashEvidence(body);
 
+                // Cenit 0.6.28: el canal que convierte un veredicto de UN teléfono
+                // en una regla de FÁBRICA para todos. Sin esto, lo que el
+                // sintonizador CPU/VU aprende se queda en el archivo de prefs de
+                // quien lo midió, y la única forma de que llegue al APK es que el
+                // usuario explique el juego de palabra. Aquí viaja la evidencia
+                // ya interpretada: serie, veredicto, qué se adoptó y qué le puso
+                // la fábrica a ese juego en este arranque. Acotado (los juegos
+                // realmente jugados, no toda la biblioteca) para que el reporte
+                // siga siendo pegable en una incidencia.
+                appendCatalogEvidence(body);
+
                 File outDir = new File(getCacheDir(), "logs");
                 if (!any) {
                     error = "vacío";
@@ -4204,6 +4253,93 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         }
         return any;
     }
+
+    /**
+     * Cenit 0.6.28: el bloque FÁBRICA del reporte. Saca del archivo de prefs lo
+     * que este teléfono ya demostró juego por juego — veredicto del sintonizador,
+     * qué quedó adoptado, qué le aplicó la fábrica en el último arranque y si
+     * ese juego cabía en RAM — más el estado global que cambia el resultado
+     * (ventana de streaming, modo automático, gama detectada). Con esto, un
+     * veredicto medido en un Snapdragon 6xx puede hornearse en la próxima
+     * versión sin que nadie tenga que explicarme qué juego es "ese de las
+     * lanzas". Se limita a los juegos con evidencia (no a toda la biblioteca) y
+     * a los primeros, para que el reporte siga siendo pegable.
+     */
+    private void appendCatalogEvidence(StringBuilder into) {
+        into.append("\n=== FABRICA (evidencia de este telefono) ===\n");
+        final SharedPreferences prefs = getSharedPreferences("app_prefs", MODE_PRIVATE);
+        // Estado global que hace falta para interpretar cualquier veredicto.
+        into.append("gama=").append(NativeApp.safeGetDevicePerformanceTier())
+                .append(" ventana_streaming_kb=").append(prefs.getInt("iso_buffer_kb", 128))
+                .append(" auto_precarga=").append(prefs.getBoolean(PrecachePolicy.PREF_AUTO, false))
+                .append(" reglas_apk=").append(FactoryRules.ruleCount())
+                .append(" resolucion_dinamica=").append(prefs.getBoolean("dynamic_res", true))
+                .append(" sintonizador=").append(prefs.getBoolean(CpuVUTuner.PREF_KEY, false))
+                .append('\n');
+
+        final java.util.List<String> uris = new ArrayList<>();
+        for (String k : prefs.getAll().keySet()) {
+            if (k != null && k.startsWith("adapt:")) uris.add(k.substring("adapt:".length()));
+        }
+        // Los últimos jugados primero: son los que importan para diagnosticar.
+        final java.util.Map<String, Long> played = new java.util.HashMap<>();
+        for (String u : uris) played.put(u, prefs.getLong("last_played:" + u, 0L));
+        uris.sort((a, b) -> Long.compare(played.getOrDefault(b, 0L), played.getOrDefault(a, 0L)));
+
+        int shown = 0;
+        for (String uri : uris) {
+            if (shown >= CATALOG_EVIDENCE_MAX) {
+                into.append("  ... ").append(uris.size() - shown).append(" juegos mas con evidencia\n");
+                break;
+            }
+            final AdaptiveProfile p = new AdaptiveProfile(this, uri);
+            final String serial = FactoryRules.serialFor(this, uri);
+            final String factory = prefs.getString("factory:" + uri, "");
+            if (!p.known()) continue;
+            // Solo los juegos que ya opinaron: sin veredicto y sin fábrica no
+            // aportan nada y ensucian el reporte.
+            final boolean hasVerdict = p.tunerVerdict != null && !p.tunerVerdict.isEmpty();
+            if (!hasVerdict && (factory == null || factory.isEmpty()) && p.heldScale <= 0f) continue;
+            into.append("  ").append(gameLabelForEvidence(uri, serial)).append('\n')
+                    .append("    veredicto=").append(hasVerdict ? p.tunerVerdict : "sin benchar")
+                    .append(" adoptado=").append(p.tunerAdoptado.isEmpty() ? "-" : p.tunerAdoptado)
+                    .append(" en_vigor=").append(p.tunerAplicado ? "si" : "no")
+                    .append(" fps=").append(String.format(java.util.Locale.US, "%.1f", p.tunerNow))
+                    .append(" sostuvo_escala=").append(p.heldScale)
+                    .append(" cpu_bound=").append(p.cpuBound ? "si" : "no")
+                    .append(" turbo_s=").append(p.turboSeconds)
+                    .append(" slow_ticks=").append(p.slowFloorTicks)
+                    .append('\n');
+            if (factory != null && !factory.isEmpty())
+                into.append("    fabrica=").append(factory).append('\n');
+            shown++;
+        }
+        if (shown == 0) into.append("  (ningun juego con veredicto todavia)\n");
+    }
+
+    /** Título corto + serial para el bloque FÁBRICA, sin exponer rutas. */
+    private String gameLabelForEvidence(String uri, String serial) {
+        String title = null;
+        try {
+            title = getSharedPreferences("title_cache", MODE_PRIVATE).getString(uri, null);
+        } catch (Throwable ignored) {
+        }
+        if (title == null || title.isEmpty()) {
+            try {
+                String last = android.net.Uri.parse(uri).getLastPathSegment();
+                if (last != null) {
+                    last = android.net.Uri.decode(last);
+                    final int dot = last.lastIndexOf('.');
+                    title = dot > 0 ? last.substring(0, dot) : last;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        return (title == null || title.isEmpty() ? "(sin titulo)" : title)
+                + " [" + (serial == null || serial.isEmpty() ? "sin serial" : serial) + "]";
+    }
+
+    private static final int CATALOG_EVIDENCE_MAX = 12;
 
     /** Últimas N líneas de un archivo, sin cargarlo entero. */
     private boolean appendTailLimited(File f, StringBuilder into, int maxLines) {

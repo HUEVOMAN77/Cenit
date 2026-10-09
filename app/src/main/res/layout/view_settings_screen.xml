@@ -262,6 +262,24 @@
 
                             <View style="@style/Cenit.Settings.Divider" />
 
+                            <!-- Cenit 0.6.28: el interruptor maestro. Va PRIMERO de
+                                 todo el grupo de rendimiento porque es lo que la
+                                 mayoría va a tocar, y su nota dice lo que cuesta
+                                 cada palanca que encierra (si un modo da cuadros
+                                 en silencio, la imagen peor se lee como un bug). -->
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/set_sw_max_playability"
+                                style="@style/Cenit.Settings.Switch"
+                                android:layout_marginTop="0dp"
+                                android:text="Máxima jugabilidad (experimental)" />
+
+                            <TextView
+                                android:id="@+id/set_tv_max_playability_note"
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Enciende a la vez todo lo que da cuadros, con su costo dicho abajo. Al apagarlo vuelve exactamente tu configuración anterior." />
+
+                            <View style="@style/Cenit.Settings.Divider" />
+
                             <TextView
                                 style="@style/Cenit.Settings.FieldLabel"
                                 android:layout_marginTop="0dp"
@@ -329,6 +347,30 @@
                             <TextView
                                 style="@style/Cenit.Settings.Caption"
                                 android:text="Recorta la espera simulada del DVD. En un teléfono casi no se gana nada con esto (el disco ya es un archivo en memoria flash) y sí rompe juegos que leen sincronizado, como Shadow of the Colossus, que se cierra al arrancar. Apagado por defecto; enciéndelo solo si un juego concreto lo pide." />
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/set_sw_precache"
+                                style="@style/Cenit.Settings.Switch"
+                                android:text="Cargar el juego en memoria (experimental)" />
+
+                            <TextView
+                                android:id="@+id/set_tv_precache_note"
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Apagado: ningún juego se carga entero en memoria. Cenit lo mediría y lo cargaría solo si cabe en la RAM libre de este teléfono. Se aplica al reiniciar cada juego; en Ajustes del juego puedes ordenarlo a mano para uno solo. Apagado por defecto: es experimental." />
+
+                            <TextView
+                                android:id="@+id/set_tv_iso_buffer_label"
+                                style="@style/Cenit.Settings.FieldLabel"
+                                android:text="Ventana de streaming del disco (experimental)" />
+
+                            <TextView
+                                android:id="@+id/set_tv_iso_buffer_note"
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Para los juegos que NO caben en memoria: cuántos KB lee el disco por golpe (dos golpes a la vez). Más grande = menos viajes al archivo cuando el juego salta de un sitio a otro; también más RAM fija mientras el juego corre. Estándar (128 KB) es lo que siempre hizo el motor. Vale para el próximo juego que abras, no para el que está delante." />
+
+                            <Spinner
+                                android:id="@+id/set_sp_iso_buffer"
+                                style="@style/Cenit.Settings.Spinner" />
 
                             <com.google.android.material.materialswitch.MaterialSwitch
                                 android:id="@+id/set_sw_mtvu"
@@ -473,6 +515,20 @@
 
                             <Spinner
                                 android:id="@+id/set_sp_cycleskip"
+                                style="@style/Cenit.Settings.Spinner" />
+
+                            <TextView
+                                android:id="@+id/set_tv_precache_game_label"
+                                style="@style/Cenit.Settings.FieldLabel"
+                                android:text="Cargar en memoria (por juego)" />
+
+                            <TextView
+                                android:id="@+id/set_tv_precache_game_note"
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Ajuste por juego: abre un juego para cambiarlo. Se aplica al reiniciar el juego." />
+
+                            <Spinner
+                                android:id="@+id/set_sp_precache_game"
                                 style="@style/Cenit.Settings.Spinner" />
 
                             <View style="@style/Cenit.Settings.Divider" />

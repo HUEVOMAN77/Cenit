@@ -127,6 +127,27 @@
         <item>Máximo</item>
     </string-array>
 
+    <!-- Precache POR JUEGO (0.6.28): Auto = deja decidir a Cenit en cada
+         arranque; Sí/No fijan la clave EmuCore/CdvdPrecache en el INI del juego,
+         que manda por encima de la preferencia global. -->
+    <string-array name="precache_game_entries">
+        <item>Auto (decide Cenit)</item>
+        <item>Sí (cargarlo siempre)</item>
+        <item>No (no cargarlo)</item>
+    </string-array>
+
+    <!-- Ventana de streaming del ISO (0.6.28): KB por buffer del lector de disco
+         (tiene dos). La posición no ES el valor — el valor real es 128 <<
+         posición —; se traduce en el controlador con las mismas constantes que
+         blinda el nativo. 128 KB (posición 0) es el valor histórico del núcleo. -->
+    <string-array name="iso_buffer_entries">
+        <item>Estándar (128 KB)</item>
+        <item>Doble (256 KB)</item>
+        <item>Cuatro veces (512 KB)</item>
+        <item>Ocho veces (1 MB)</item>
+        <item>Dieciséis veces (2 MB)</item>
+    </string-array>
+
     <!-- Cola de cuadros (VsyncQueueSize), Cenit 0.6.6. La posición ES el valor
          de la clave: 0 = ritmo óptimo (menos input lag, más exigente), 1..n =
          n cuadros por delante. -->
