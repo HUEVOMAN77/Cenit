@@ -86,6 +86,8 @@
 // informe) usan relaxed: telemetría, nunca entrada de simulación. Header
 // puro C++ (sin vixl, sin tipos de microVU).
 
+#include "MvuSbLife.h"
+
 #include "common/Pcsx2Defs.h"
 
 #include <atomic>
@@ -108,8 +110,42 @@ namespace mVUSuperblock
 	bool WasKilled();
 
 	// ------------------------------------------------------------------
-	// Fase 1 (0.6.31) — Que esta ocupado el motor de superbloques.
-	// El prompt impone un solo dueño por intervalo: mientras el tuner CPU/VU mide,
+	// ------------------------------------------------------------------
+	// Cenit 0.6.32 (Fase 2 del prompt directo) — Observadores que el TU de
+	// microVU REGISTRA en mVUinit. El motor no puede ver VURegs ni el ABI del
+	// compilador desde este TU (vive libre de vixl a proposito), y la maquina de
+	// estados necesita ambos como DATOS: la identidad del candidato
+	// (SbAreaDigestFn + engineAbi) y la MASCARA de comparacion (exitMask), que
+	// es lo unico que autoriza a contar un par. Si nadie registra la mascara, la
+	// maquina RECHAZA los pares y el informe lo dice: una equivalencia afirmada
+	// sobre un estado que no se miro entero no es evidencia.
+	// ------------------------------------------------------------------
+	// El area fusionada NO es contigua (cada tramo esta donde estaba su bloque),
+	// asi que el digest se pide por LISTA de tramos: pcs[i] = PC de entrada del
+	// tramo, ops[i] = instrucciones que cobra ese tramo segun la sonda. Quien ve
+	// el microcodigo (el TU de microVU) decide como se hashkea, y el resultado es
+	// parte de la IDENTIDAD: dos areas con el mismo PC pero microcodigo distinto
+	// no comparten evidencia.
+	using SbAreaDigestFn = u32 (*)(const u32* pcs, const u32* ops, u32 count);
+	extern SbAreaDigestFn g_areaDigest;	// nullptr hasta mVUinit
+	extern std::atomic<u32> g_exitMask;	// Regions:: que cubre g_exitDigest
+	extern std::atomic<u32> g_engineAbi; // kMvuCompilerAbiVersion
+
+	// Superficie de snapshot/restore IMPLEMENTADA (encabezado de MvuSbLife.h,
+	// punto 2): VURegs + 16 KB VU1.Mem + prog.lpState + microVU1.cycles +
+	// VU0.VI[REG_VPU_STAT]. Vale false hasta que alguien la programe, y mientras
+	// valga false NINGUN candidato entra en SHADOW aunque MTVU este apagado: cae
+	// en VALIDATE_ONLY y el HUD lo dice. Es el estado honesto de esta version,
+	// no un interruptor de favor.
+	extern std::atomic<bool> g_rollbackSurface;
+
+	// Identidad de juego+dispositivo: la publica Java por el mismo canal que el
+	// HUD del sintonizador (native-lib la reenvia aqui), porque el FNV-1a de la
+	// identidad lo construye Java y el C++ no lo recalcula. 0 = sin identidad.
+	void SetProfileHash(u64 hash);
+	u64 ProfileHash();
+
+ prompt impone un solo dueño por intervalo: mientras el tuner CPU/VU mide,
 	// el regidor se congela; la misma regla aplica al revés. Un superbloque en
 	// VERIFY cambia CUANTAS VECES entra el recompilador y cómo se cobra el paso
 	// (SbResolve alterna cadena normal / superbloque dentro de la misma ventana de
@@ -133,9 +169,32 @@ namespace mVUSuperblock
 	static constexpr u32 kSbMaxJunctions = 5;      // uniones por superbloque (tramos-1)
 	static constexpr u32 kSbMaxOps = 192;          // instrucciones analizadas fundidas
 	static constexpr u32 kSbMaxCycles = 384;       // ciclos cobrados fundidos
-	static constexpr u32 kSbVerifyPairs = 8;       // pares MATCH para promover a TRUSTED
-	static constexpr u32 kSbVerifyDispatches = 256; // ventana; sin 8 pares al agotarse -> unproven
-	static constexpr u32 kSbKills = 3;             // divergencias totales -> motor OFF por sesión
+	// kSbVerifyDispatches: TAMANO DE LA VENTANA del motor (256 despachos
+	// emparejables = UNA ventana; cada ventana sube el id monotono que la maquina
+	// exige para el «>1 ventana»). LAS LEYES DE PROMOCION YA NO VIVEN AQUI: viven
+	// en mVUSbLife (kValidPairs=1000, kValidWindows=2, kBudgetEpisodes=60000,
+	// kMinGainPairs=64, kTrustedGainPermille=30), el header puro que Harness9
+	// prueba en host. Antes (0.6.21..0.6.31) la promocion era «8 pares y ya», sin
+	// umbral de ventanas ni de muestra: el prompt lo prohibe, y por eso se fue.
+	static constexpr u32 kSbVerifyDispatches = 256; // despachos emparejables por ventana
+	// Breaker del proceso. Sin superficie de rollback el episodio divergente YA
+	// corrio como autoritativo (VALIDATE alternatea), asi que el unico escudo es
+	// parar: 3 divergencias y fuera, como en 0.6.21. Con superficie (SHADOW de
+	// verdad, donde la divergencia se revierte antes de llegar al juego) el
+	// castigo global exige ADEMAS que sean al menos 3 CANDIDATOS DISTINTOS: un
+	// candidato malo no apaga a los sanos — lo que el prompt pide como «DEAD por
+	// candidato, no quemado de proceso» —, pero un motor que diverge en todas
+	// partes esta roto y eso si es del proceso.
+		// Quemado por PC (no por proceso): evita RECOMPILAR en bucle lo que la
+	// maquina ya rechazo o ya no puede financiar. Se quema (a) rechazo
+	// determinista de forma, (b) DEAD por divergencia, (c) medido sin ganancia y
+	// (d) presupuesto agotado — los dos ultimos con el matiz de que la maquina
+	// NO los considera un "no" de equivalencia (eso vive en sus estados, y el
+	// informe los lista aparte: dead vs archived). El bit vive por identidad de
+	// code cache: SbKillAll y el flanco OFF->ON de SyncFromConfig lo limpian.
+	static constexpr u32 kSbBreakNoSurface = 3;
+	static constexpr u32 kSbBreakWithSurface = 8;
+	static constexpr u32 kSbBreakCandidates = 3;
 	static constexpr u32 kSbMaxVariants = 256;     // superbloques vivos a la vez
 
 	// Bits de rasguño de identidad de variante — byte 6 de microRegInfo
@@ -280,7 +339,17 @@ namespace mVUSuperblock
 	// ventana agotada sin los pares -> candidato "unproven" (superbloque
 	// liberado). Solo VU1, solo con motor ON. Llamable SIEMPRE (el motor
 	// decide si hay episodio abierto).
-	void SbFinish(u32 startPC_bytes, u32 consumedCycles);
+	// episodeNs: duracion REAL del episodio (el llamador la toma con
+	// Common::Timer, monotonia). Con las DOS patas de un par medidas se forma la
+	// GANANCIA: sin numero no hay TRUSTED, y con numero pero sin su n tampoco.
+	// 0 = «este episodio no se cronometro»: ese par no cuenta como cronometrado
+	// (se anota aparte, no se silencia).
+	void SbFinish(u32 startPC_bytes, u32 consumedCycles, u64 episodeNs);
+
+	// Etiqueta de LA MAQUINA para la linea VU-SB del HUD, con recuentos. En
+	// VALIDATE y SHADOW nunca dice «acelerado»: esa regla esta codificada en
+	// mVUSbLife::Machine::HudLabel, no en quien pinta. outSize >= 96.
+	void HudSummary(char* out, u32 outSize);
 
 	// Digest de salida del estado observable de VU1 (VF/VI/ACC, q/p,
 	// flags, pendings, micro_*flags, mac/status/clipflag, nextBlockCycles,
@@ -316,6 +385,15 @@ namespace mVUSuperblock
 		std::atomic<u64> promoted{0};        // variantes VERIFY -> TRUSTED
 		std::atomic<u64> unproven{0};        // ventana agotada sin evidencia -> cadena normal
 		std::atomic<u64> killed{0};          // veces que el motor se auto-apagó
+		// 0.6.32 — contabilidad de LA MAQUINA por candidato.
+		std::atomic<u64> mask_rejected{0};   // pares NO contados por mascara incompleta
+		std::atomic<u64> epochs{0};          // ventanas (ids monotonicos) abiertas
+		std::atomic<u64> validated{0};       // VALIDATED (equivale) — NO es TRUSTED
+		std::atomic<u64> dead_candidates{0}; // DEAD por candidato (el proceso sigue vivo)
+		std::atomic<u64> archived{0};        // INVALIDATED por presupuesto/contexto
+		std::atomic<u64> trials{0};          // ventanas de prueba declaradas
+		std::atomic<u64> spot_checks{0};     // comprobaciones puntuales de un TRUSTED
+		std::atomic<u64> unprofitable{0};    // VALIDATED sin ganancia: equivale pero no vale la pena
 	};
 	extern Stats g_stats[2];
 

@@ -11,6 +11,7 @@
 #include "common/Path.h"
 #include "common/Perf.h"
 #include "common/StringUtil.h"
+#include "common/Timer.h" // Cenit 0.6.32: duracion real del episodio VU1
 #include "SaveState.h"
 #include "VU1Trace.h"
 #ifdef __ANDROID__
@@ -79,6 +80,9 @@ static_assert(offsetof(microRegInfo, blockType) < sizeof(u64),
 // Cenit VU Superblock Engine — prototipo del oraculo del replay diferencial
 // (definicion cerca de mVUexecute; registrada en mVUinit como g_exitDigest).
 static u64 mVU1ExitDigest(u32 consumedCycles);
+// Cenit 0.6.32 — digest del MICROCODIGO del area fusionada (identidad del
+// candidato; registrada en mVUinit como g_areaDigest).
+static u32 mVU1AreaDigest(const u32* pcs, const u32* ops, u32 count);
 
 // SlotArray() — la vista publica del array de slots (declarada en el header
 // del probe para lectores sin acceso al struct).
@@ -543,6 +547,31 @@ void mVUinit(microVU& mVU, uint vuIndex)
 		// El motor pide el digest de salida al cerrar cada episodio de la
 		// ventana de replay (solo existe VU1; el motor es VU1-only).
 		mVUSuperblock::g_exitDigest = &mVU1ExitDigest;
+		// Cenit 0.6.32 (Fase 2) — los otros tres observadores que la maquina de
+		// estados necesita como DATOS, no como suposicion:
+		//  * g_areaDigest: identidad del microcodigo del area. Sin el, la
+		//    identidad queda incompleta (codeDigest=0) y Rules::TrustedReady no
+		//    promociona nada.
+		//  * g_exitMask: que regiones cubre HOY mVU1ExitDigest. La maquina rechaza
+		//    cada par si la mascara declarada no cubre kRequiredRegions, asi que
+		//    esta linea es la unica que puede autorizar evidencia. Se declara
+		//    campo por campo abajo, junto al cuerpo del digest.
+		//  * g_engineAbi: version del compilador/emision. Cambiar el ABI sin cambiar
+		//    este numero deja evidencia vieja sobre codigo nuevo.
+		mVUSuperblock::g_areaDigest = &mVU1AreaDigest;
+		mVUSuperblock::g_exitMask.store(mVUSbLife::Regions::Vf | mVUSbLife::Regions::Vi |
+			mVUSbLife::Regions::Acc | mVUSbLife::Regions::Qp | mVUSbLife::Regions::Cycle |
+			mVUSbLife::Regions::Flags | mVUSbLife::Regions::Pendings |
+			mVUSbLife::Regions::MacroClipStatus | mVUSbLife::Regions::NextBlockCycles |
+			mVUSbLife::Regions::Xgkick | mVUSbLife::Regions::ViBackup |
+			mVUSbLife::Regions::LatencyRings | mVUSbLife::Regions::DataMem |
+			mVUSbLife::Regions::EpisodeCycles, std::memory_order_relaxed);
+		mVUSuperblock::g_engineAbi.store(kMvuCompilerAbiVersion, std::memory_order_relaxed);
+		// Superficie de snapshot/restore: NO implementada en esta version (ver
+		// MvuSbLife.h punto 2 — x19 fijo + direcciones absolutas de VPU_STAT).
+		// Se escribe explicitamente porque el estado honesto de esta version es un
+		// dato que la maquina lee, no la ausencia de un escrito.
+		mVUSuperblock::g_rollbackSurface.store(false, std::memory_order_relaxed);
 		// Token de armado de la compilacion variante. Ambos VUs lo inicializan:
 		// mVUinit hace memset(&mVU.prog,...) pero microVU0/1 son estaticos
 		// (cero-llenados), y sbSlot debe ser -1 = "sin frame variante", no 0
@@ -1785,6 +1814,71 @@ static u64 mVU1ExitDigest(u32 consumedCycles)
 }
 
 //------------------------------------------------------------------
+// Cenit 0.6.32 (Fase 2) — Digest del MICROCODIGO de un area superbloqueada.
+//
+// Para que sirve: la IDENTIDAD del candidato. La maquina de estados solo
+// comparte evidencia entre dos candidatos con identidad identica, y el prompt
+// exige que un superbloque construido sobre microcodigo distinto no herede la
+// confianza del anterior. Este TU es el unico que ve VU1.Micro, asi que el
+// motor pide el numero por funcion registrado (g_areaDigest) en vez de
+// adivinarlo.
+//
+// Que entra: por cada tramo, su PC de entrada y el numero de instrucciones que
+// cobra (como palabras, para que un reacondicionamiento de tramos cambie el
+// digest) y los BYTES REALES de microinstruccion del tramo. El area no es
+// contigua, por eso es lista de tramos y no un rango.
+//
+// Coste: kSbMaxJunctions+1 = 6 tramos de hasta kSbMaxOps = 192 instrucciones de
+// 8 bytes, es decir <= ~9.2 KB hashkeados, y SOLO al armar/relabelar un
+// candidato (compilation path, no el de despacho). Comparado con mVU1ExitDigest
+// (21 KB por episodio emparejable) es ruina de una vez por bloque.
+//
+// Silencio honesto: si un tramo no tiene forma medida (ops=0) o cae fuera de
+// microMem, SOLO entra pc|ops, y el candidato queda con un digest que no
+// describe el microcodigo de ese tramo. No se rellena con ceros fingidos ni se
+// declara cubierto: la cobertura de la que depende la promocion es la mascara
+// de la COMPARACION (g_exitMask), no este numero.
+//------------------------------------------------------------------
+
+static u32 mVU1AreaDigest(const u32* pcs, const u32* ops, u32 count)
+{
+	if (!pcs || !ops || count == 0)
+		return 0u;
+
+	// microMem de VU1 = 0x4000 bytes, una microinstruccion cada 8 (xPC =
+	// (iPC/2)*8, microVU_Misc-arm64.h:297) y el dispatcher enmascara a 0x3ff8.
+	static constexpr u32 kAreaMem = 0x4000u;
+	static constexpr u32 kAreaMask = 0x3ff8u;
+
+	XXH3_state_t st;
+	XXH3_64bits_reset(&st);
+	for (u32 i = 0; i < count; i++)
+	{
+		const u32 pc = pcs[i];
+		const u32 n = ops[i];
+		XXH3_64bits_update(&st, &pc, sizeof(pc));
+		XXH3_64bits_update(&st, &n, sizeof(n));
+		const u32 off = pc & kAreaMask;
+		if (off < kAreaMem && n > 0)
+		{
+			// recorte por el final de microMem: un tramo que empezase cerca de
+			// 0x4000 no puede cobrar todas sus instrucciones
+			u64 len = (u64)n * 8u;
+			if (len > (u64)(kAreaMem - off))
+				len = (u64)(kAreaMem - off);
+			XXH3_64bits_update(&st, &VU1.Micro[off], (size_t)len);
+		}
+	}
+	const u64 h = XXH3_64bits_digest(&st);
+	const u32 d = (u32)(h >> 32) ^ (u32)h;
+	// d == 0 (una entre 4e9) se lee como "nadie midio el area" y el candidato no
+	// se promociona. Es un fallo hacia lo seguro y se deja asi: forzar un valor no
+	// medido para que "se promocione" es precisamente lo que este motor no
+	// hace nunca.
+	return d;
+}
+
+//------------------------------------------------------------------
 // Execution Functions
 //------------------------------------------------------------------
 
@@ -2238,6 +2332,12 @@ void recMicroVU1::Execute(u32 cycles)
 	// codigo generado puede mover TPC dentro del episodio.
 	const u32 sbEntryPC = VU1.VI[REG_TPC].UL & 0x3ff8;
 	const bool sbRun = mVUSuperblock::IsEnabled();
+	// Cenit 0.6.32 (Fase 2) — duracion REAL del episodio. La ganancia de un
+	// superbloque no se declara: se mide manzana con manzana sobre los dos
+	// episodios de un par (cadena normal / superbloque), y eso exige el reloj.
+	// El reloj solo corre con el motor encendido; Common::Timer es
+	// CLOCK_MONOTONIC (common/Timer.h), sin costo de FPU ni de syscall extra.
+	const Common::Timer::Value sbT0 = sbRun ? Common::Timer::GetCurrentValue() : 0;
 	((mVUrecCall)microVU1.startFunct)(VU1.VI[REG_TPC].UL, cycles);
 	VU1.VI[REG_TPC].UL >>= 3;
 #ifdef PCSX2_RECOMPILER_TESTS
@@ -2254,7 +2354,9 @@ void recMicroVU1::Execute(u32 cycles)
 	if (sbRun)
 	{
 		const s32 c0 = microVU1.cycles;
-		mVUSuperblock::SbFinish(sbEntryPC, (c0 > 0) ? (u32)c0 : 0u);
+		const u64 episodeNs = (u64)Common::Timer::ConvertValueToNanoseconds(
+			Common::Timer::GetCurrentValue() - sbT0);
+		mVUSuperblock::SbFinish(sbEntryPC, (c0 > 0) ? (u32)c0 : 0u, episodeNs);
 	}
 
 	if (microVU1.regs().flags & 0x4 && !THREAD_VU1)
