@@ -214,6 +214,59 @@ public class NativeApp {
 		try { return getEEThreadUsage(); } catch (Throwable t) { return 0f; }
 	}
 
+	// --- Cenit 0.6.30: snapshot unificado de carga (Fase 0/1 del prompt maestro) --
+	// Un solo cruce JNI por tick en vez de doce lecturas sueltas. El double[] de
+	// 24 elementos es un SNAPSHOT de un mismo instante de PerformanceMetrics::Update,
+	// asi que GPU%, EE%, speed, frametime, MTVU, etc. son todos de la MISMA ventana
+	// de 0,5 s. Ver CONTRATO_CENIT_LOAD_SAMPLE.md para los 24 indices y sus unidades.
+	// null = "no hay muestra" (binario ausente o fallo), NUNCA ceros.
+	public static native double[] getCenitSample();
+	/** Snapshot unificado de carga. null si el binario no esta o la llamada falla. */
+	public static double[] safeGetCenitSample() {
+		if (hasNoNativeBinary) return null;
+		try { return getCenitSample(); } catch (Throwable t) { return null; }
+	}
+
+	// --- Cenit 0.6.30: publicacion del veredicto al HUD nativo (Fase 1.8) ---------
+	// Guarda el veredicto en CenitTelemetry.h (objeto inline de atomicos) y
+	// ImGuiOverlays.cpp lo pinta en una linea nueva junto a la de VUSB, solo si
+	// confidencePct >= 0. No toca nada de emulacion: es solo para que el HUD
+	// muestre el estado de carga.
+	// OJO con el SEXTO parametro (thermalStatus): lo agregue en el nativo porque
+	// el estado THERMAL_BOUND del clasificador no se puede verificar en pantalla
+	// sin ver el termico, y ese dato SOLO lo tiene Java (PowerManager, por
+	// reflexion). La firma tiene que coincidir EXACTA con el .cpp: una firma JNI
+	// desalineada no falla al compilar, falla en tiempo de ejecucion con
+	// UnsatisfiedLinkError — que aqui se tragaria el catch y el HUD quedaria
+	// mudo para siempre sin ningun aviso.
+	// stateOrdinal: {0=UNKNOWN,1=NO_BOTTLENECK,2=GPU_BOUND,3=CPU_BOUND,4=VU_BOUND,
+	//                5=THERMAL_BOUND,6=INVALID_SAMPLE}
+	// actionCode: {0=HOLD,1=ALLOW_RESOLUTION_DROP,2=BLOCK_RESOLUTION_DROP,3=WAIT_FOR_EVIDENCE}
+	// thermalStatus: el entero de PowerManager.getCurrentThermalStatus (0..6), o
+	//                -1 cuando el telefono no expone la API o aun no se leyo.
+	public static native void setCenitLoadVerdict(int stateOrdinal, int confidencePct,
+	                                               int actionCode, double gpuPct, double eePct,
+	                                               int thermalStatus);
+	/** Publica el veredicto al HUD nativo. No-op si el binario no esta o la llamada falla. */
+	public static void safeSetCenitLoadVerdict(int stateOrdinal, int confidencePct,
+	                                            int actionCode, double gpuPct, double eePct,
+	                                            int thermalStatus) {
+		if (hasNoNativeBinary) return;
+		try { setCenitLoadVerdict(stateOrdinal, confidencePct, actionCode, gpuPct, eePct, thermalStatus); }
+		catch (Throwable t) { /* el HUD no debe romper la emulacion */ }
+	}
+
+	/**
+	 * Borra el veredicto del HUD (vuelve a "todavia no hay"). Sin argumentos, asi que
+	 * el riesgo de firma desalineada es el minimo: JNI sin parametros no puede
+	 * desfasarse.
+	 */
+	public static native void resetCenitLoadVerdict();
+	public static void safeResetCenitLoadVerdict() {
+		if (hasNoNativeBinary) return;
+		try { resetCenitLoadVerdict(); } catch (Throwable t) { /* idem: el HUD no rompe nada */ }
+	}
+
 	public static native void renderUpscalemultiplier(float value);
     public static void renderUpscalemultiplierAsync(float value) {
         runNativeSettingAsync("renderUpscalemultiplier", () -> renderUpscalemultiplier(value));

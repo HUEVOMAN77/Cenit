@@ -57,6 +57,30 @@ import android.os.Looper;
  * regidor recortaba imagen también en juegos donde recortar no recupera cuadros.
  * Un solo camino de código para cualquier disco del catálogo y para Snapdragon 6,
  * 7 u 8: lo único que cambia entre ellos es lo que miden.
+ *
+ * v6 (0.6.30, Fase 1 + Fase 4 del prompt maestro) — tres cambios de fondo, cada
+ * uno con su porqué medible:
+ *
+ *  1) UNA lectura por tick. El regidor ya no hace ocho llamadas sueltas al motor:
+ *     pide un snapshot (CenitLoadSample, 24 cifras del MISMO PerformanceMetrics::Update)
+ *     y con eso se clasifica, se loguea y se alimenta al sintonizador. Antes, si un
+ *     Update caía en medio de la ristra, el tick comparaba la GPU de una ventana con
+ *     el EE de la anterior.
+ *  2) La CONFIANZA manda la acción (Regla 5). El recorte exige
+ *     ALLOW_RESOLUTION_DROP y el bloqueo exige BLOCK_RESOLUTION_DROP; una decisión
+ *     floja llega degradada a WAIT_FOR_EVIDENCE y el regidor no aprende nada de
+ *     ese tick. En v5 la confianza se imprimía pero no gobernaba nada.
+ *  3) UN dueño por tick, con la matriz de la Fase 4: GPU_BOUND → se recorta y el
+ *     sintonizador queda en espera; CPU_BOUND/VU_BOUND con permiso → se mantiene la
+ *     escala y el sintonizador trabaja; THERMAL_BOUND → no se sube, no se benchea y
+ *     NO se escribe cpuBound en el perfil; INVALID_SAMPLE → la métrica faltó (se
+ *     busca la causa); UNKNOWN_LOAD → se espera. Los dos "no sé" estaban antes
+ *     mezclados en la misma etiqueta y el tally no podía contarlos aparte.
+ *
+ * Además: la calibración de umbrales (LoadTrend) se acumula por clave juego+SoC+
+ * backend y solo sustituye los números por defecto cuando pasa los mínimos del
+ * prompt (3 juegos × 5 ventanas × 2 sesiones). Mientras no los pasa, la política
+ * sigue provisional y el log lo dice.
  */
 final class DynamicResolutionGovernor {
 
@@ -66,33 +90,21 @@ final class DynamicResolutionGovernor {
     private static final int SLOW_TICKS_TO_DROP = 2;
     private static final int FAST_TICKS_TO_RAISE = 8;
     // ------------------------------------------------------------------
-    // Cenit 0.6.29 — UNIDAD CORREGIDA. getGPUUsage() devuelve PORCENTAJE
-    // (0..100), no fracción: la fórmula del core es
-    //   s_gpu_usage = gpu_time_acumulado_ms / (ventana_s * 10.0)
-    // con ventana = 0,5 s, o sea ms de GPU por cada segundo de RELOJ REAL. Así
-    // que un 92 ya significa "la GPU tiene llena el 92% del tiempo", para
-    // cualquier juego y cualquier gama — esa es la razón de que la regla pueda
-    // ser universal sin tabla de nombres. El HUD y el PerfLog del propio motor lo
-    // imprimen con "%". Aquí se comparaba contra 0,65 y 0,05 desde 0.6.4, lo que
-    // invertía la decisión en el caso común (GameLoadClassifier documenta el
-    // alcance, con la rama verificada). Los umbrales de abajo vuelven a estar en
-    // la unidad REAL de la métrica y ya no son criterio de nadie: quien decide es
-    // el clasificador, con sus propios números y su porqué escrito.
+    // Cenit 0.6.30 (Fase 1 del prompt maestro): los umbrales de carga ya NO viven
+    // aqui. Viven en LoadPolicy, que es la unica dueña de los numeros, y el
+    // regidor los recibe calibrados desde la evidencia acumulada (LoadTrend).
+    //
+    // Por que todavia hay constantes GPU_* aqui abajo: las reglas PROPIAS del
+    // regidor (cuando enganchar el turbo de cargas) no son criterios de clasifi-
+    // cacion y todavia no tienen evidencia para calibrarse. Se quedan en su sitio
+    // y etiquetadas como tales; lo que se borro es la copia de umbrales del
+    // clasificador, que en 0.6.4 ya demostro lo que pasa cuando dos archivos
+    // tienen "su propio" numero para la misma pregunta.
     // ------------------------------------------------------------------
 
-    /** Con la GPU por debajo de este uso (en %), el retraso NO es de píxeles:
-     *  la emulación está mandando y recortar imagen solo estropea la salida.
-     *  Antes: 0,65, leyendo la métrica como fracción. Es UNA SOLA constante con
-     *  el clasificador: si los dos tuvieran números propios, el governor y su
-     *  criterio podrían discrepar en silencio — otra vez. */
-    private static final float GPU_BOUND_MIN = GameLoadClassifier.GPU_IDLE_PCT;
-    // La métrica de GPU por debajo de esto es "aún no existe" (GetGPUUsage
-    // devuelve s_gpu_usage, que vale 0 hasta el primer Update con presents
-    // reales, y se queda 0 si el driver no reporta tiempo de GPU). En %: 0,5%
-    // es una GPU parada, y a diferencia del 0,05 de antes ahora sí separa el
-    // "sin dato" del "8% y el cuello es la emulación". Compartida con el
-    // clasificador por el mismo motivo de arriba.
-    private static final float GPU_METRIC_MIN = GameLoadClassifier.GPU_METRIC_MISSING_PCT;
+    /** Umbral de "la metrica de GPU no existe todavia", compartido con el
+     *  clasificador desde la MISMA politica (no dos constantes gemelas). */
+    private static final float GPU_METRIC_MIN = (float) LoadPolicy.defaults().gpuMetricMissingPct;
     // Umbrales del turbo de cargas: ANTES valían 0,22 / 0,40 / 0,05 creyendo
     // que la métrica era fracción, así que "GPU muerta" pedía un 0,22% real
     // (imposible salvo en un menu) y "carga terminada" un 0,40% (se cumplía
@@ -172,6 +184,28 @@ final class DynamicResolutionGovernor {
     // 0.6.29: cuarta etiqueta, UNKNOWN_LOAD — evidencia intermedia que no
     // autoriza a recortar. Sin este flag el log se repetiría en cada tick.
     private boolean unknownHoldLogged = false;
+    // 0.6.30: quinta etiqueta, THERMAL_BOUND. Existe separada de las otras cuatro
+    // porque es el unico estado donde NO se aprende nada: si se reutilizara el
+    // flag de CPU_BOUND, un throttle a mitad de partida impediría imprimir el
+    // CPU_BOUND real que venga despues de enfriar.
+    private boolean thermalLogged = false;
+
+    // ------------------------------------------------------------------
+    // 0.6.30 (Fase 1): trend de la partida + política del clasificador
+    // ------------------------------------------------------------------
+    /**
+     * Anillo de la partida en curso (medianas, P95 propio, rachas sostenidas,
+     * descartes) y calibracion acumulada entre juegos. Dura lo que el objeto del
+     * regidor; la calibracion se salva a prefs en stop() y se lee en start().
+     */
+    private final LoadTrend trend = new LoadTrend();
+    /**
+     * Politica activa, reconstruida cuando la evidencia alcanza los minimos del
+     * prompt (3 juegos x 5 ventanas x 2 sesiones). Mientras no los alcance sigue
+     * provisional, que es la unica manera honesta de decir "estos umbrales son mi
+     * criterio, no una medicion".
+     */
+    private LoadPolicy mPolicy = LoadPolicy.defaults();
 
     // ------------------------------------------------------------------
     // v3: memoria, pre-corte térmico, turbo de cargas y evidencia de cuotas
@@ -290,6 +324,13 @@ final class DynamicResolutionGovernor {
     void start() {
         if (active) return;
         active = true;
+        sCurrent = this; // Ajustes necesita poder hablarle al regidor vivo
+        // 0.6.30 (Fase 1.8): el cuadro de instrumentos se pone a cero ANTES del
+        // primer tick. Sin esto, los ~600 ms que tardan el arranque y la primera
+        // ventana en llenarse se veria el LOAD del disco anterior (o el veredicto
+        // de hace dos partidas) pintado como si fuera de esta, y eso es justo el
+        // numero viejo que hace confiar en una decision que no se tomo.
+        NativeApp.safeResetCenitLoadVerdict();
         selfDisabled = false; // juego nuevo, capa por juego nueva: otra oportunidad
         attachThermalListener(); // sin-op si no hay señal térmica accesible
         adaptiveOn = prefs.getBoolean("adaptive_perf", true);
@@ -303,6 +344,17 @@ final class DynamicResolutionGovernor {
         loadTicks = 0; turboOn = false; turboSeconds = 0; turboCooldown = 0;
         cpuBoundTicks = 0;
         unknownHoldLogged = false;
+        thermalLogged = false;
+        // 0.6.30 (Fase 1.3/1.7): juego nuevo, anillo nuevo; la CALIBRACION no,
+        // porque vive indexada por clave y mezclar discos en el anillo de "sostenido"
+        // seria inventar patrones. Se reanuda la acumulada en prefs y se reconstruye
+        // la politica solo si la evidencia ya pasa los minimos del prompt.
+        trend.clearRing();
+        trend.deserialize(prefs.getString(CAL_PREF_KEY, ""));
+        mPolicy = refreshPolicy();
+        // Un reloj con la politica y el anillo nuevos: sin esto, el primer tick
+        // clasifica con la politica del juego anterior.
+        sessionStartMs = System.currentTimeMillis();
         // 0.6.27: procesar el diario de un benchmark que el cierre de la app
         // dejó a medias ANTES de tocar la escala (revertir speedhacks globales
         // colgados es lo único urgente; el benchmark nuevo, si viene, empieza
@@ -312,11 +364,40 @@ final class DynamicResolutionGovernor {
         main.postDelayed(tick, TICK_MS);
     }
 
+    /**
+     * 0.6.30: reconstruye la politica a partir de la calibracion acumulada.
+     * Devuelve la default (provisional=true) mientras no haya evidencia, y deja
+     * constar en el log cuando si la hay: cambiar un umbral con medicion tiene que
+     * quedar escrito, no quedarse dentro de un objeto.
+     */
+    private LoadPolicy refreshPolicy() {
+        final LoadPolicy suggested = trend.suggestPolicy();
+        if (suggested.provisional) return LoadPolicy.defaults();
+        if (Math.abs(suggested.gpuHotPct - mPolicy.gpuHotPct) > 0.01
+                || Math.abs(suggested.emuHotPct - mPolicy.emuHotPct) > 0.01
+                || Math.abs(suggested.gpuIdlePct - mPolicy.gpuIdlePct) > 0.01) {
+            android.util.Log.i("DynRes", "policy calibrated from evidence: gpu_hot "
+                    + mPolicy.gpuHotPct + "->" + suggested.gpuHotPct
+                    + " ee_hot " + mPolicy.emuHotPct + "->" + suggested.emuHotPct
+                    + " gpu_idle " + mPolicy.gpuIdlePct + "->" + suggested.gpuIdlePct
+                    + " (juegos=" + trend.calibrationKeyCount() + ")");
+        }
+        return suggested;
+    }
+
     /** Al apagar el juego o cerrar la app: deja la escala del usuario aplicada. */
     void stop() {
         if (!active) return;
         active = false;
+        if (sCurrent == this) sCurrent = null;
         main.removeCallbacks(tick);
+        // El mismo cuadro se borra al cerrar: si el usuario vuelve al menu, el
+        // overlay no debe seguir mostrando el veredicto de un juego que ya no esta
+        // corriendo. Va aqui y no solo en start() porque el cierre puede ser lo
+        // ultimo que ocurra antes de que el proceso muera (congelacion por el
+        // sistema, deslizar arriba, matar la app): lo que se deja publicado es lo
+        // que se vera al volver.
+        NativeApp.safeResetCenitLoadVerdict();
         final float ceiling = ceiling();
         if (applied > 0f && applied < ceiling - 0.001f) host.applyUpscale(ceiling);
         applied = 0f;
@@ -327,6 +408,130 @@ final class DynamicResolutionGovernor {
         tuner.onGameStop(profile);
         // v3: el aprendizaje de esta partida se guarda con el juego.
         if (profile != null && profile.known()) profile.save();
+        // 0.6.30 (Fase 1.7): la calibracion viaja por clave (juego + telefono +
+        // backend), NO por URI de partida, y se salva aunque el usuario tenga
+        // "recordar rendimiento" apagado: lo que se acumula aqui no es una decision
+        // sobre SU juego, es evidencia de umbrales. Se guarda siempre y se puede
+        // borrar entero desde Ajustes; nunca se usa para recortar sin pasar los
+        // minimos del prompt.
+        saveCalibration();
+    }
+
+    /** Clave de prefs donde vive la calibracion de umbrales (acumulada). */
+    static final String CAL_PREF_KEY = "load_cal_v1";
+
+    /** Identificador de sesion: un arranque de partida = una sesion. */
+    private long sessionStartMs = 0L;
+
+    /**
+     * Id de sesion para LoadTrend.observe(). Se usa el momento del start(), no un
+     * contador: el minimo del prompt son DOS sesiones separadas por juego, y un
+     * numero que solo aumenta dentro de la misma partida no serviria para saber si
+     * la segunda fue otro dia.
+     */
+    private String appSessionId() { return Long.toString(sessionStartMs); }
+
+    /**
+     * Clase del SoC, leida por REFLEXION a proposito. Build.SOC_MODEL es API 31 y
+     * el SDK con el que compila CI no siempre lo resuelve igual (es exactamente el
+     * motivo por el que las APIs termicas ya se leian asi desde 0.6.19). Si el
+     * campo no esta, se cae a MANUFACTURER/MODEL, que existen desde API 1: la
+     * clave de calibracion puede ser menos especifica en un telefono viejo, nunca
+     * puede reventar la partida.
+     */
+    private static String socClass() {
+        for (String field : new String[]{"SOC_MODEL", "SOC_MANUFACTURER"}) {
+            try {
+                final Object v = android.os.Build.class.getField(field).get(null);
+                if (v instanceof String && !((String) v).isEmpty()) return (String) v;
+            } catch (Throwable ignored) {
+                // campo inexistente en este SDK/runtime: seguir bajando
+            }
+        }
+        return android.os.Build.MANUFACTURER + "/" + android.os.Build.MODEL;
+    }
+
+    /**
+     * Clave de calibracion de la Fase 1.7: serial del disco (no el nombre del
+     * archivo: el mismo juego descargado dos veces es el mismo disco) + SoC +
+     * backend Grafico elegido. Con esto, la evidencia de un Snapdragon 7 con
+     * Turnip no le cambia los umbrales a un Exynos con otro driver, que es justo
+     * lo que hay que poder separar cuando lleguen los demas telefonos.
+     */
+    private String calibrationKey() {
+        final StringBuilder sb = new StringBuilder(48);
+        String serial = "";
+        try { serial = GameSerialUtils.serialFromUri(hostCurrentUri()); } catch (Throwable ignored) {}
+        if (serial == null || serial.isEmpty()) {
+            try { serial = NativeApp.getCurrentGameSerial(); } catch (Throwable ignored) {}
+        }
+        sb.append(serial == null || serial.isEmpty() ? "sin-serial" : serial).append('#');
+        sb.append(socClass()).append('#').append(prefs.getInt("renderer", -1));
+        return sb.toString();
+    }
+
+    /**
+     * 0.6.30: el regidor en curso, para que Ajustes pueda hablarle sin pasar por
+     * la actividad. Hay UN solo regidor por MainActivity y su vida la manda el
+     * juego (start/stop), así que la referencia es simplemente "el que esta vivo
+     * ahora"; se limpia en stop() y solo si es este, para no borrar por error el
+     * del siguiente arranque.
+     */
+    private static volatile DynamicResolutionGovernor sCurrent;
+
+    /**
+     * Olvidar la calibracion de umbrales acumulada (Fase 1.7) en TODAS sus copias:
+     * la de prefs, la del anillo en memoria y la politica que de ella se derivaba.
+     *
+     * Hacerlo a medias es peor que no hacerlo: si alguien (o esta clase) borrara
+     * solo la preferencia, el regidor vivo resalvaria su copia en el proximo
+     * stop() y el boton pareceria mentira. Y si solo se limpiara la memoria, la
+     * preferencia vieja volveria en el proximo start(). Por eso este metodo hace
+     * las tres cosas y se llama desde el unico sitio que tiene las tres a mano.
+     *
+     * @return true si habia evidencia que borrar (para que el aviso no mienta).
+     */
+    static boolean forgetCalibration(Context context) {
+        final SharedPreferences p = context.getApplicationContext()
+                .getSharedPreferences("app_prefs", Context.MODE_PRIVATE);
+        final String saved = p.getString(CAL_PREF_KEY, "");
+        final DynamicResolutionGovernor g = sCurrent;
+        final int liveKeys = g != null ? g.trend.calibrationKeyCount() : 0;
+        final boolean had = !saved.isEmpty() || liveKeys > 0;
+        p.edit().remove(CAL_PREF_KEY).apply();
+        if (g != null) g.forgetCalibrationLocked();
+        android.util.Log.i("DynRes", "load-threshold calibration cleared by user"
+                + " (claves en memoria=" + liveKeys + ")");
+        return had;
+    }
+
+    /** Borra la copia viva; la politica vuelve a ser la provisional de siempre. */
+    private void forgetCalibrationLocked() {
+        trend.clearCalibration();
+        mPolicy = refreshPolicy();
+    }
+
+    /** Salva la calibracion acumulada. Sin contexto de prefs, es sin-op. */
+    private void saveCalibration() {
+        final String data = trend.serialize();
+        if (data.isEmpty() && prefs.getString(CAL_PREF_KEY, "").isEmpty()) return;
+        prefs.edit().putString(CAL_PREF_KEY, data).apply();
+    }
+
+    /**
+     * Snapshot de la ventana, con el fallback que pide la Regla 5 del prompt.
+     *
+     * Si el nativo no contesta (binario ausente, JNI sin registrar, fallo en la
+     * copia del array) se construye la muestra con CERO cruce JNI y el clasificador
+     * respondera INVALID_SAMPLE: el regidor se queda quieto y el HUD lo dice. La
+     * alternativa — leer los getters sueltos de 0.6.29 — estaria comparando metricas
+     * de momentos distintos, que es el defecto que esta version viene a cerrar. No
+     * hay nada que perder: sin snapshot tampoco hay clasificacion util.
+     */
+    private CenitLoadSample readSample() {
+        final double[] raw = NativeApp.safeGetCenitSample();
+        if (raw != null) return new CenitLoadSample(raw);
+        return CenitLoadSample.invalid("el nativo no devolvio snapshot");
     }
 
     /** El usuario tocó algo que invalida la medición: olvidar y volver al techo. */
@@ -370,7 +575,7 @@ final class DynamicResolutionGovernor {
      * de píxeles?"— pero con una constante absoluta en la unidad equivocada y con
      * el ajuste de evidencia al revés (×0.8, más difícil de declarar CPU-bound).
      * La evidencia aprendida sigue usándose, ahora en la dirección correcta:
-     * ensancha el umbral de "GPU holgada" (idlePct, ver evaluate()).
+     * ensancha el umbral de "GPU holgada" (policy.withGpuIdlePct, ver evaluate()).
      */
     private void evaluate() {
         // ¿El último paso llegó realmente a la resolución en uso? Si no, es que los
@@ -489,30 +694,67 @@ final class DynamicResolutionGovernor {
             return;
         }
 
-        final float speed = NativeApp.safeGetEmulationSpeed();
-        // Cenit 0.6.29: UNA clasificacion por tick, con las lecturas crudas del
-        // motor. Antes cada rama comparaba gpu contra sus propias constantes sin
-        // unidad (y en la unidad equivocada); ahora el criterio vive en
-        // GameLoadClassifier, es universal (no depende del nombre del juego) y
-        // puede ejercitarse en el arnes con numeros sinteticos.
-        final float gpu = NativeApp.safeGetGPUUsage();          // PORCENTAJE 0..100
-        final float eePct = NativeApp.safeGetEEThreadUsage();   // % hilo EE
-        // Estos dos son EVIDENCIA para el log, no decision: el clasificador no los
-        // mira (GameLoadClassifier explica por que el ms de GPU y el presupuesto
-        // 1000/fps no son comparables campo a cuadro). Se leen igual porque sin
-        // ellos un log de un telefono ajeno no se puede interpretar.
-        final float gpuMs = NativeApp.safeGetGPUAverageTime();  // ms por present
-        final float targetFps = NativeApp.safeGetFrameRateTarget(); // vertical: ~49,76..60, 0 = sin senal
-        // Evidencia aprendida: si la partida anterior ya demostro que ESTE juego
-        // es de emulacion, el umbral de "GPU holgada" se ANCHA (sube), no se
-        // estrecha. Direccion corregida en 0.6.29: con *0.8 era mas dificil
-        // seguir declarandolo y el juego volvia a recibir recortes.
-        final float idlePct = (profile != null && profile.cpuBound)
-                ? GPU_BOUND_MIN * 1.2f : GPU_BOUND_MIN;
-        final GameLoadClassifier.Bottleneck load = GameLoadClassifier.classify(
-                speed, gpu, eePct,
-                NativeApp.safeGetMtvuWaitMs(), NativeApp.safeGetMtvuWaitCalls(),
-                idlePct);
+        // ==================================================================
+        // Cenit 0.6.30 (Fase 1 del prompt maestro): UNA lectura por tick.
+        //
+        // Antes el regidor hacia ocho llamadas sueltas (speed, gpu, ee, gpuMs,
+        // vertical, waitMs, waitCalls, upscale) y cada una caia en el instante
+        // que le tocaba. PerformanceMetrics::Update renueva las metricas cada
+        // 0,5 s y el tick es de 1 s, asi que la mayoria de los ticks leia todo de
+        // la misma ventana — pero cuando un Update caia EN MEDIO de la ristra, el
+        // tick mezclaba la GPU de una ventana con el EE de la anterior y el
+        // clasificador comparaba dos etapas de dos intervalos distintos. El
+        // prompt lo pide explicito: "Las metricas GPU y emulacion deben pertenecer
+        // al mismo intervalo temporal". getCenitSample() devuelve el snapshot de
+        // un mismo Update: ya no es una coincidencia temporal, es un hecho.
+        // ==================================================================
+        final CenitLoadSample sample = readSample();
+
+        // Evidencia para el log, no decision: gpuMs puede venir NaN si la ventana
+        // no tuvo presents y el "presupuesto" 1000/Hz no es comparable campo a
+        // campo en entrelazado (GameLoadClassifier y el contrato explican por que).
+        // Se declaran float para no tocar el tipo de todo lo de abajo (el anillo de
+        // velocidad, el sintonizador y el turbo siguen en float): la diferencia de
+        // precision no cambia una decision, y aqui lo que importa es la unidad.
+        final float speed = (float) sample.speedPct();
+        final float gpu = (float) sample.gpuPct();
+        final float eePct = (float) sample.eePct();
+
+        // La muestra entra al trend ANTES de clasificar: el clasificador pregunta
+        // por rachas sostenidas, y la racha de este tick cuenta. add() responde
+        // false cuando la tiro (pausa, turbo, cambio de escala, calor, sin
+        // presents, NaN o ventana recortada) — en ese caso tampoco se suma a la
+        // calibracion, que es justo lo que hay que no contaminar.
+        //
+        // Con un ensayo del sintonizador en vuelo NO se alimenta el trend: el
+        // speed% de un ensayo esta bajo a PROPOSITO, y mezclarlo con la partida
+        // real daria medianas y rachas de datos de prueba. Es la misma regla con la
+        // que 0.6.27 ya protege heldScale y slowFloorTicks, ahora tambien para la
+        // calibracion de umbrales.
+        final boolean tunerMeasuring = tuner.isActive();
+        final boolean counted = !tunerMeasuring && trend.add(sample, isVmPaused(), turboOn,
+                pendingApply > 0f, lastThermalStatus);
+        if (counted)
+            trend.observe(calibrationKey(), appSessionId(), sample);
+
+        // Politica: la calibrada por evidencia (si la hay) mas el ensanche que
+        // aporta el perfil de ESTE juego. Con la evidencia aprendida de que el
+        // disco es de emulacion, el piso de "GPU holgada" SUBE (x1,2), corregido
+        // en 0.6.29: con *0.8 era mas dificil seguir declarandolo y el juego
+        // volvia a recibir recortes que no le servian.
+        LoadPolicy policy = mPolicy;
+        if (profile != null && profile.cpuBound)
+            policy = policy.withGpuIdlePct(policy.gpuIdlePct * 1.2);
+
+        final GameLoadClassifier.Verdict verdict =
+                GameLoadClassifier.classify(sample, policy, lastThermalStatus, trend);
+
+        // Fase 1.8: el veredicto se publica SIEMPRE, antes de cualquier guarda que
+        // haga retornar el tick. Si no, el HUD mostraria el veredicto de hace
+        // minutos justo en los momentos donde el regidor no actua, que son los
+        // que alguien tiene que poder verificar desde el sofa.
+        NativeApp.safeSetCenitLoadVerdict(verdict.stateOrdinal(), verdict.confidencePct,
+                verdict.actionCode(), gpu, eePct, lastThermalStatus);
 
         // ---------------------------------------------------------------
         // 0.6.27 (governor v4): el sintonizador CPU/VU se consulta AQUÍ, con el
@@ -525,15 +767,19 @@ final class DynamicResolutionGovernor {
         // ---------------------------------------------------------------
         final boolean behind = speed > 0f && speed < DROP_BELOW_PCT;
         final boolean atFloor = applied <= STEPS[0] + 0.001f;
-        // Metrica viva = hay lectura de GPU utilizable O el motor ya clasificó con
-        // otra evidencia (VU_WAIT no depende del % de GPU).
-        final boolean metricsAlive = speed > 0f
-                && (gpu > GPU_METRIC_MIN || load == GameLoadClassifier.Bottleneck.VU_WAIT);
-        // Cuello de emulación (o VU esperando): lo que el sintonizador necesita.
-        // Antes: gpu < 0,65 con gpu en % — casi inalcanzable, por eso el
-        // benchmark de 0.6.27 disparaba tan raro.
-        final boolean cpuBoundNow = load == GameLoadClassifier.Bottleneck.EMULATION
-                || load == GameLoadClassifier.Bottleneck.VU_WAIT;
+        // Metrica viva = el clasificador tuvo muestra usable (valida y con
+        // velocidad real). Es la definicion del contrato, no "gpu > 0,5": con
+        // EE valido y GPU ausente si hay metrica que leer, y antes esto cerraba
+        // benchmarks que iban bien.
+        final boolean metricsAlive = verdict.state != GameLoadClassifier.LoadState.INVALID_SAMPLE
+                && speed > 0f;
+        // Cuello de emulacion (o VU esperando): lo que necesita el sintonizador.
+        // Se lee de la ACCION, no del estado: Regla 5 del prompt — una CPU_BOUND
+        // con confianza insuficiente ya no es "el cuello es la emulacion", es
+        // "todavia no lo sabemos", y no debe encender un benchmark.
+        final boolean cpuBoundNow = verdict.action == GameLoadClassifier.Action.BLOCK_RESOLUTION_DROP
+                && (verdict.state == GameLoadClassifier.LoadState.CPU_BOUND
+                    || verdict.state == GameLoadClassifier.LoadState.VU_BOUND);
         final int tunerAction = tuner.tick(profile, hostCurrentUri(), applied,
                 behind, atFloor, cpuBoundNow, metricsAlive,
                 turboOn, pendingApply > 0f, thermalLimited());
@@ -626,21 +872,27 @@ final class DynamicResolutionGovernor {
         }
 
         // ---------------------------------------------------------------
-        // Reglas clásicas (v2) de subida/bajada.
+        // Reglas clásicas (v2) de subida/bajada, ahora regidas por la MATRIZ de
+        // la Fase 4 del prompt maestro: el dueno del tick es UN solo sistema y
+        // cada veredicto autoriza un conjunto cerrado de acciones.
         //
-        // Cenit 0.6.29: el "¿de qué es este retraso?" ya NO se decide aquí a ojo.
-        // La decisión única es `load`, la que tomó GameLoadClassifier con el % de
-        // reloj que tiene la GPU, el % que tiene el hilo EE y la espera MTVU — sin
-        // saber qué disco está delante. Esto reemplaza tres comparaciones que
-        // estaban en la unidad equivocada (gpu <= 0,05 / gpu < 0,65, con gpu en %),
-        // y por eso en la práctica declaraban GPU_BOUND en casi todo: se recortaba
-        // imagen también cuando recortar no recupera ni un cuadro.
+        // Cenit 0.6.30 — lo que cambia respecto a 0.6.29:
+        //  - La rama de recorte pide PERMISO, no evidencia: exige
+        //    ALLOW_RESOLUTION_DROP. En 0.6.29 el regidor miraba el ESTADO y
+        //    actuaba; la confianza se imprimia pero no mandaba nada (Regla 5).
+        //  - Se separan los dos "no se" que estaban mezclados. INVALID_SAMPLE es
+        //    "la metrica fallo" (hay que buscar la causa, y no se aprende nada);
+        //    UNKNOWN_LOAD es "la metrica existe y no alcanza para concluir" (se
+        //    espera). Antes los dos caian en la misma etiqueta y el FÁBRICA no
+        //    podia distinguir un driver sin tiempo de GPU de un juego raro.
+        //  - THERMAL_BOUND tiene rama propia. Es el unico caso donde bajar la
+        //    resolucion NUNCA debe escribir cpuBound en el perfil: con el SoC
+        //    recortando por calor, la emulacion SIEMPRE parece el cuello, y esa
+        //    memoria se queda persiguiendo al juego cuando el telefono enfria.
         //
-        // Las etiquetas "DynRes state: ..." se conservan palabra por palabra: los
-        // logs que ya me llegaron de los teléfonos siguen siendo comparables con
-        // los que vengan, que es la única forma de verificar esto con medición. Lo
-        // nuevo es UNKNOWN_LOAD, y su evidencia impresa es el dato que falta para
-        // saber si los umbrales están bien puestos en Snapdragon 6 y 7.
+        // Las etiquetas "DynRes state: ..." siguen siendo grepeables y con las
+        // mismas palabras donde el significado no cambio, para que los logs de
+        // telefonos ajenos que ya tengo sigan siendo comparables con los nuevos.
         // ---------------------------------------------------------------
         if (speed > 0f && speed < DROP_BELOW_PCT) {
             // 0.6.29: tally del veredicto, UN tick por veredicto, y solo cuando hay
@@ -651,19 +903,63 @@ final class DynamicResolutionGovernor {
             // que va a tiempo tampoco sirve: el clasificador devolveria UNKNOWN por
             // "no hay cuello", no por evidencia insuficiente, y eso llenaria la
             // casilla equivocada.
+            //
+            // 0.6.30: el indice es el codigo del CONTRATO (0..6, siete casillas),
+            // no un "tallySlot" propio: el numero que se guarda en las prefs es el
+            // mismo que pinta el HUD y el que traduce el C++, asi que no puede
+            // discrepar entre los tres.
             if (profile != null && profile.known())
-                profile.loadMix[load.tallySlot()]++;
-            if (load == GameLoadClassifier.Bottleneck.GPU) {
-                // Píxeles: recortar SÍ recupera cuadros.
+                profile.loadMix[verdict.stateOrdinal()]++;
+
+            final boolean allowDrop = verdict.action == GameLoadClassifier.Action.ALLOW_RESOLUTION_DROP;
+            final boolean blockDrop = verdict.action == GameLoadClassifier.Action.BLOCK_RESOLUTION_DROP;
+
+            if (verdict.state == GameLoadClassifier.LoadState.THERMAL_BOUND) {
+                // El SoC esta recortando por calor y el juego va atrasado: mantener
+                // la escala, no empezar benchmark (el regidor ya se lo dijo al
+                // sintonizador con thermal=true) y sobre todo NO aprender.
+                slowTicks = 0;
+                fastTicks = 0;
+                cpuBoundTicks = 0; // un throttle ajeno no es evidencia de ESTE disco
+                gpuBoundLogged = false;
+                cpuBoundLogged = false;
+                gpuMetricLogged = false;
+                if (!thermalLogged) {
+                    thermalLogged = true;
+                    android.util.Log.i("DynRes", "DynRes state: THERMAL_BOUND — "
+                            + GameLoadClassifier.evidence(verdict, sample)
+                            + ": thermal limit, holding scale and not learning");
+                }
+            } else if (verdict.state == GameLoadClassifier.LoadState.INVALID_SAMPLE) {
+                // La metrica no existe todavia (GS recien abierto, driver que no
+                // reporta tiempo de GPU, ventana recortada o muestra repetida). No
+                // fiarse para recortar: slowTicks en cero para que, cuando la
+                // metrica despierte, se necesiten los ticks completos de retraso
+                // real antes de mover nada.
+                slowTicks = 0;
+                fastTicks = 0;
+                gpuBoundLogged = false;
+                cpuBoundLogged = false;
+                unknownHoldLogged = false;
+                if (!gpuMetricLogged) {
+                    gpuMetricLogged = true;
+                    android.util.Log.i("DynRes", "DynRes state: INVALID_SAMPLE — "
+                            + GameLoadClassifier.evidence(verdict, sample)
+                            + ": metric missing, holding scale, not guessing");
+                }
+            } else if (verdict.state == GameLoadClassifier.LoadState.GPU_BOUND && allowDrop) {
+                // Píxeles: recortar SÍ recupera cuadros, y la confianza del
+                // clasificador alcanza para autorizarlo.
                 cpuBoundLogged = false;
                 gpuMetricLogged = false;
                 unknownHoldLogged = false;
+                thermalLogged = false;
                 cpuBoundTicks = 0; // el retraso este vez sí era de píxeles: cuenta nueva
                 fastTicks = 0;
                 if (!gpuBoundLogged) {
                     gpuBoundLogged = true;
                     android.util.Log.i("DynRes", "DynRes state: GPU_BOUND — "
-                            + GameLoadClassifier.evidence(load, speed, gpu, gpuMs, eePct, targetFps)
+                            + GameLoadClassifier.evidence(verdict, sample)
                             + ": resolution can help");
                 }
                 slowTicks++;
@@ -677,14 +973,16 @@ final class DynamicResolutionGovernor {
                         host.applyUpscale(next);
                         cooldownTicks = 2;
                     } else {
-                        cooldownTicks = 5; // ya está en 1x, no hay marcha atrás
+                        cooldownTicks = 5; // ya está en el piso, no hay marcha atrás
                     }
                 }
-            } else if (cpuBoundNow) {
+            } else if (blockDrop && (verdict.state == GameLoadClassifier.LoadState.CPU_BOUND
+                        || verdict.state == GameLoadClassifier.LoadState.VU_BOUND)) {
                 // El cuello es la emulación (EE/GS trabajándose el cuadro) o el EE
-                // bloqueado esperando al VU1. Bajar resolución en ambos casos solo
-                // estropea la imagen: mantener la escala y dejar que el sintonizador
-                // CPU/VU, que ya recibió cpuBoundNow, haga su parte.
+                // bloqueado esperando al VU1, con confianza suficiente para decirlo.
+                // Bajar resolución en ambos casos solo estropea la imagen: mantener
+                // la escala y dejar que el sintonizador CPU/VU, que ya recibió
+                // cpuBoundNow, haga su parte.
                 slowTicks = 0;
                 fastTicks = 0;
                 gpuBoundLogged = false;
@@ -695,39 +993,27 @@ final class DynamicResolutionGovernor {
                     profile.cpuBound = true; // fue consistente: que conste en el perfil
                 if (!cpuBoundLogged) {
                     cpuBoundLogged = true;
-                    android.util.Log.i("DynRes", "DynRes state: CPU_BOUND — "
-                            + GameLoadClassifier.evidence(load, speed, gpu, gpuMs, eePct, targetFps)
+                    android.util.Log.i("DynRes", "DynRes state: " + verdict.state + " — "
+                            + GameLoadClassifier.evidence(verdict, sample)
                             + ": CPU-bound, holding scale");
                 }
-            } else if (gpu <= GPU_METRIC_MIN) {
-                // Estado desconocido porque LA MÉTRICA no existe todavía (GS recién
-                // abierto, o driver que no reporta tiempo de GPU). No fiarse para
-                // recortar: slowTicks en cero para que, cuando la métrica despierte,
-                // se necesiten los ticks completos de retraso real antes de mover nada.
-                slowTicks = 0;
-                fastTicks = 0;
-                gpuBoundLogged = false; // cambio de estado: permitir la próxima etiqueta
-                if (!gpuMetricLogged) {
-                    gpuMetricLogged = true;
-                    // "DynRes state: ..." es la etiqueta grepeable que pide la
-                    // revisión: con un console.txt se puede saber cuántos ticks
-                    // pasó en cada estado sin reconstruir la lógica a mano.
-                    android.util.Log.i("DynRes", "DynRes state: UNKNOWN_GPU — behind at " + speed
-                            + "% but GPU metric unavailable (" + gpu + "): holding scale, not guessing");
-                }
             } else {
-                // 0.6.29: lectura intermedia pero contradictoria (GPU ni saturada
-                // ni holgada, EE sin datos suficientes). La regla del clasificador
-                // es no inventar: en el catálogo entero, recortar de más sale más
-                // caro que dejar una mejora sobre la mesa.
+                // UNKNOWN_LOAD, NO_BOTTLENECK retrasado, o una decision cuya
+                // confianza NO llego al umbral de la accion (gate() la degrado a
+                // WAIT_FOR_EVIDENCE). En todos los casos: no inventar. En el
+                // catalogo entero, recortar de mas sale mas caro que dejar una
+                // mejora sobre la mesa — y aqui es donde se ve, porque el log
+                // imprime la razon del clasificador con la duda escrita.
                 slowTicks = 0;
                 fastTicks = 0;
                 gpuBoundLogged = false;
+                cpuBoundLogged = false;
+                gpuMetricLogged = false;
                 if (!unknownHoldLogged) {
                     unknownHoldLogged = true;
                     android.util.Log.i("DynRes", "DynRes state: UNKNOWN_LOAD — "
-                            + GameLoadClassifier.evidence(load, speed, gpu, gpuMs, eePct, targetFps)
-                            + ": evidence mixed, holding scale");
+                            + GameLoadClassifier.evidence(verdict, sample)
+                            + ": evidence insufficient, holding scale");
                 }
             }
         } else if (speed > HOLDS_ABOVE_PCT && applied < ceiling - 0.001f) {

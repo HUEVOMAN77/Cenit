@@ -67,21 +67,45 @@ final class AdaptiveProfile {
     float tunerNow = 0f;
 
     // ------------------------------------------------------------------
-    // 0.6.29: tally de veredictos del clasificador universal
+    // 0.6.30: tally del clasificador NUEVO (los siete estados del contrato)
     // ------------------------------------------------------------------
     /**
-     * Cuántos ticks de esta partida vio el clasificador cada cuello en ESTE
-     * juego, escrito como "gpu,emu,vu,unk". No decide nada: es la evidencia que
-     * falta para saber si los umbrales de GameLoadClassifier (85/35/80) están
-     * bien puestos en un Snapdragon 6 o 7. Sin este número, la respuesta es mi
-     * criterio; con él es una curva medida en teléfonos ajenos, que es como se
-     * han corregido ya tres cosas de este regidor.
+     * Cuantos ticks de esta partida vio el clasificador cada estado en ESTE
+     * juego. No decide nada: es la evidencia que falta para saber si los umbrales
+     * de LoadPolicy (gpu>=85 / gpu<=35 / ee>=80) estan bien puestos en un
+     * Snapdragon 6 o 7. Sin este numero, la respuesta es mi criterio; con el es
+     * una curva medida en telefonos ajenos, que es como se han corregido ya tres
+     * cosas de este regidor.
      *
      * Se cuenta por JUEGO y no global porque un umbral que sirva para un juego
-     * GPU-bound a 60 Hz puede no servir para un entrelazado: lo que se quiere ver
-     * es la MEZCLA de veredictos que da cada disco.
+     * GPU-bound a 60 Hz puede no servir para un entrelazado.
+     *
+     * La casilla INVALID_SAMPLE es la que no existia antes y la que importa para
+     * la Regla 3 del prompt: "GPU al 3%" y "GPU sin metrica" son cosas distintas,
+     * y un perfil que no las separe no puede contarlo. En 0.6.29 la muestra mala
+     * se sumaba a "sin veredicto" y el FÁBRICA no podia decir si el regidor se
+     * paso la partida dudando o la partida sin lecturas.
      */
-    int[] loadMix = new int[GameLoadClassifier.TALLY_SLOTS]; // GPU, EMULATION, VU_WAIT, UNKNOWN
+    int[] loadMix = new int[CenitTelemetry.STATE_COUNT]; // unk,nog,gpu,cpu,vu,therm,inv
+
+    /**
+     * El tally de 0.6.29 tenia CUATRO casillas con claves que ya no significan
+     * lo mismo: su orden era gpu,emu,vu,sin y el nuevo es unk,nog,gpu,cpu,vu,
+     * therm,inv. Leer el viejo con el formato nuevo llenaria "desconocido" con
+     * recuentos de GPU y "sin cuello" con los de emulacion — justo los numeros
+     * con los que alguien calibraria umbrales. Si viene con 4 cifras se traduce
+     * con el orden antiguo; el save() lo reescribe ya con las siete.
+     */
+    private static void loadLegacyMix(String v, int[] into) {
+        // Orden de 0.6.29: gpu, emu, vu, sin. Se traduce al orden de estados del
+        // contrato; la casilla NO_BOTTLENECK queda en 0 porque aquel tally solo
+        // contaba ticks CON retraso (un juego a tiempo no se registraba).
+        final String[] p = v.split(",");
+        into[CenitTelemetry.STATE_GPU_BOUND] = Integer.parseInt(p[0].trim());
+        into[CenitTelemetry.STATE_CPU_BOUND] = Integer.parseInt(p[1].trim());
+        into[CenitTelemetry.STATE_VU_BOUND] = Integer.parseInt(p[2].trim());
+        into[CenitTelemetry.STATE_UNKNOWN_LOAD] = Integer.parseInt(p[3].trim());
+    }
 
     private final SharedPreferences prefs;
     private final String uri;
@@ -125,14 +149,18 @@ final class AdaptiveProfile {
                     case "tap": tunerAplicado = "1".equals(v); break;
                     case "tat": tunerAt = Long.parseLong(v); break;
                     case "tnow": tunerNow = Float.parseFloat(v); break;
-                    // 0.6.29: "gpu,emu,vu,unk". Se valida el tamaño: un perfil de
-                    // 0.6.28 no trae la clave y se queda en ceros, y uno roto a mano
-                    // no puede desplazar un veredicto a otra casilla.
+                    // 0.6.30: el tally cambio de formato (4 casillas -> 7, con el
+                    // orden de estados del contrato). Se aceptan los dos: un
+                    // perfil de 0.6.29 se traduce, uno roto a mano se descarta
+                    // entero antes de que un numero se cuele en la casilla
+                    // equivocada.
                     case "load": {
                         final String[] parts = v.split(",");
                         if (parts.length == loadMix.length) {
                             for (int i = 0; i < parts.length; i++)
                                 loadMix[i] = Integer.parseInt(parts[i].trim());
+                        } else if (parts.length == 4) {
+                            loadLegacyMix(v, loadMix);
                         }
                         break;
                     }
@@ -165,7 +193,8 @@ final class AdaptiveProfile {
                         + ";tat=" + tunerAt
                         + ";tnow=" + tunerNow
                         + ";load=" + loadMix[0] + "," + loadMix[1] + ","
-                                + loadMix[2] + "," + loadMix[3]).apply();
+                                + loadMix[2] + "," + loadMix[3] + ","
+                                + loadMix[4] + "," + loadMix[5] + "," + loadMix[6]).apply();
     }
 
     /** Borrar el aprendizaje de un juego (desde sus Ajustes por juego). */

@@ -459,6 +459,27 @@ public final class SettingsScreenController {
             });
         }
 
+        // 0.6.30 (Fase 1.7): la calibración de umbrales NO vive por juego — es la
+        // evidencia de "a partir de cuánto porcentaje esta GPU se considera
+        // saturada en ESTE teléfono" —, así que necesita su propio gesto y no puede
+        // ir en el borrado de arriba. Pulsación larga en «Resolución dinámica».
+        //
+        // El borrado se ofrece aunque no haya juego delante: la evidencia es del
+        // teléfono, no de la partida. Y se avisa distinto cuando no había nada que
+        // borrar, para que el texto no prometa una cosa que no pasó.
+        View dynresSw = root.findViewById(R.id.set_sw_dynres);
+        if (dynresSw != null) {
+            dynresSw.setOnLongClickListener(v -> {
+                final boolean had = DynamicResolutionGovernor.forgetCalibration(context);
+                android.widget.Toast.makeText(context,
+                        had ? "Evidencia de umbrales borrada: Cenit vuelve a sus "
+                                + "valores de criterio hasta volver a medir"
+                              : "No había evidencia de umbrales que borrar",
+                        android.widget.Toast.LENGTH_LONG).show();
+                return true;
+            });
+        }
+
         spinner(R.id.set_sp_ee_cycle, R.array.ee_cycle_entries, position -> {
             // La posición 3 es el 100% (normal); EECycleRate = posición - 3.
             int rate = position - 3;

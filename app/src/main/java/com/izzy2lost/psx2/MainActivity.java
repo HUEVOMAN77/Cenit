@@ -4309,15 +4309,22 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                     .append(" cpu_bound=").append(p.cpuBound ? "si" : "no")
                     .append(" turbo_s=").append(p.turboSeconds)
                     .append(" slow_ticks=").append(p.slowFloorTicks)
-                    // 0.6.29: la mezcla de veredictos que dio el clasificador en
-                    // este juego. Es el unico numero que puede decir si los umbrales
-                    // (gpu>=85 / gpu<=35 / ee>=80) estan bien puestos en ESTE
-                    // telefono: "unk=400 gpu=3" significa que el regidor se paso la
-                    // partida sin atreverse, y eso se arregla midiendo, no opinando.
-                    .append(" carga=[gpu=").append(p.loadMix[0])
-                    .append(" emu=").append(p.loadMix[1])
-                    .append(" vu=").append(p.loadMix[2])
-                    .append(" sin=").append(p.loadMix[3]).append(']')
+                    // 0.6.30: el tally ahora tiene las SIETE casillas del contrato,
+                    // incluidas las dos que no existian: "sin cuello" (el juego iba a
+                    // tiempo) y "muestra invalida" (la metrica fallo). La segunda es la
+                    // que responde por Regla 3: un telefono cuyo driver no reporta
+                    // tiempo de GPU va a verse aqui con inv alto y unk bajo, y eso es
+                    // un problema de METRICA, no de umbrales mal puestos. La casilla
+                    // "nocuello" queda en cero a proposito: el tally solo cuenta ticks
+                    // CON retraso (el regidor no tiene nada que diagnosticar cuando el
+                    // juego va a tiempo), y esa decision esta documentada desde 0.6.29.
+                    .append(" carga=[unk=").append(p.loadMix[0])
+                    .append(" nocuello=").append(p.loadMix[1])
+                    .append(" gpu=").append(p.loadMix[2])
+                    .append(" emu=").append(p.loadMix[3])
+                    .append(" vu=").append(p.loadMix[4])
+                    .append(" termico=").append(p.loadMix[5])
+                    .append(" inv=").append(p.loadMix[6]).append(']')
                     .append('\n');
             if (factory != null && !factory.isEmpty())
                 into.append("    fabrica=").append(factory).append('\n');
