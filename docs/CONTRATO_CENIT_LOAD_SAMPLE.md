@@ -276,7 +276,7 @@ volver al menú y entrar en otro disco quedaría pintado el `TUNER:` del juego a
 
 ### Quién verifica todo esto, sin teléfono
 
-`tools/arneses/baseline.sh` corre los cuatro arneses y dos verificadores estáticos:
+`tools/arneses/baseline.sh` corre los cinco arneses (h5–h9) y dos verificadores estáticos:
 
 - `jnisig.py` — cada `native` de `NativeApp.java` tiene su `Java_...()` en el C++ con
   el **mismo número de argumentos**. Un desajuste no rompe CI (los símbolos JNI se
@@ -290,6 +290,76 @@ volver al menú y entrar en otro disco quedaría pintado el `TUNER:` del juego a
   repo**. Ninguno de los arneses anteriores los compilaba (`Harness6` sustituye el
   tuner por un stub), así que hasta 0.6.31 "el tuner compila" no estaba cubierto por
   ninguna línea base.
+
+## Máquina de superbloques VU1: contrato de estados y HUD (0.6.32, Fase 2)
+
+El dueño de los números es `pcsx2/arm64/MvuSbLife.h` (header puro, sin
+dependencias de PCSX2: por eso lo compila g++ en host). Nadie más define un
+estado, un umbral o una etiqueta.
+
+### Diccionario de estados (`mVUSbLife::State` ↔ `StateName` ↔ HUD)
+
+| Ordinal | Estado | `StateName` | Etiqueta HUD | ¿sirve la variante? |
+|---|---|---|---|---|
+| 0 | `Unseen` | `UNSEEN` | `VU-SB: UNSEEN` | no |
+| 1 | `Building` | `BUILDING` | `VU-SB: BUILDING` | no (compilación en vuelo) |
+| 2 | `Validating` | `VALIDATE` | `VU-SB: VALIDATE` | sí, alternada (forma los pares) |
+| 3 | `Shadowing` | `SHADOW` | `VU-SB: SHADOW` / `.../TRIAL` | no (autoritativo = cadena normal) |
+| 4 | `Validated` | `VALIDATED` | `VU-SB: VALIDATED` / `.../TRIAL` | solo en ventana de prueba declarada |
+| 5 | `Trusted` | `TRUSTED` | `VU-SB: TRUSTED` / `TRUSTED/SPOT` | sí, con vigilancia periódica |
+| 6 | `Dead` | `DEAD` | `VU-SB: DEAD` | no (castigo del candidato, no del proceso) |
+| 7 | `Invalidated` | `INVALIDATED` | `VU-SB: INVALIDATED` | no (evidence archivada, hueco reasignable) |
+
+Sin candidatos y motor encendido: `VU-SB: ON/SIN CANDIDATO`. Con el breaker del
+proceso disparado: `VU-SB: PARADO`. Con el motor apagado la línea no se pinta.
+
+Reglas del HUD, codificadas en la propia etiqueta y no delegadas al llamador:
+
+- `VALIDATE` y `SHADOW` **no pueden** decir «acelerado», «turbo» ni `TRUSTED`.
+  Un candidato en esas fases no ha entregado todavía ningún número de ganancia.
+- La ventana de prueba y la vigilancia se dicen **junto** al estado
+  (`SHADOW/TRIAL`, `VALIDATED/TRIAL`, `TRUSTED/SPOT`), nunca en lugar de él.
+- Los recuentos del HUD son los del candidato más adelantado (`pares=N/1000`,
+  `ventana=K`), no los acumulados del proceso. El acumulado completo vive en
+  `logs/vu_superblock.txt`.
+
+### Unidades del puente (Java → C++)
+
+| Campo | Canal | Unidad | Centinela |
+|---|---|---|---|
+| `profileHash` | `NativeApp.setCenitTunerStatus` (jlong) → `mVUSuperblock::SetProfileHash` | FNV-1a 64 bits de juego+dispositivo | `0` = sin identidad ⇒ identidad incompleta ⇒ **sin promoción** |
+| `g_engineAbi` | registrado en `mVUinit` | `kMvuCompilerAbiVersion` (entero) | `0` = nadie registró ⇒ identidad incompleta |
+| `g_exitMask` | registrado en `mVUinit` | bits `Regions::` (14) | máscara incompleta ⇒ la máquina **rechaza cada par** y lo cuenta |
+| `g_rollbackSurface` | escrito en `mVUinit` | bool | `false` hoy ⇒ ningún candidato entra en `SHADOW` |
+| `episodeNs` | `recMicroVU1::Execute` → `SbFinish` | nanoseconds, `Common::Timer` (monotónico) | `0` = no cronometrado ⇒ **no cuenta como par medido** |
+
+### Umbrales de promoción (los define `MvuSbLife.h`, el motor los obedece)
+
+- `kValidPairs = 1000` pares sin divergencia y `kValidWindows = 2` ventanas que
+  aportaron pares ⇒ `VALIDATED`.
+- `TRUSTED` añade: identidad **completa**, ganancia medida ≥ +3 % (criterio
+  propio, no del prompt), `timedPairs ≥ 64`, y P95 de la variante no peor que el
+  de la cadena normal (delta en **microsegundos** — en milisegundos el veto no
+  se activaría nunca a escala de VU1).
+- `kBudgetEpisodes = 60000` episodios por candidato: presupuesto de *trabajo*,
+  no de pares.
+- `kTrustedSpotPeriod = 4096` despachos: vigilancia de un `TRUSTED`.
+- Breaker de proceso: 3 divergencias sin superficie de rollback; con superficie,
+  8 repartidas en ≥ 3 candidatos distintos.
+
+### Quién verifica esto, sin teléfono
+
+- `Harness9` (`tools/arneses/h9-src/`): 227 comprobaciones sobre la máquina.
+- `jnidict.py`: que la enum no tenga huecos ni cambie de orden, que ninguna
+  etiqueta prometa velocidad, que `g_exitMask` declare exactamente
+  `kRequiredRegions` y que **cada región declarada esté realmente hashkeada**
+  campo por campo en `mVU1ExitDigest`, y que `HudSummary` tenga tantos
+  especificadores como argumentos.
+
+### Lo que este contrato NO afirma
+
+No hay ni un número de ganancia de superbloque medido en hardware. La máquina
+está verificada; **el rendimiento no**. El motor sigue apagado por defecto.
 
 ## Reglas de oro para ambos equipos
 

@@ -13,15 +13,19 @@
 #
 # Uso:  bash tools/arneses/baseline.sh          (todas)
 #       ARNES=h8 bash tools/arneses/baseline.sh (una)
-# Requiere JDK 21 (javac/java) en PATH o en /usr/lib/jvm/temurin-21.
+# Requiere JDK 21 (javac/java) en PATH o en /usr/lib/jvm/temurin-21, y g++ de host
+# para h9 (el arnes de la maquina de estados del superbloque es C++ puro).
 set -u
 JAVAC=${JAVAC:-/usr/lib/jvm/temurin-21/bin/javac}
 JAVA=${JAVA:-/usr/lib/jvm/temurin-21/bin/java}
 [ -x "$JAVAC" ] || JAVAC=javac
 [ -x "$JAVA" ] || JAVA=java
+CXX=${CXX:-g++}
+command -v "$CXX" >/dev/null 2>&1 || CXX=
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 SRC=$(cd "$HERE/../../app/src/main/java/com/izzy2lost/psx2" && pwd)
+CPP=$(cd "$HERE/../../app/src/main/cpp/pcsx2/arm64" && pwd)
 WORK=${WORK:-/tmp/cenit-arneses}
 RC=0
 
@@ -43,13 +47,38 @@ run() { # dir-arnes main clases-del-repo-a-sincronizar...
   echo "$OUT" | grep -q "Comprobaciones" || { echo "$d: el arnes no imprime recuento"; RC=1; }
 }
 
+runh9() { # arnes C++ puro de host: la maquina de estados del superbloque
+  local box=$WORK/h9
+  if [ -z "$CXX" ]; then
+    # Ausencia de g++ NO es un verde: es una linea base que no corro. Lo grito y
+    # dejo RC=1, porque "los arneses pasaron" sin h9 seria exactamente el verde
+    # vacio que este script existe para evitar.
+    echo "h9: SIN COMPILAR - no hay g++ de host (CXX='$CXX'); la maquina de estados del superbloque NO se verifico en esta corrida"
+    RC=1
+    return
+  fi
+  rm -rf "$box"; mkdir -p "$box"
+  cp "$HERE/h9-src/sb_life_test.cpp" "$box/" || { echo "h9: no se pudo traer el arnes"; RC=1; return; }
+  # Misma regla anti-copia-vieja que los arneses de Java: la maquina se trae DEL
+  # REPO en cada corrida, nunca del arnes.
+  if [ ! -f "$CPP/MvuSbLife.h" ]; then echo "h9: FALTA MvuSbLife.h en el repo ($CPP)"; RC=1; return; fi
+  cp "$CPP/MvuSbLife.h" "$box/" || { echo "h9: no se pudo copiar MvuSbLife.h"; RC=1; return; }
+  if ! "$CXX" -std=c++17 -Wall -Wextra -I"$box" -o "$box/h9" "$box/sb_life_test.cpp" 2>"$box/compile.err"; then
+    echo "h9: FALLO DE COMPILACION"; head -40 "$box/compile.err"; RC=1; return
+  fi
+  OUT=$("$box/h9" 2>/dev/null | grep -E "Comprobaciones|FALLO")
+  echo "$OUT"
+  echo "$OUT" | grep -qE ", [1-9][0-9]* Fallos" && RC=1
+  echo "$OUT" | grep -q "Comprobaciones" || { echo "h9: el arnes no imprime recuento"; RC=1; }
+}
+
 ONLY=${ARNES:-all}
 case "$ONLY" in
-  all|h5|h6|h7|h8) ;;
+  all|h5|h6|h7|h8|h9) ;;
   # Un nombre mal escrito tiene que ruidar: si no, "corrí los arneses" se convierte
   # en "no corrí ninguno y volvi con RC=0", que es exactamente el verde vacio que
   # este script existe para evitar.
-  *) echo "baseline.sh: ARNES='$ONLY' no existe (valores: all h5 h6 h7 h8)"; exit 2 ;;
+  *) echo "baseline.sh: ARNES='$ONLY' no existe (valores: all h5 h6 h7 h8 h9)"; exit 2 ;;
 esac
 [ "$ONLY" = all ] || [ "$ONLY" = h5 ] && run h5 Harness5 GameLoadClassifier CenitLoadSample LoadPolicy LoadTrend CenitTelemetry
 [ "$ONLY" = all ] || [ "$ONLY" = h6 ] && run h6 Harness6 DynamicResolutionGovernor GameLoadClassifier AdaptiveProfile CenitLoadSample LoadPolicy LoadTrend CenitTelemetry GameSerialUtils
@@ -58,6 +87,12 @@ esac
 # CpuVUTuner.java — h6 lo sustituye por un stub —, asi que sin h8 "el tuner del repo
 # compila" no estaria cubierto por ninguna linea base. TunerProfileStore tampoco.
 [ "$ONLY" = all ] || [ "$ONLY" = h8 ] && run h8 Harness8 CpuVUTuner TunerProfileStore AdaptiveProfile GameSerialUtils CenitLoadSample LoadPolicy GameLoadClassifier LoadTrend CenitTelemetry
+# h9 (0.6.32): LA MAQUINA por candidato del superbloque VU1. Es C++ puro y vive en
+# el arbol del nativo, asi que NINGUNO de los arneses de Java la cubre — y el CI no
+# la puede cubrir tampoco: CI compila para arm64 con el toolchain de Android, y lo
+# que se quiere verificar aqui es la LOGICA de estados/promocion, no la emision.
+# Por eso se compila con g++ de host contra el header real del repo.
+[ "$ONLY" = all ] || [ "$ONLY" = h9 ] && runh9
 
 # Verificadores que no necesitan javac: las tablas que cruzan la frontera JNI.
 # jnisig: cada `native` de NativeApp.java tiene su Java_...() con el mismo numero de
