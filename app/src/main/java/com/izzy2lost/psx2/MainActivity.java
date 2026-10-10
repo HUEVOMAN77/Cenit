@@ -4274,7 +4274,11 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
                 .append(" auto_precarga=").append(prefs.getBoolean(PrecachePolicy.PREF_AUTO, false))
                 .append(" reglas_apk=").append(FactoryRules.ruleCount())
                 .append(" resolucion_dinamica=").append(prefs.getBoolean("dynamic_res", true))
-                .append(" sintonizador=").append(prefs.getBoolean(CpuVUTuner.PREF_KEY, false))
+                // 0.6.31 (Fase 1): el modo, por nombre. Un "sintonizador=true" ya no
+                // significa lo mismo: AUTO_SAFE y AUTO_MTVU comparten "verdadero" y son
+                // decisiones distintas sobre las cuotas, y el que lee el reporte tiene
+                // que poder decir cual estaba puesto.
+                .append(" sintonizador=").append(CpuVUTuner.modeName(CpuVUTuner.modeOf(prefs)))
                 .append('\n');
 
         final java.util.List<String> uris = new ArrayList<>();

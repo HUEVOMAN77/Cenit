@@ -70,7 +70,12 @@ public final class PlayabilityBundle {
     static final String DYN_RES = "dynamic_res";
     static final String ADAPTIVE = "adaptive_perf";
     static final String EASU = "easu_reconstruct";
-    static final String TUNER = CpuVUTuner.PREF_KEY;
+    // Cenit 0.6.31 (Fase 1): el sintonizador dejo de ser una booleana. "cpu_tuner"
+    // existio solo desde 0.6.27 y ahora CpuVUTuner la migra y la BORRA al elegir
+    // modo, asi que el paquete photographia el ENTERO (cpu_tuner_mode), que es el
+    // unico dueno actual. Fotografear la booleana vieja seria guardar el estado de
+    // una clave que ya no manda: al apagar el modo habria escrito un fantasma.
+    static final String TUNER_MODE = CpuVUTuner.PREF_MODE;
     static final String ASYNC_SHADERS = "async_shader_compile";
     static final String PRECACHE = PrecachePolicy.PREF_AUTO;
 
@@ -113,7 +118,11 @@ public final class PlayabilityBundle {
         return Math.min(want, user);
     }
 
-    /** Valor por defecto documentado de cada clave (el plan B sin fotografía). */
+    /**
+     * Valor por defecto documentado de cada clave (el plan B sin fotografía).
+     * La lista esta separada por tipo porque desde 0.6.31 el paquete también
+     * photographia enteros: el sintonizador CPU/VU pasó de booleana a modo.
+     */
     static boolean defaultBooleanFor(String key) {
         switch (key) {
             case DYN_RES:
@@ -121,8 +130,16 @@ public final class PlayabilityBundle {
             case EASU:
                 return true;
             default:
-                return false; // TUNER, ASYNC_SHADERS, PRECACHE
+                return false; // ASYNC_SHADERS, PRECACHE
         }
+    }
+
+    /** Igual, para las claves enteras del paquete. Un entero sin default escrito
+     *  a mano es un 128 heredado de otra clave, y eso fue literalmente lo que
+     *  pasaba si se compartía el case "i" con iso_buffer_kb. */
+    static int defaultIntFor(String key) {
+        if (TUNER_MODE.equals(key)) return CpuVUTuner.DEFAULT_MODE;
+        return 128; // iso_buffer_kb: la ventana histórica del motor
     }
 
     /** La booleana que el modo enciende al entrar. */
@@ -131,7 +148,6 @@ public final class PlayabilityBundle {
         v.put(DYN_RES, true);
         v.put(ADAPTIVE, true);
         v.put(EASU, true);
-        v.put(TUNER, true);
         v.put(ASYNC_SHADERS, true);
         // En gama baja la precarga queda fuera del paquete: con 3-4 GB de RAM,
         // copiar el disco entero desaloja la caché del propio juego, que es justo
@@ -142,21 +158,35 @@ public final class PlayabilityBundle {
     }
 
     /**
+     * El modo del sintonizador que el paquete pone al entrar: AUTO_SAFE, que desde
+     * 0.6.31 es TAMBIEN el default del tuner. Entonces, ¿por qué escribirlo? Porque
+     * el paquete existe para poder APAGARLO y devolver lo que había, y para eso la
+     * clave tiene que estar anotada en la fotografía con un dueño claro. Dejarla
+     * fuera y que el default hiciera el trabajo sería tener dos respuestas para
+     * "que estaba puesto antes" segun desde donde se mire.
+     */
+    static int tunerModeForOn() {
+        return CpuVUTuner.MODE_AUTO_SAFE;
+    }
+
+    /**
      * FOTOGRAFÍA COMPLETA, legible a mano: "clave=tipo:en_valOR:valor" separado
      * por ';'. tipo b/f/i, en_valOR 1 si la preferencia existía (0 = no estaba
      * puesta: al apagar se BORRA, para no dejar un default escrito de más).
      *
-     * Se anotan SIEMPRE las seis booleanas, aunque la gama no escriba todas: la
-     * lista de escrituras depende de la gama y la de la fotografía no, así que
-     * apagar el modo en gama baja no se queda sin dónde mirar cdvd_precache.
+     * Se anotan SIEMPRE todas las claves del paquete, aunque la gama no escriba
+     * todas: la lista de escrituras depende de la gama y la de la fotografía no,
+     * así que apagar el modo en gama baja no se queda sin dónde mirar
+     * cdvd_precache ni el modo del sintonizador.
      */
-    static final String[] BOOL_KEYS = { DYN_RES, ADAPTIVE, EASU, TUNER, ASYNC_SHADERS, PRECACHE };
+    static final String[] BOOL_KEYS = { DYN_RES, ADAPTIVE, EASU, ASYNC_SHADERS, PRECACHE };
+    static final String[] INT_KEYS = { TUNER_MODE, KEY_ISO_BUFFER };
 
     static String snapshot(SharedPreferences prefs) {
         final StringBuilder sb = new StringBuilder();
         for (String key : BOOL_KEYS) sb.append(pair(sb, key, "b", prefs.getBoolean(key, defaultBooleanFor(key)) ? 1 : 0, prefs.contains(key)));
+        for (String key : INT_KEYS) sb.append(pair(sb, key, "i", prefs.getInt(key, defaultIntFor(key)), prefs.contains(key)));
         sb.append(pair(sb, KEY_UPSCALE, "f", floatBits(prefs.getFloat(KEY_UPSCALE, 1f)), prefs.contains(KEY_UPSCALE)));
-        sb.append(pair(sb, KEY_ISO_BUFFER, "i", prefs.getInt(KEY_ISO_BUFFER, 128), prefs.contains(KEY_ISO_BUFFER)));
         return sb.toString();
     }
 
@@ -227,6 +257,7 @@ public final class PlayabilityBundle {
         final SharedPreferences.Editor ed = prefs.edit();
         ed.putString(PREF_SNAPSHOT, snap);   // antes de cualquier escritura
         for (Map.Entry<String, Boolean> e : want.entrySet()) ed.putBoolean(e.getKey(), e.getValue());
+        ed.putInt(TUNER_MODE, tunerModeForOn());
         ed.putFloat(KEY_UPSCALE, scale);
         ed.remove(KEY_ISO_BUFFER);           // que hable la regla de fábrica
         ed.putBoolean(PREF_ON, true);
@@ -234,12 +265,14 @@ public final class PlayabilityBundle {
 
         // Notificar lo que se nota sin reiniciar. Las demás se leen desde la
         // preferencia en cada arranque o en cada tick del regidor: dynamic_res,
-        // adaptive_perf y cpu_tuner no tienen setter nativo a propósito.
+        // adaptive_perf y cpu_tuner_mode no tienen setter nativo a propósito.
         NativeApp.renderUpscalemultiplierAsync(scale);
         NativeApp.setEASUReconstructAsync(true);
         NativeApp.setAsyncShaderCompileAsync(true);
 
-        Log.i(TAG, "modo maxima jugabilidad ON (" + summaryFor(want) + " escala=" + scale + "x)");
+        Log.i(TAG, "modo maxima jugabilidad ON (" + summaryFor(want)
+                + " tuner_mode=" + CpuVUTuner.modeName(tunerModeForOn())
+                + " escala=" + scale + "x)");
         return want;
     }
 
@@ -268,6 +301,15 @@ public final class PlayabilityBundle {
             for (String key : BOOL_KEYS) {
                 ed.putBoolean(key, defaultBooleanFor(key));
                 done.add(key);
+            }
+            // El modo del sintonizador se BORRA en el plan B, no se escribe: su
+            // default (AUTO_SAFE) vive en CpuVUTuner.DEFAULT_MODE, y anotar un entero
+            // extra sería sembrar una clave que el usuario nunca puso — exactamente el
+            // defecto por el que el diario del tuner distingue "clave que existía" de
+            // "clave que creé yo". iso_buffer_kb sigue sin tocarse aquí, como siempre.
+            if (prefs.contains(TUNER_MODE)) {
+                ed.remove(TUNER_MODE);
+                done.add(TUNER_MODE);
             }
             ed.apply();
         }
@@ -331,7 +373,7 @@ public final class PlayabilityBundle {
     private static String currentValue(String type, SharedPreferences prefs, String key, String old) {
         switch (type) {
             case "b": return prefs.getBoolean(key, defaultBooleanFor(key)) ? "1" : "0";
-            case "i": return String.valueOf(prefs.getInt(key, 128));
+            case "i": return String.valueOf(prefs.getInt(key, defaultIntFor(key)));
             case "f": return String.valueOf(Float.floatToRawIntBits(prefs.getFloat(key, 1f)) & 0xFFFFFFFFL);
             default:  return old;
         }
@@ -352,15 +394,19 @@ public final class PlayabilityBundle {
         return "Todo lo que da cuadros, encendido a la vez y con su costo dicho: "
             + "resolución dinámica y memoria por juego (la imagen sube y baja sola), "
             + "reconstrucción EASU por debajo de 1x (se ve mejor que estirado, pero "
-            + "no inventa detalle que nunca se renderizó), sintonizador CPU/VU (mide "
-            + "una vez por juego y guarda SOLO lo que gana de verdad) y compilación "
+            + "no inventa detalle que nunca se renderizó), sintonizador CPU/VU en "
+            + "modo automático seguro (ensaya una vez por juego con los ajustes "
+            + "globales y los devuelve; lo único que se queda es lo que ganó medido, "
+            + "guardado por juego) y compilación "
             + "de shaders en segundo plano (un efecto que se estrena puede parpadear "
             + "uno o dos frames en vez de frenar el cuadro entero). Escala tope: "
             + scaleLabel(scaleFor(tier)) + "x en " + gama + ", y nunca por encima de la tuya. "
             + "Precarga en memoria: "
             + precarga + ". "
-            + "El modo NO toca las cuotas de CPU, ni Fast CDVD, ni el motor VU por "
-            + "dentro. Al apagarlo vuelve exactamente lo que tenías antes, incluida "
+            + "El modo NO escribe tus cuotas de CPU ni suelta Fast CDVD por sí "
+            + "mismo: el único que toca las cuotas es el sintonizador, solo durante "
+            + "su ensayo y devolviéndolas. Al apagarlo vuelve exactamente lo que "
+            + "tenías antes, incluida "
             + "tu escala. Experimental: si un juego va raro con el modo, apágalo y "
             + "cuéntame cuál es.";
     }

@@ -267,6 +267,90 @@ public class NativeApp {
 		try { resetCenitLoadVerdict(); } catch (Throwable t) { /* idem: el HUD no rompe nada */ }
 	}
 
+	// --- Cenit 0.6.31 (Fase 1): el audio como metrica de adopcion --------------
+	// long[3] = {underflows con silencio, chunks descartados, entradas en
+	// timestretch}, ACUMULADOS desde que arranco el proceso. Se leen en delta: un
+	// candidato no puede compararse contra el historial de diez minutos del juego,
+	// solo contra lo que rompio DURANTE su ventana. null = sin cifra (binario
+	// ausente o fallo de JNI), que es "no sabemos", NO "audio perfecto".
+	public static native long[] getAudioFaultStats();
+	public static long[] safeGetAudioFaultStats() {
+		if (hasNoNativeBinary) return null;
+		try { return getAudioFaultStats(); } catch (Throwable t) { return null; }
+	}
+	/** Pone los tres contadores a cero. Se llama al arrancar un ensayo, no por tick. */
+	public static native void resetAudioFaultStats();
+	public static void safeResetAudioFaultStats() {
+		if (hasNoNativeBinary) return;
+		try { resetAudioFaultStats(); } catch (Throwable t) { /* el audio no se toca */ }
+	}
+
+	// --- Cenit 0.6.31 (Fase 1): estado del sintonizador CPU/VU para el HUD -------
+	// Mismo contrato que setCenitLoadVerdict: Java mide y publica, el C++ solo lee.
+	// Los decimales viajan escalados a entero (fps x100, frame time x10) y con -1
+	// como "no medido": el HUD no puede distinguir un NaN de un cero por su cuenta,
+	// y pintar 0,0 ms como si fuera una medida real es justamente el tipo de numero
+	// inventado que el prompt prohibe.
+	// p50Ms/p95Ms y profileId se escalan/hashes AQUI, no en C++, para que la firma
+	// nativa sea puramente de enteros: una JNI con String por campo es una superficie
+	// de fuga y de carrera en el hilo de ImGui, y aqui solo hace falta un identificador
+	// corto que el usuario puede cruzar con el log "perfil <id>".
+	public static native void setCenitTunerStatus(int state, int mode, int gainPermille,
+	                                              int fpsBeforeX100, int fpsAfterX100,
+	                                              int p50DeciMs, int p95DeciMs,
+	                                              int thermalStatus, long profileHash);
+	public static void safeSetCenitTunerStatus(int state, int mode, int gainPermille,
+	                                            int fpsBeforeX100, int fpsAfterX100,
+	                                            float p50Ms, float p95Ms,
+	                                            int thermalStatus, String profileId) {
+		if (hasNoNativeBinary) return;
+		final int p50 = (Float.isNaN(p50Ms) || p50Ms < 0f) ? -1 : Math.round(p50Ms * 10f);
+		final int p95 = (Float.isNaN(p95Ms) || p95Ms < 0f) ? -1 : Math.round(p95Ms * 10f);
+		try {
+			setCenitTunerStatus(state, mode, gainPermille, fpsBeforeX100, fpsAfterX100,
+			                    p50, p95, thermalStatus, profileHash(profileId));
+		} catch (Throwable t) { /* el HUD no debe romper la emulacion */ }
+	}
+	public static native void resetCenitTunerStatus();
+	public static void safeResetCenitTunerStatus() {
+		if (hasNoNativeBinary) return;
+		try { resetCenitTunerStatus(); } catch (Throwable t) { /* idem */ }
+	}
+	/** FNV-1a de 64 bits. Estable entre versiones y sin dependencias. */
+	static long profileHash(String s) {
+		if (s == null || s.isEmpty()) return 0L;
+		long h = 0xcbf29ce484222325L;
+		for (int i = 0; i < s.length(); i++) {
+			h ^= (long) s.charAt(i);
+			h *= 0x100000001b3L;
+		}
+		return h;
+	}
+
+	// --- Cenit 0.6.31 (Fase 1): carga de texturas como puerta de aprendizaje -----
+	// Numero de reemplazos ya en cache. No hace falta traducir saf:// ni abrir el
+	// disco: el core lo cuenta en su propio mutex. Devuelve -1 cuando NO hay senal
+	// (binario ausente o excepcion), y CpuVUTuner interpreta -1 como "desconocido",
+	// nunca como "carga terminada" (Regla 3).
+	public static native long getLoadedTextureCount();
+	public static long safeGetLoadedTextureCount() {
+		if (hasNoNativeBinary) return -1L;
+		try { return getLoadedTextureCount(); } catch (Throwable t) { return -1L; }
+	}
+
+	// --- Cenit 0.6.31 (Fase 1): borrar una clave del INI GLOBAL ------------------
+	// Precedente: deleteGameSettingKey (capa por-juego). El diario anti-cierre apunta
+	// si la clave EXISTIA antes del ensayo; si el tuner la creó, restaurar un 0 no es
+	// neutro (siembra una clave que pisa el default del core y del GameDB), hay que
+	// borrarla. Solo quita, nunca escribe. false = no se pudo (no hay binario o JNI
+	// fallo); el llamador lo registra, porque un "no se pudo revertir" silencioso es
+	// exactamente como se hereda un CycleSkip de prueba.
+	public static native boolean deleteGlobalSettingKey(String section, String key);
+	public static boolean safeDeleteGlobalSettingKey(String section, String key) {
+		if (hasNoNativeBinary) return false;
+		try { return deleteGlobalSettingKey(section, key); } catch (Throwable t) { return false; }
+	}
+
 	public static native void renderUpscalemultiplier(float value);
     public static void renderUpscalemultiplierAsync(float value) {
         runNativeSettingAsync("renderUpscalemultiplier", () -> renderUpscalemultiplier(value));
@@ -505,6 +589,16 @@ public class NativeApp {
     }
     public static native boolean getVUSuperblockEnabled();
     public static native boolean getVUSuperblockEffective();
+    // Cenit 0.6.31 (Fase 1): ¿hay superbloques en ventana de validacion? Es la
+    // puerta "superblockBusy" del sintonizador CPU/VU (un solo dueño por
+    // intervalo). Distinta de getVUSuperblockEffective: esa dice si el motor esta
+    // ON, esta dice si esta OCUPADO midiendo, que es lo que realmente interfiere.
+    // false sin binario o sin arm64 = no hay motor, y la puerta no bloquea nada.
+    public static native boolean superblockValidating();
+    public static boolean safeSuperblockValidating() {
+        if (hasNoNativeBinary) return false;
+        try { return superblockValidating(); } catch (Throwable t) { return false; }
+    }
     public static native void dumpVUSuperblockReport(String reason);
     /** True si el motor está validando/actuando ahora mismo (el HUD lo pinta). */
     public static boolean safeVUSuperblockEffective() {

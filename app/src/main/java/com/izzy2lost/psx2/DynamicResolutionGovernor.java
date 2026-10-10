@@ -331,6 +331,11 @@ final class DynamicResolutionGovernor {
         // de hace dos partidas) pintado como si fuera de esta, y eso es justo el
         // numero viejo que hace confiar en una decision que no se tomo.
         NativeApp.safeResetCenitLoadVerdict();
+        // 0.6.31 (Fase 1): igual para el sintonizador. startSession() publica su
+        // estado unos milisegundos despues, pero entre el cierre de un juego y el
+        // primer tick del siguiente el HUD tiene que decir "todavia no hay", no el
+        // GAIN de la partida anterior.
+        NativeApp.safeResetCenitTunerStatus();
         selfDisabled = false; // juego nuevo, capa por juego nueva: otra oportunidad
         attachThermalListener(); // sin-op si no hay señal térmica accesible
         adaptiveOn = prefs.getBoolean("adaptive_perf", true);
@@ -406,6 +411,11 @@ final class DynamicResolutionGovernor {
         // 0.6.27: un ensayo a medias se revierte y el veredicto del último se
         // anota en el perfil ANTES de salvarlo (mismo hilo, mismo instante).
         tuner.onGameStop(profile);
+        // Y el cuadro del sintonizador se borra DESPUES de su ultimo vuelco: el
+        // orden importa, porque onGameStop publica el veredicto final y aqui se
+        // limpia el tablero para el menu. Al reves, el menu heredaria el estado de
+        // un juego que ya no corre.
+        NativeApp.safeResetCenitTunerStatus();
         // v3: el aprendizaje de esta partida se guarda con el juego.
         if (profile != null && profile.known()) profile.save();
         // 0.6.30 (Fase 1.7): la calibracion viaja por clave (juego + telefono +
@@ -478,6 +488,29 @@ final class DynamicResolutionGovernor {
      * del siguiente arranque.
      */
     private static volatile DynamicResolutionGovernor sCurrent;
+
+    /**
+     * Cenit 0.6.31 (Fase 1) — Ajustes cambio el MODO del sintonizador. Si habia un
+     * ensayo en vuelo hay que cerrarlo con reversión, no dejarlo correr: el prompt
+     * dice que una decision del usuario manda sobre la nuestra ("el usuario cambia
+     * ajustes → cancelar y revertir"), y un ensayo que sigue midiendo con el modo
+     * ya apagado dejaria puestas cuotas que nadie pidio. Sin regidor vivo no hay
+     * nada que abortar: recoverAtBoot/startSession ya cubre el caso al arrancar.
+     */
+    static void onTunerModeChanged() {
+        final DynamicResolutionGovernor g = sCurrent;
+        if (g != null) g.tuner.halt("el usuario cambio el modo del sintonizador");
+    }
+
+    /**
+     * Estado ST_* del sintonizador vivo, o -1 si no hay regidor (o el tuner aun no
+     * arranco). Ajustes lo pinta en la nota: "que hace Cenit ahora mismo" no puede
+     * deducirse del modo guardado, que solo dice lo que el usuario autorizo.
+     */
+    static int liveTunerState() {
+        final DynamicResolutionGovernor g = sCurrent;
+        return g == null ? -1 : g.tuner.hudState();
+    }
 
     /**
      * Olvidar la calibracion de umbrales acumulada (Fase 1.7) en TODAS sus copias:
@@ -774,15 +807,20 @@ final class DynamicResolutionGovernor {
         final boolean metricsAlive = verdict.state != GameLoadClassifier.LoadState.INVALID_SAMPLE
                 && speed > 0f;
         // Cuello de emulacion (o VU esperando): lo que necesita el sintonizador.
-        // Se lee de la ACCION, no del estado: Regla 5 del prompt — una CPU_BOUND
-        // con confianza insuficiente ya no es "el cuello es la emulacion", es
-        // "todavia no lo sabemos", y no debe encender un benchmark.
-        final boolean cpuBoundNow = verdict.action == GameLoadClassifier.Action.BLOCK_RESOLUTION_DROP
-                && (verdict.state == GameLoadClassifier.LoadState.CPU_BOUND
-                    || verdict.state == GameLoadClassifier.LoadState.VU_BOUND);
+        // 0.6.31 (Fase 1): esa condicion ya NO se arma aqui para pasarsela hecha.
+        // El sintonizador la lee del veredicto dentro de gates() (Regla 5: la ACCION,
+        // no la etiqueta suelta), junto con las otras diez puertas. Duplicarla aqui
+        // era dejar dos dueños del mismo criterio, que es el defecto que ya costo el
+        // ciclo 0.6.4 con los umbrales.
+        // El tick recibe ADEMAS la muestra y el veredicto completos: el prompt exige
+        // que el ensayo se apoye en el clasificador y en un snapshot del MISMO
+        // intervalo, no en ocho getters sueltos (0.6.30 ya los unifico para el
+        // regidor; el tuner leerlos aparte volvria a mezclar dos ventanas).
         final int tunerAction = tuner.tick(profile, hostCurrentUri(), applied,
-                behind, atFloor, cpuBoundNow, metricsAlive,
-                turboOn, pendingApply > 0f, thermalLimited());
+                sample, verdict, lastThermalStatus,
+                behind, atFloor, metricsAlive,
+                turboOn, pendingApply > 0f, thermalLimited(),
+                NativeApp.safeSuperblockValidating());
         if (tunerAction == CpuVUTuner.RETRY) wantRetry = true;
         if (tunerAction == CpuVUTuner.CONTINUE) {
             slowTicks = 0;

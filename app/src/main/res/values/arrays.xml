@@ -127,7 +127,22 @@
         <item>Máximo</item>
     </string-array>
 
+    <!-- Modo del sintonizador CPU/VU (0.6.31, Fase 1). La posicion ES el valor de
+         cpu_tuner_mode y coincide 1:1 con las constantes CpuVUTuner.MODE_*: cambiar
+         una tabla sin la otra pinta un modo y aplica otro. OFF y MANUAL son estados
+         distintos a proposito: OFF no mira las metricas; MANUAL si las lee y las
+         muestra, pero no escribe nada. AUTO_SAFE_sinRS ofrece MTVU y CycleSkip sin
+         tocar CycleRate, que es la palanca que cambia cuanto emula la consola. -->
+    <string-array name="tuner_mode_entries">
+        <item>Desactivado</item>
+        <item>Manual (solo mira, no toca)</item>
+        <item>Automático seguro (predeterminado)</item>
+        <item>Automático sólo MTVU</item>
+        <item>Automático sin Rate/Skip</item>
+    </string-array>
+
     <!-- Precache POR JUEGO (0.6.28): Auto = deja decidir a Cenit en cada
+
          arranque; Sí/No fijan la clave EmuCore/CdvdPrecache en el INI del juego,
          que manda por encima de la preferencia global. -->
     <string-array name="precache_game_entries">

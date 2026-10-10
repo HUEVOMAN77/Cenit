@@ -99,6 +99,11 @@ public final class SettingsScreenController {
     // Cenit 0.6.28: ventana de streaming del ISO — última posición mostrada, con
     // la guardia de adopción de siempre (el primer disparo del spinner es 0).
     private int isoBufferShown = -1;
+    // Cenit 0.6.31 (Fase 1): modo del sintonizador mostrado. Mismo centinela y la
+    // misma razón: el primer onItemSelected es posición 0 sea cual sea el valor
+    // guardado, y adoptarlo como "no escrito" apagaría el tuner con solo abrir
+    // Ajustes.
+    private int tunerModeShown = -1;
 
     /** Índice del desplegable -> KB por buffer. 128 << posición. */
     static int isoBufferKbFor(int position) {
@@ -319,11 +324,46 @@ public final class SettingsScreenController {
         // todo. Sin "Recordar rendimiento por juego" encendido no arranca: el
         // veredicto necesita dónde vivir. El regidor de resolución también tiene
         // que estar encendido (es su reloj el que lo hace tic-tac).
-        toggle(R.id.set_sw_cpu_tuner, "cpu_tuner", false, null);
+        //
+        // 0.6.31 (Fase 1): eso sigue siendo el contrato, pero ahora es un SPINNER
+        // de cinco modos y AUTO_SAFE es el default. Se escribió a mano la migración
+        // en lugar de dejar un toggle + un spinner sobre la misma decisión: dos
+        // dueños de un mismo número fue el defecto del ciclo 0.6.4, y CpuVUTuner
+        // borra la booleana vieja en cuanto se elige modo aquí.
+        spinner(R.id.set_sp_cpu_tuner_mode, R.array.tuner_mode_entries, position -> {
+            final int shown = tunerModeShown;
+            // Primera pasada tras inflar: ADOPTAR, no escribir. Sin esto, abrir
+            // Ajustes escribiría el modo 0 (Desactivado) en cualquier teléfono que
+            // estuviera en AUTO_SAFE — el spinner arranca en posición 0 siempre, y
+            // ese primer disparo no es una elección del usuario.
+            if (shown < 0) { tunerModeShown = position; return; }
+            if (position == shown) return;
+            final int mode = CpuVUTuner.clampMode(position);
+            CpuVUTuner.setMode(prefs, mode);
+            // Con el modo encendido, lo que el usuario mueva es su voluntad y debe
+            // ser lo que el paquete devuelva al apagarse (misma regla que el resto
+            // de claves del paquete).
+            PlayabilityBundle.rebaseline(prefs, CpuVUTuner.PREF_MODE);
+            // Y si había un ensayo en vuelo, se cierra con reversión: una decisión
+            // del usuario manda sobre una medición a medias.
+            DynamicResolutionGovernor.onTunerModeChanged();
+            tunerModeShown = position;
+        });
         // Guardar la explicación general del layout: readValuesIntoUi() la pisa
         // con el veredicto del juego en curso y necesita poder restaurarla.
         TextView tunerNoteView = root.findViewById(R.id.set_tv_cpu_tuner_note);
         if (tunerNoteView != null) tunerNoteDefault = tunerNoteView.getText().toString();
+
+        // "Borrar perfil aprendido" (sección 10 del prompt) como botón, no como
+        // modo: no es una preferencia, es una acción sobre los datos de ESTE
+        // juego. Avisa cuántos registros se fueron de verdad; un Toast que promete
+        // un borrado que no ocurrió es peor que no tener botón.
+        click(R.id.set_btn_forget_tuner, () -> {
+            final String uri = host.runningGamePath();
+            final String msg = CpuVUTuner.forgetLearned(context, uri);
+            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show();
+            readValuesIntoUi();
+        });
 
         // 0.6.6 (bloques 1-3): pinning, cola de cuadros y precarga. El pinning
         // vive en EmuCore del INI base, que en este port es memoria rellena por
@@ -761,6 +801,19 @@ public final class SettingsScreenController {
     /** Texto original de la nota del sintonizador (del layout), para poder volver a el. */
     private String tunerNoteDefault;
 
+    /**
+     * Cenit 0.6.31 (Fase 1): cola que dice lo que el sintonizador está haciendo
+     * AHORA, leída del regidor vivo. Vacía si no hay juego corriendo: sin regidor
+     * no hay estado, y escribir "IDLE" en el menú sería atribuirle al tuner un
+     * estado que nunca publicó. Es el mismo principio que el HUD nativo.
+     */
+    private String liveSuffix() {
+        final int st = DynamicResolutionGovernor.liveTunerState();
+        if (st < 0) return "";
+        return "\n\nAhora mismo: " + CpuVUTuner.stateName(st)
+                + " (modo " + CpuVUTuner.modeName(CpuVUTuner.modeOf(prefs)) + ").";
+    }
+
     private void readValuesIntoUi() {
         int renderer = prefs.getInt("renderer", -1);
         MaterialButtonToggleGroup tg = root.findViewById(R.id.set_tg_renderer);
@@ -782,7 +835,13 @@ public final class SettingsScreenController {
         check(R.id.set_sw_dynres, prefs.getBoolean("dynamic_res", true));
         check(R.id.set_sw_adaptive, prefs.getBoolean("adaptive_perf", true));
         check(R.id.set_sw_autoturbo, prefs.getBoolean("auto_turbo", false));
-        check(R.id.set_sw_cpu_tuner, prefs.getBoolean("cpu_tuner", false));
+        // Cenit 0.6.31 (Fase 1): el modo, no una booleana. La lectura es por el
+        // mismo camino que usa el tuner (modeOf), así que la pantalla muestra LO
+        // QUE EL TUNER VA A HACER, incluida la migración de la booleana vieja:
+        // pintar "cpu_tuner=false" como "desactivado" diría una mentira a quien
+        // nunca lo tocó y ahora tiene AUTO_SAFE por default.
+        tunerModeShown = CpuVUTuner.modeOf(prefs);
+        setSpinner(R.id.set_sp_cpu_tuner_mode, tunerModeShown);
         // Cenit 0.6.28: la nota del precache dice el modo y lo que significa, no
         // una medida: las sondas no corren en el hilo de la interfaz. La medida
         // concreta del juego que está delante vive más abajo, en el grupo
@@ -818,26 +877,40 @@ public final class SettingsScreenController {
         // 0.6.27: el sintonizador CPU/VU cuenta aquí su veredicto real del juego
         // que está delante (o el último bencheado), no promesas. Con el juego
         // apagado y sin veredicto, la nota del layout (la explicación general).
+        //
+        // 0.6.31 (Fase 1): se añade ADEMÁS lo que el tuner está haciendo ahora
+        // mismo, porque el prompt exige que la opción automática se pueda auditar:
+        // "AUTO_SAFE" en el spinner no dice si está aprendiendo, rechazando o
+        // suspendido. Y hay botón de borrado, porque con el veredicto puesto la
+        // pulsación larga de 'Recordar' dejó de ser el único camino.
         final TextView tunerNote = root.findViewById(R.id.set_tv_cpu_tuner_note);
         if (tunerNote != null) {
             final String tUri = host.runningGamePath();
             final AdaptiveProfile tProf = (tUri != null && !tUri.isEmpty())
                     ? new AdaptiveProfile(context, tUri) : null;
             final String verdict = tProf == null ? "" : tProf.tunerVerdict;
-            if (tProf != null && tProf.tunerAplicado) {
-                tunerNote.setText("Este juego: adoptado " + verdict + ". Cenit lo guardó "
-                        + "en sus ajustes por juego y ya no lo vuelve a probar. Mantén "
-                        + "pulsado 'Recordar rendimiento por juego' para deshacerlo.");
-            } else if ("ninguno".equals(verdict)) {
-                tunerNote.setText("Este juego: Cenit lo probó y ningún perfil le ganó a "
-                        + "su estado actual, así que no tocó nada. Vuelve a mirar en una "
-                        + "semana o tras cambiar de driver.");
-            } else if ("recuperado".equals(verdict)) {
-                tunerNote.setText("Este juego: una prueba de Cenit se cortó de golpe (el "
-                        + "juego se cerró a mitad). Cenit revirtió todo solo; la próxima "
-                        + "vez que dé la señal lo vuelve a intentar.");
+            final String base =
+                    (tProf != null && tProf.tunerAplicado) ? ("Este juego: adoptado " + verdict
+                            + " (" + tProf.tunerAdoptado + "). Cenit lo guardó en sus ajustes por "
+                            + "juego y ya no lo vuelve a probar; 'Borrar perfil aprendido' lo "
+                            + "deshace. Tus valores globales no se tocaron.")
+                        : "suspendido".equals(verdict) ? ("Este juego: la última prueba se canceló "
+                            + "y Cenit lo dejó suspendido un día antes de reintentar; no tocó nada.")
+                        : "ninguno".equals(verdict) ? ("Este juego: Cenit lo probó y ningún perfil le "
+                            + "ganó a su estado actual con P95, mínimos, audio y temperatura "
+                            + "intactos, así que no tocó nada. Vuelve a mirar en una semana o tras "
+                            + "cambiar de driver.")
+                        : "rechazado".equals(verdict) ? ("Este juego: hubo un ensayo y quedó rechazado; "
+                            + "Cenit no aplica nada y vuelve a mirar cuando el registro caduque.")
+                        : "recuperado".equals(verdict) ? ("Este juego: una prueba de Cenit se cortó de "
+                            + "golpe (el juego se cerró a mitad). Cenit revirtió los valores exactos "
+                            + "que había guardado en su diario y suspendió ESA prueba; la próxima vez "
+                            + "que dé la señal intenta con otra.")
+                        : null;
+            if (base != null) {
+                tunerNote.setText(base + liveSuffix());
             } else if (tunerNoteDefault != null) {
-                tunerNote.setText(tunerNoteDefault);
+                tunerNote.setText(tunerNoteDefault + liveSuffix());
             }
         }
         check(R.id.set_sw_pinning, prefs.getBoolean("thread_pinning", true));

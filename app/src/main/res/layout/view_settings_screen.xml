@@ -320,15 +320,32 @@
                                 style="@style/Cenit.Settings.Caption"
                                 android:text="Detecta las cargas (pantalla quieta, GPU sin usar) y acelera solo esos segundos. Se apaga cuando vuelve el juego." />
 
-                            <com.google.android.material.materialswitch.MaterialSwitch
-                                android:id="@+id/set_sw_cpu_tuner"
-                                style="@style/Cenit.Settings.Switch"
+                            <!-- Cenit 0.6.31 (Fase 1): de interruptor a modo. El prompt
+                                 pide seis opciones (auto seguro / sólo MTVU / sin
+                                 Rate-Skip / manual / desactivado / borrar perfil) y un
+                                 switch de dos valores no las representa: con un toggle
+                                 "AUTO" el usuario no puede saber SI el tuner puede
+                                 tocar sus cuotas. La quinta opcion (borrar lo aprendido)
+                                 es un boton, no un modo. -->
+                            <TextView
+                                style="@style/Cenit.Settings.FieldLabel"
                                 android:text="Sintonizador CPU/VU por juego (experimental)" />
+
+                            <Spinner
+                                android:id="@+id/set_sp_cpu_tuner_mode"
+                                style="@style/Cenit.Settings.Spinner" />
 
                             <TextView
                                 android:id="@+id/set_tv_cpu_tuner_note"
                                 style="@style/Cenit.Settings.Caption"
-                                android:text="Cuando un juego va atrasado con la GPU holgada y ya en su resolución más baja, Cenit prueba una vez —solo para ese juego— una escalera conservadora: MTVU al revés, Ciclo EE -1 o cuota suave. Mide con FPS reales y solo se queda con lo que gana de verdad; si nada gana, lo devuelve. Los ensayos usan los ajustes globales y se revierten: lo adoptado queda guardado en los ajustes por juego del núcleo, tus valores no se tocan. Apagado por defecto: es experimental." />
+                                android:text="Cuando un juego va atrasado con la GPU holgada y ya en su resolución más baja, Cenit prueba una vez —solo para ese juego y este teléfono— una escalera conservadora: MTVU, Ciclo EE -1 o cuota suave, nunca mezcladas. Compara alternando tu estado y la prueba (A-B-A-B) durante unos segundos cada uno y se queda solo con lo que gana de verdad: más cuadros sin P95 peor, sin mínimos peores, sin cortes de audio, sin más temperatura y sin subidas raras. Después lo verifica 45 s en la partida real y, si la ganancia desaparece, lo revierte él solo. Los ensayos usan los ajustes globales y siempre los devuelven; lo adoptado queda guardado en los ajustes POR JUEGO, tus valores globales no se tocan. Encendido por defecto en modo automático seguro: no cambia nada al arrancar y solo actúa si el juego realmente se atrasa. Es experimental." />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/set_btn_forget_tuner"
+                                style="@style/Cenit.Settings.ActionRow"
+                                android:layout_marginTop="6dp"
+                                android:text="Borrar perfil aprendido de este juego"
+                                app:icon="@drawable/settings_24px" />
 
                             <com.google.android.material.materialswitch.MaterialSwitch
                                 android:id="@+id/set_sw_pinning"
