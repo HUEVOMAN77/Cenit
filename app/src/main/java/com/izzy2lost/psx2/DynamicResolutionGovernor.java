@@ -47,6 +47,16 @@ import android.os.Looper;
  *     0.6.25, hoy 0.5x) el juego sigue atrasado muchos segundos, se
  *     cuenta (slowFloorTicks en el perfil) y la pantalla de Ajustes ofrece el
  *     "modo cuotas" (EECycleSkip por-juego) con datos, no a ciegas.
+ *
+ * v5 (0.6.29) — el regidor deja de opinar sobre "de qué es el retraso": esa
+ * pregunta se contesta en UN solo sitio, GameLoadClassifier, comparando el % de
+ * reloj real que tiene la GPU con el % que tiene el hilo EE (las dos métricas del
+ * core, misma ventana, misma unidad). Motivo, medido en el código del core:
+ * getGPUUsage() devuelve PORCENTAJE (0..100) y aquí se comparaba contra 0,65/0,05
+ * desde 0.6.4 — o sea que la rama "GPU holgada" casi nunca se declaraba y el
+ * regidor recortaba imagen también en juegos donde recortar no recupera cuadros.
+ * Un solo camino de código para cualquier disco del catálogo y para Snapdragon 6,
+ * 7 u 8: lo único que cambia entre ellos es lo que miden.
  */
 final class DynamicResolutionGovernor {
 
@@ -55,15 +65,46 @@ final class DynamicResolutionGovernor {
     private static final float HOLDS_ABOVE_PCT = 99.5f; // por encima: va sobrado
     private static final int SLOW_TICKS_TO_DROP = 2;
     private static final int FAST_TICKS_TO_RAISE = 8;
-    // Regidor v2: con la GPU por debajo de este uso, un retraso NO es de píxeles.
-    private static final float GPU_BOUND_MIN = 0.65f;
-    // 0.6.13: por debajo de esto la métrica de GPU NO es fiable como lectura de
-    // "GPU ociosa": es "aún no existe" (GetGPUUsage devuelve s_gpu_usage, que vale
-    // 0 hasta el primer Update con presents reales, y se queda 0 si el driver no
-    // reporta tiempo de GPU). Antes se usaba 0.05 solo dentro de la condición de
-    // CPU-bound, y su efecto colateral era recortar resolución con el dato
-    // ausente. Ahora es un estado explícito.
-    private static final float GPU_METRIC_MIN = 0.05f;
+    // ------------------------------------------------------------------
+    // Cenit 0.6.29 — UNIDAD CORREGIDA. getGPUUsage() devuelve PORCENTAJE
+    // (0..100), no fracción: la fórmula del core es
+    //   s_gpu_usage = gpu_time_acumulado_ms / (ventana_s * 10.0)
+    // con ventana = 0,5 s, o sea ms de GPU por cada segundo de RELOJ REAL. Así
+    // que un 92 ya significa "la GPU tiene llena el 92% del tiempo", para
+    // cualquier juego y cualquier gama — esa es la razón de que la regla pueda
+    // ser universal sin tabla de nombres. El HUD y el PerfLog del propio motor lo
+    // imprimen con "%". Aquí se comparaba contra 0,65 y 0,05 desde 0.6.4, lo que
+    // invertía la decisión en el caso común (GameLoadClassifier documenta el
+    // alcance, con la rama verificada). Los umbrales de abajo vuelven a estar en
+    // la unidad REAL de la métrica y ya no son criterio de nadie: quien decide es
+    // el clasificador, con sus propios números y su porqué escrito.
+    // ------------------------------------------------------------------
+
+    /** Con la GPU por debajo de este uso (en %), el retraso NO es de píxeles:
+     *  la emulación está mandando y recortar imagen solo estropea la salida.
+     *  Antes: 0,65, leyendo la métrica como fracción. Es UNA SOLA constante con
+     *  el clasificador: si los dos tuvieran números propios, el governor y su
+     *  criterio podrían discrepar en silencio — otra vez. */
+    private static final float GPU_BOUND_MIN = GameLoadClassifier.GPU_IDLE_PCT;
+    // La métrica de GPU por debajo de esto es "aún no existe" (GetGPUUsage
+    // devuelve s_gpu_usage, que vale 0 hasta el primer Update con presents
+    // reales, y se queda 0 si el driver no reporta tiempo de GPU). En %: 0,5%
+    // es una GPU parada, y a diferencia del 0,05 de antes ahora sí separa el
+    // "sin dato" del "8% y el cuello es la emulación". Compartida con el
+    // clasificador por el mismo motivo de arriba.
+    private static final float GPU_METRIC_MIN = GameLoadClassifier.GPU_METRIC_MISSING_PCT;
+    // Umbrales del turbo de cargas: ANTES valían 0,22 / 0,40 / 0,05 creyendo
+    // que la métrica era fracción, así que "GPU muerta" pedía un 0,22% real
+    // (imposible salvo en un menu) y "carga terminada" un 0,40% (se cumplía
+    // siempre, liberando el turbo al tick siguiente). En porcentaje: una carga
+    // real deja la GPU dibujando casi nada (< 22% de un cuadro que además no se
+    // presenta), y el juego de verdad vuelve con la GPU trabajando (>= 40%).
+    private static final float LOAD_GPU_MAX = 22f;
+    private static final float LOAD_END_GPU = 40f;
+    // "Hay métrica de GPU que leer" para la regla del turbo: el mismo 0,5 que
+    // usa el clasificador, otra vez en la unidad real (antes era el 0,05
+    // heredado del error de unidad, que se cumplía con casi cualquier cosa).
+    private static final float LOAD_GPU_ALIVE = GPU_METRIC_MIN;
     // Escalones de PowerManager.THERMAL_STATUS_*: MODERATE y más arriba significan
     // que el SoC ya está recortando frecuencias por calor.
     private static final int THERMAL_BLOCK_RAISE = 2; // THERMAL_STATUS_MODERATE
@@ -72,9 +113,8 @@ final class DynamicResolutionGovernor {
     private static final float TREND_DROP_PCT = 6f;  // media últimos 4 vs últimos 12
     private static final int PRECLIMITS_PER_GAME = 2;
     // v3 turbo de cargas: GPU casi ociosa + velocidad clavada, N segundos.
-    private static final float LOAD_GPU_MAX = 0.22f;
+    // (Los umbrales de GPU de esta regla viven arriba, ya en %.)
     private static final int LOAD_TICKS_TO_TURBO = 4;
-    private static final float LOAD_END_GPU = 0.40f;
     private static final int TURBO_MAX_SECONDS = 45; // seguro: si la lectura miente, se suelta
     private static final int TURBO_REARM_TICKS = 6;
     // Los mismos escalones que ofrece el menú: una sola fuente de verdad. Si el
@@ -129,6 +169,9 @@ final class DynamicResolutionGovernor {
     // 0.6.14: tercera etiqueta de estado, para que el log diga GPU_BOUND al
     // empezar a acumular ticks lentos y no solo cuando ya bajó la escala.
     private boolean gpuBoundLogged = false;
+    // 0.6.29: cuarta etiqueta, UNKNOWN_LOAD — evidencia intermedia que no
+    // autoriza a recortar. Sin este flag el log se repetiría en cada tick.
+    private boolean unknownHoldLogged = false;
 
     // ------------------------------------------------------------------
     // v3: memoria, pre-corte térmico, turbo de cargas y evidencia de cuotas
@@ -259,6 +302,7 @@ final class DynamicResolutionGovernor {
         preclimsUsed = 0;
         loadTicks = 0; turboOn = false; turboSeconds = 0; turboCooldown = 0;
         cpuBoundTicks = 0;
+        unknownHoldLogged = false;
         // 0.6.27: procesar el diario de un benchmark que el cierre de la app
         // dejó a medias ANTES de tocar la escala (revertir speedhacks globales
         // colgados es lo único urgente; el benchmark nuevo, si viene, empieza
@@ -321,16 +365,13 @@ final class DynamicResolutionGovernor {
     }
 
     /**
-     * Umbral de "esto no es de píxeles" (0.6.27: era un cálculo en línea dentro
-     * de la regla GPU-bound; el sintonizador CPU/VU necesita la MISMA pregunta
-     * antes de esa regla, así que pasa a ser una función con un solo criterio).
-     * Si el perfil ya aprendió que ESTE juego es CPU-bound, el umbral se suaviza
-     * un 20% porque la evidencia es de la partida anterior, no de este segundo.
+     * Cenit 0.6.29: esta función (boundThreshold) ya no existe. Hacía la misma
+     * pregunta que ahora contesta GameLoadClassifier.classify —"¿este retraso es
+     * de píxeles?"— pero con una constante absoluta en la unidad equivocada y con
+     * el ajuste de evidencia al revés (×0.8, más difícil de declarar CPU-bound).
+     * La evidencia aprendida sigue usándose, ahora en la dirección correcta:
+     * ensancha el umbral de "GPU holgada" (idlePct, ver evaluate()).
      */
-    private float boundThreshold() {
-        return (profile != null && profile.cpuBound) ? GPU_BOUND_MIN * 0.8f : GPU_BOUND_MIN;
-    }
-
     private void evaluate() {
         // ¿El último paso llegó realmente a la resolución en uso? Si no, es que los
         // ajustes por juego fijan su propia escala y mandan sobre el INI global:
@@ -449,7 +490,29 @@ final class DynamicResolutionGovernor {
         }
 
         final float speed = NativeApp.safeGetEmulationSpeed();
-        final float gpu = NativeApp.safeGetGPUUsage();
+        // Cenit 0.6.29: UNA clasificacion por tick, con las lecturas crudas del
+        // motor. Antes cada rama comparaba gpu contra sus propias constantes sin
+        // unidad (y en la unidad equivocada); ahora el criterio vive en
+        // GameLoadClassifier, es universal (no depende del nombre del juego) y
+        // puede ejercitarse en el arnes con numeros sinteticos.
+        final float gpu = NativeApp.safeGetGPUUsage();          // PORCENTAJE 0..100
+        final float eePct = NativeApp.safeGetEEThreadUsage();   // % hilo EE
+        // Estos dos son EVIDENCIA para el log, no decision: el clasificador no los
+        // mira (GameLoadClassifier explica por que el ms de GPU y el presupuesto
+        // 1000/fps no son comparables campo a cuadro). Se leen igual porque sin
+        // ellos un log de un telefono ajeno no se puede interpretar.
+        final float gpuMs = NativeApp.safeGetGPUAverageTime();  // ms por present
+        final float targetFps = NativeApp.safeGetFrameRateTarget(); // vertical: ~49,76..60, 0 = sin senal
+        // Evidencia aprendida: si la partida anterior ya demostro que ESTE juego
+        // es de emulacion, el umbral de "GPU holgada" se ANCHA (sube), no se
+        // estrecha. Direccion corregida en 0.6.29: con *0.8 era mas dificil
+        // seguir declarandolo y el juego volvia a recibir recortes.
+        final float idlePct = (profile != null && profile.cpuBound)
+                ? GPU_BOUND_MIN * 1.2f : GPU_BOUND_MIN;
+        final GameLoadClassifier.Bottleneck load = GameLoadClassifier.classify(
+                speed, gpu, eePct,
+                NativeApp.safeGetMtvuWaitMs(), NativeApp.safeGetMtvuWaitCalls(),
+                idlePct);
 
         // ---------------------------------------------------------------
         // 0.6.27 (governor v4): el sintonizador CPU/VU se consulta AQUÍ, con el
@@ -462,8 +525,15 @@ final class DynamicResolutionGovernor {
         // ---------------------------------------------------------------
         final boolean behind = speed > 0f && speed < DROP_BELOW_PCT;
         final boolean atFloor = applied <= STEPS[0] + 0.001f;
-        final boolean metricsAlive = speed > 0f && gpu > GPU_METRIC_MIN;
-        final boolean cpuBoundNow = metricsAlive && gpu < boundThreshold();
+        // Metrica viva = hay lectura de GPU utilizable O el motor ya clasificó con
+        // otra evidencia (VU_WAIT no depende del % de GPU).
+        final boolean metricsAlive = speed > 0f
+                && (gpu > GPU_METRIC_MIN || load == GameLoadClassifier.Bottleneck.VU_WAIT);
+        // Cuello de emulación (o VU esperando): lo que el sintonizador necesita.
+        // Antes: gpu < 0,65 con gpu en % — casi inalcanzable, por eso el
+        // benchmark de 0.6.27 disparaba tan raro.
+        final boolean cpuBoundNow = load == GameLoadClassifier.Bottleneck.EMULATION
+                || load == GameLoadClassifier.Bottleneck.VU_WAIT;
         final int tunerAction = tuner.tick(profile, hostCurrentUri(), applied,
                 behind, atFloor, cpuBoundNow, metricsAlive,
                 turboOn, pendingApply > 0f, thermalLimited());
@@ -501,7 +571,7 @@ final class DynamicResolutionGovernor {
         // auto-turbo y el juego conocido (o tras la primera detección), se
         // engancha el limitador Turbo y se suelta al volver el juego real.
         // ---------------------------------------------------------------
-        if (gpu > 0.05f && speed > 0f) {
+        if (gpu > LOAD_GPU_ALIVE && speed > 0f) {
             if (turboOn) {
                 turboSeconds++;
                 final boolean loadOver = gpu >= LOAD_END_GPU || speed < HOLDS_ABOVE_PCT;
@@ -556,28 +626,84 @@ final class DynamicResolutionGovernor {
         }
 
         // ---------------------------------------------------------------
-        // Reglas clásicas (v2) de subida/bajada:
+        // Reglas clásicas (v2) de subida/bajada.
+        //
+        // Cenit 0.6.29: el "¿de qué es este retraso?" ya NO se decide aquí a ojo.
+        // La decisión única es `load`, la que tomó GameLoadClassifier con el % de
+        // reloj que tiene la GPU, el % que tiene el hilo EE y la espera MTVU — sin
+        // saber qué disco está delante. Esto reemplaza tres comparaciones que
+        // estaban en la unidad equivocada (gpu <= 0,05 / gpu < 0,65, con gpu en %),
+        // y por eso en la práctica declaraban GPU_BOUND en casi todo: se recortaba
+        // imagen también cuando recortar no recupera ni un cuadro.
+        //
+        // Las etiquetas "DynRes state: ..." se conservan palabra por palabra: los
+        // logs que ya me llegaron de los teléfonos siguen siendo comparables con
+        // los que vengan, que es la única forma de verificar esto con medición. Lo
+        // nuevo es UNKNOWN_LOAD, y su evidencia impresa es el dato que falta para
+        // saber si los umbrales están bien puestos en Snapdragon 6 y 7.
         // ---------------------------------------------------------------
         if (speed > 0f && speed < DROP_BELOW_PCT) {
-            // ¿El retraso es de GPU? GPUUsage ~= (tiempo GPU)/(16.6 ms). Con la
-            // GPU holgada, recortar resolución no recupera cuadros.
-            // v3: además, si el perfil ya aprendió que ESTE juego es CPU-bound,
-            // el filtro se aplica con un umbral más suave (0.8*GPU_BOUND_MIN)
-            // porque la evidencia es de la partida anterior, no de este segundo.
-            //
-            // 0.6.13 (fix del bug que encontró la revisión de ingeniería): hay que
-            // distinguir TRES estados, no dos. gpu <= GPU_METRIC_MIN significa
-            // "la métrica todavía no existe" (GS recién abierto, o driver que no
-            // reporta tiempo de GPU), NO "la GPU está casi ociosa". Antes, con
-            // gpu==0 la condición de CPU-bound fallaba y el código caía a BAJAR
-            // resolución: justo lo contrario de la intención, recortando imagen de
-            // gratis en un juego CPU-bound. Ahora, métrica inválida = mantener la
-            // escala en neutral (no subir ni bajar), hasta que llegue un dato real.
-            final float bound = boundThreshold();
-            if (gpu <= GPU_METRIC_MIN) {
-                // Estado desconocido: no fiarse para recortar. Dejar slowTicks en
-                // cero para que, cuando la métrica despierte, se necesiten los
-                // ticks completos de retraso real antes de mover nada.
+            // 0.6.29: tally del veredicto, UN tick por veredicto, y solo cuando hay
+            // un retraso que diagnosticar. Se cuenta aqui y no arriba porque este
+            // punto ya paso las dos guardas que invalidan la muestra: el CONTINUE
+            // del sintonizador (un ensayo baja el speed% A PROPOSITO y sus lecturas
+            // no hablan del juego) y las reglas de congelamiento. Contar un juego
+            // que va a tiempo tampoco sirve: el clasificador devolveria UNKNOWN por
+            // "no hay cuello", no por evidencia insuficiente, y eso llenaria la
+            // casilla equivocada.
+            if (profile != null && profile.known())
+                profile.loadMix[load.tallySlot()]++;
+            if (load == GameLoadClassifier.Bottleneck.GPU) {
+                // Píxeles: recortar SÍ recupera cuadros.
+                cpuBoundLogged = false;
+                gpuMetricLogged = false;
+                unknownHoldLogged = false;
+                cpuBoundTicks = 0; // el retraso este vez sí era de píxeles: cuenta nueva
+                fastTicks = 0;
+                if (!gpuBoundLogged) {
+                    gpuBoundLogged = true;
+                    android.util.Log.i("DynRes", "DynRes state: GPU_BOUND — "
+                            + GameLoadClassifier.evidence(load, speed, gpu, gpuMs, eePct, targetFps)
+                            + ": resolution can help");
+                }
+                slowTicks++;
+                if (slowTicks >= SLOW_TICKS_TO_DROP) {
+                    slowTicks = 0;
+                    final float next = nextStepDown(applied, ceiling);
+                    if (next < applied - 0.001f) {
+                        applied = next;
+                        pendingApply = next;
+                        pendingTicks = 2;
+                        host.applyUpscale(next);
+                        cooldownTicks = 2;
+                    } else {
+                        cooldownTicks = 5; // ya está en 1x, no hay marcha atrás
+                    }
+                }
+            } else if (cpuBoundNow) {
+                // El cuello es la emulación (EE/GS trabajándose el cuadro) o el EE
+                // bloqueado esperando al VU1. Bajar resolución en ambos casos solo
+                // estropea la imagen: mantener la escala y dejar que el sintonizador
+                // CPU/VU, que ya recibió cpuBoundNow, haga su parte.
+                slowTicks = 0;
+                fastTicks = 0;
+                gpuBoundLogged = false;
+                gpuMetricLogged = false;
+                unknownHoldLogged = false;
+                cpuBoundTicks++;
+                if (profile != null && profile.known() && cpuBoundTicks >= 15)
+                    profile.cpuBound = true; // fue consistente: que conste en el perfil
+                if (!cpuBoundLogged) {
+                    cpuBoundLogged = true;
+                    android.util.Log.i("DynRes", "DynRes state: CPU_BOUND — "
+                            + GameLoadClassifier.evidence(load, speed, gpu, gpuMs, eePct, targetFps)
+                            + ": CPU-bound, holding scale");
+                }
+            } else if (gpu <= GPU_METRIC_MIN) {
+                // Estado desconocido porque LA MÉTRICA no existe todavía (GS recién
+                // abierto, o driver que no reporta tiempo de GPU). No fiarse para
+                // recortar: slowTicks en cero para que, cuando la métrica despierte,
+                // se necesiten los ticks completos de retraso real antes de mover nada.
                 slowTicks = 0;
                 fastTicks = 0;
                 gpuBoundLogged = false; // cambio de estado: permitir la próxima etiqueta
@@ -589,43 +715,19 @@ final class DynamicResolutionGovernor {
                     android.util.Log.i("DynRes", "DynRes state: UNKNOWN_GPU — behind at " + speed
                             + "% but GPU metric unavailable (" + gpu + "): holding scale, not guessing");
                 }
-                return;
-            }
-            gpuMetricLogged = false;
-            if (gpu < bound) {
+            } else {
+                // 0.6.29: lectura intermedia pero contradictoria (GPU ni saturada
+                // ni holgada, EE sin datos suficientes). La regla del clasificador
+                // es no inventar: en el catálogo entero, recortar de más sale más
+                // caro que dejar una mejora sobre la mesa.
                 slowTicks = 0;
                 fastTicks = 0;
-                gpuBoundLogged = false; // cambio de estado: permitir la próxima etiqueta
-                cpuBoundTicks++;
-                if (profile != null && profile.known() && cpuBoundTicks >= 15)
-                    profile.cpuBound = true; // fue consistente: que conste en el perfil
-                if (!cpuBoundLogged) {
-                    cpuBoundLogged = true;
-                    android.util.Log.i("DynRes", "DynRes state: CPU_BOUND — behind at " + speed
-                            + "% but GPU usage only " + gpu + ": CPU-bound, holding scale");
-                }
-                return;
-            }
-            cpuBoundLogged = false;
-            cpuBoundTicks = 0; // el retraso este vez sí era de píxeles: cuenta nueva
-            fastTicks = 0;
-            if (!gpuBoundLogged) {
-                gpuBoundLogged = true;
-                android.util.Log.i("DynRes", "DynRes state: GPU_BOUND — behind at " + speed
-                        + "% with GPU usage " + gpu + ": resolution can help");
-            }
-            slowTicks++;
-            if (slowTicks >= SLOW_TICKS_TO_DROP) {
-                slowTicks = 0;
-                final float next = nextStepDown(applied, ceiling);
-                if (next < applied - 0.001f) {
-                    applied = next;
-                    pendingApply = next;
-                    pendingTicks = 2;
-                    host.applyUpscale(next);
-                    cooldownTicks = 2;
-                } else {
-                    cooldownTicks = 5; // ya está en 1x, no hay marcha atrás
+                gpuBoundLogged = false;
+                if (!unknownHoldLogged) {
+                    unknownHoldLogged = true;
+                    android.util.Log.i("DynRes", "DynRes state: UNKNOWN_LOAD — "
+                            + GameLoadClassifier.evidence(load, speed, gpu, gpuMs, eePct, targetFps)
+                            + ": evidence mixed, holding scale");
                 }
             }
         } else if (speed > HOLDS_ABOVE_PCT && applied < ceiling - 0.001f) {
