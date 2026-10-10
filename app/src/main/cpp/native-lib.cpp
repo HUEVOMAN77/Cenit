@@ -1866,6 +1866,48 @@ Java_com_izzy2lost_psx2_NativeApp_getEmulationSpeed(JNIEnv *env, jclass clazz) {
     return (jfloat)PerformanceMetrics::GetSpeed();
 }
 
+// Cenit 0.6.29 — frecuencia VERTICAL que el juego le pide al GS, para el log.
+// GetVerticalFrequency() lee SMODE/SMODE2 del hardware emulado y responde con el
+// modo de vídeo de ESTE disco: 59,94 (NTSC entrelazado), 59,83 (NTSC progresivo,
+// que es el -0,11 que aplica el core), ~49,76-50 (PAL), 60 (los modos HDTV) y una
+// temporal de 50/59,94 con la consola arrancando. OJO con lo que NO es: es la
+// frecuencia VERTICAL, no "los fps del juego". Un título que diseña a 30 cuadros
+// en entrelazado sigue publicando 59,94 (presenta campo a campo), así que este
+// número no sirve para calcular un presupuesto por cuadro y por eso
+// GameLoadClassifier lo imprime pero no lo usa para decidir; lo verificó rama por
+// rama contra Counters.cpp y GSRenderer::VSync. Aquí se expone porque sin él un
+// "gpu=92%" de un log ajeno no se puede interpretar. Es lectura pura, sin candado
+// y sin VM nueva: la misma categoría de consulta que getGPUUsage.
+extern "C"
+JNIEXPORT jfloat JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getFrameRateTarget(JNIEnv* env, jclass)
+{
+    const double fps = GetVerticalFrequency();
+    // La guarda NO es para el arranque: con SetGsCrt sin ejecutar el core ya
+    // responde un modo temporal plausible (50 o 59,94 segun la region, y el
+    // default del switch es FRAMERATE_NTSC*2 = 59,94), nunca 0. Es para el INI:
+    // FramerateNTSC/FrameratePAL son editables a mano, y un 0 o una basura ahi
+    // llegaria tal cual — el mismo GetSpeed() del motor divide entre esta
+    // funcion, o sea que un 0 ya esta rompiendo el % de velocidad de todo el
+    // regidor, no solo este numero. Como aqui SOLO se imprime (ninguna decision
+    // del clasificador depende de el), basta con rechazar lo que no puede ser un
+    // modo de video: fuera de 5..240 se devuelve 0 y Java imprime su fallback.
+    return (fps > 5.0 && fps < 240.0) ? static_cast<jfloat>(fps) : 0.0f;
+}
+
+// Cenit 0.6.29 — % de reloj que el HILO DE EMULACION (EE) estuvo trabajando, en
+// la misma ventana de 0,5 s y con el mismo denominador que getGPUUsage. Con los
+// dos numeros en la misma unidad se puede sumar: GPU llena = pixeles, EE lleno =
+// emulacion, y los dos a la vez = hay que mirar la suma. GetCPUThreadUsage ya
+// existe (la imprime el PerfLog con "EE %.0f%%") y es lectura de un valor
+// renovado cada ventana; no abre la VM ni toma candados.
+extern "C"
+JNIEXPORT jfloat JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getEEThreadUsage(JNIEnv* env, jclass)
+{
+    return (jfloat)PerformanceMetrics::GetCPUThreadUsage();
+}
+
 // Resolución interna realmente en uso. Puede no coincidir con lo que se pidió:
 // la capa de ajustes por juego (UpdateGameSettingsLayer) tiene prioridad sobre el
 // INI global, y el regidor necesita saberlo para no insistir sobre oídos sordos.

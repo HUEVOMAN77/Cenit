@@ -188,6 +188,32 @@ public class NativeApp {
 		try { return getGPUAverageTime(); } catch (Throwable t) { return 0f; }
 	}
 
+	// --- Cenit 0.6.29: lecturas para el clasificador universal de carga ---------
+	// Son del mismo tipo que getGPUUsage: un atomic del motor renovado cada
+	// ventana de 0,5 s. Ninguna escribe, pausa ni reconfigura nada, así que no
+	// hay riesgo nuevo para el bucle emulacion. Sirven para dejar de comparar
+	// numeros contra constantes sin unidad (el bug que GameLoadClassifier
+	// documenta) y para que la decision no dependa del nombre del juego.
+
+	/** Frecuencia VERTICAL que el juego publica en el GS emulado (~49,76/50/
+	 *  59,83/59,94/60; 0 = sin senal). OJO: NO son los fps del juego — un titulo
+	 *  que diseña a 30 en entrelazado presenta campo a campo y sigue publicando
+	 *  59,94 —, así que sirve para LEER la evidencia, no para decidir con ella.
+	 *  GameLoadClassifier tiene el porque verificado contra Counters.cpp. */
+	public static native float getFrameRateTarget();
+	public static float safeGetFrameRateTarget() {
+		if (hasNoNativeBinary) return 0f;
+		try { return getFrameRateTarget(); } catch (Throwable t) { return 0f; }
+	}
+
+	/** % de reloj que el hilo de emulacion (EE) trabajo en la ultima ventana: la
+	 *  MISMA unidad que getGPUUsage, y por eso el clasificador puede sumarlas. */
+	public static native float getEEThreadUsage();
+	public static float safeGetEEThreadUsage() {
+		if (hasNoNativeBinary) return 0f;
+		try { return getEEThreadUsage(); } catch (Throwable t) { return 0f; }
+	}
+
 	public static native void renderUpscalemultiplier(float value);
     public static void renderUpscalemultiplierAsync(float value) {
         runNativeSettingAsync("renderUpscalemultiplier", () -> renderUpscalemultiplier(value));
