@@ -27,6 +27,41 @@
 #define LOG_UNDERRUN(...) (void)0
 static constexpr bool LOG_TIMESTRETCH_STATS = false;
 
+// Cenit 0.6.31 — Contadores de fallo de audio (ver declaracion en AudioStream.h).
+// Se escriben en las TRES transiciones donde el stream pierde coherencia, y se
+// leen en delta desde Java para decidir si un candidato del sintonizador rompe el
+// audio. No se cuentan los reads que salen en silencio DURANTE una recuperacion:
+// eso es la consecuencia del underflow ya contado al entrar, y contarlo por read
+// inflaria un fallo en funcion de cuanto tardo el buffer en llenarse — dos
+// candidatos con el mismo numero de fallos saldrian con cifras distintas.
+namespace {
+	std::atomic<u64> s_audio_silence_events{0}; // underflow: paso a m_filling
+	std::atomic<u64> s_audio_dropped_chunks{0}; // overflow: chunk descartado
+	std::atomic<u64> s_audio_stretch_events{0}; // el timestretch paso a activo
+} // namespace
+
+u64 AudioStream::GetAudioSilenceEvents()
+{
+	return s_audio_silence_events.load(std::memory_order_relaxed);
+}
+
+u64 AudioStream::GetAudioDroppedChunks()
+{
+	return s_audio_dropped_chunks.load(std::memory_order_relaxed);
+}
+
+u64 AudioStream::GetAudioStretchEvents()
+{
+	return s_audio_stretch_events.load(std::memory_order_relaxed);
+}
+
+void AudioStream::ResetAudioFaultStats()
+{
+	s_audio_silence_events.store(0, std::memory_order_relaxed);
+	s_audio_dropped_chunks.store(0, std::memory_order_relaxed);
+	s_audio_stretch_events.store(0, std::memory_order_relaxed);
+}
+
 static constexpr const std::array<std::pair<u8, u8>, static_cast<size_t>(AudioExpansionMode::Count)>
 	s_expansion_channel_count = {{
 		{u8(2), u8(2)}, // Disabled
@@ -257,6 +292,10 @@ void AudioStream::ReadFrames(SampleType* samples, u32 num_frames)
 
 	if (available_frames < frames_to_read)
 	{
+		// Cenit 0.6.31: se cuenta SOLO la ENTRADA en underflow (m_filling estaba en
+		// false), no cada read que sale en silencio mientras el buffer se rellena.
+		if (!m_filling)
+			s_audio_silence_events.fetch_add(1, std::memory_order_relaxed);
 		silence_frames = frames_to_read - available_frames;
 		frames_to_read = available_frames;
 		m_filling = true;
@@ -358,6 +397,10 @@ void AudioStream::InternalWriteFrames(const SampleType* data, u32 num_frames)
 		}
 		else
 		{
+			// Cenit 0.6.31: el chunk se descarto — el audio perdio un trozo real.
+			// Con stretched activo no se cuenta porque ahi el overflow se absorve
+			// acelerando el consumo (StretchOverrun), no tirando muestras.
+			s_audio_dropped_chunks.fetch_add(1, std::memory_order_relaxed);
 			LOG_UNDERRUN("Buffer overrun, chunk dropped");
 			return;
 		}
@@ -737,6 +780,11 @@ void AudioStream::UpdateStretchTempo()
 	}
 	else if (!IsInRange(tempo, 1.0f / INACTIVE_BAD_FACTOR, INACTIVE_BAD_FACTOR))
 	{
+		// Cenit 0.6.31: el timestretch tuvo que entrar en accion — el buffer se
+		// salio del rango de tolerancia. Es el fallo de audio MAS sutil (no corta,
+		// estira) y el que mas se presta a pasar desapercibido para el oido del que
+		// prueba y por eso es el que mas necesita un numero.
+		s_audio_stretch_events.fetch_add(1, std::memory_order_relaxed);
 		LOG_UNDERRUN("~~~ Stretcher is now active @ tempo {}.", tempo);
 		m_stretch_inactive = false;
 		m_stretch_ok_count = 0;

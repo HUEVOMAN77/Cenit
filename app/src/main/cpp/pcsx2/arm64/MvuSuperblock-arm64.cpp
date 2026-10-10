@@ -337,6 +337,24 @@ namespace mVUSuperblock
 		return s_killed;
 	}
 
+	// Fase 1 (0.6.31): ¿esta el motor ocupado? Ver el contrato en el header. El
+	// bucle es sobre 256 entradas de 4 bytes leidas como relaxed: es un escaneo
+	// que corre una vez por segundo (el tick del regidor), no por cuadro, asi que
+	// el costo es irrelevante y el resultado es lo bastante fresco — un VERIFY que
+	// abra justo despues de la consulta se vera al segundo siguiente, y para
+	// entonces el tuner aun estara en su asentamiento de 3 s.
+	bool Validating()
+	{
+		if (!IsEnabled() || s_killed)
+			return false;
+		for (u32 i = 0; i < kSbMaxVariants; i++)
+		{
+			if (s_tab[i].state == SbState::Verify)
+				return true;
+		}
+		return false;
+	}
+
 	// ------------------------------------------------------------------
 	// Política de elegibilidad — Fase 2
 	// ------------------------------------------------------------------

@@ -94,4 +94,72 @@ namespace CenitTelemetry
 		v.ee_pct.store(0.0, std::memory_order_relaxed);
 		v.thermal_status.store(-1, std::memory_order_relaxed);
 	}
+
+	// ==========================================================================
+	// Cenit 0.6.31 (Fase 1 del prompt directo) — Estado del sintonizador CPU/VU.
+	//
+	// Por qué hace falta: el prompt exige que el HUD muestre TUNER/STATE/PROFILE/
+	// GAIN/FPS antes→después/FRAME P50-P95/THERMAL. Un estado que solo vive en Java
+	// no se puede verificar desde el sofá mientras el juego corre, y "el tuner está
+	// seguro" sin que se vea qué está haciendo en cada instante es una opinión.
+	//
+	// Mismo contrato que LoadVerdict: Java mide y publica, el HUD lee y pinta, el
+	// C++ no escribe nunca. Los números con nombre "x10/x100/x1000" viajan escalados
+	// a entero a propósito: seguirían siendo legibles en un logcat y evitan un
+	// double por campo, pero sobre todo evitan que un NaN decore el overlay — para
+	// "sin cifra" se usa el centinela -1 y el HUD lo pinta como "-", que es la única
+	// manera honesta de distinguir "cero medido" de "no medido".
+	//
+	// El perfil viaja como hash de 64 bits de la identidad completa, no como cadena
+	// (una std::string entre TUs con hilos que no se sincronizan es una carrera de
+	// destrucción, y este header lo prohíbe arriba). El hash es un puntero legible:
+	// la identidad entera se lee en Ajustes y en el log "CpuVUTuner ... perfil <id>".
+	struct TunerStatus
+	{
+		std::atomic<int> state{-1};        // diccionario CpuVUTuner.ST_* (-1 = sin publica)
+		std::atomic<int> mode{0};          // MODE_* del prompt
+		std::atomic<int> gain_permille{0}; // ganancia en milésimas de ratio (50 = +5 %)
+		std::atomic<int> fps_before_x100{-1};
+		std::atomic<int> fps_after_x100{-1};
+		std::atomic<int> p50_deci_ms{-1};  // P50 del frame, x10; -1 sin muestra
+		std::atomic<int> p95_deci_ms{-1};
+		std::atomic<int> thermal_status{-1};
+		std::atomic<unsigned long long> profile_hash{0};
+
+		TunerStatus& operator=(const TunerStatus&) = delete;
+		TunerStatus(const TunerStatus&) = delete;
+		TunerStatus() = default;
+	};
+
+	inline TunerStatus g_tuner_status;
+
+	inline void PublishTunerStatus(const int state, const int mode, const int gain_permille,
+		const int fps_before_x100, const int fps_after_x100, const int p50_deci_ms,
+		const int p95_deci_ms, const int thermal_status, const unsigned long long profile_hash)
+	{
+		TunerStatus& t = g_tuner_status;
+		t.state.store(state, std::memory_order_relaxed);
+		t.mode.store(mode, std::memory_order_relaxed);
+		t.gain_permille.store(gain_permille, std::memory_order_relaxed);
+		t.fps_before_x100.store(fps_before_x100, std::memory_order_relaxed);
+		t.fps_after_x100.store(fps_after_x100, std::memory_order_relaxed);
+		t.p50_deci_ms.store(p50_deci_ms, std::memory_order_relaxed);
+		t.p95_deci_ms.store(p95_deci_ms, std::memory_order_relaxed);
+		t.thermal_status.store(thermal_status, std::memory_order_relaxed);
+		t.profile_hash.store(profile_hash, std::memory_order_relaxed);
+	}
+
+	inline void ResetTunerStatus()
+	{
+		TunerStatus& t = g_tuner_status;
+		t.state.store(-1, std::memory_order_relaxed);
+		t.mode.store(0, std::memory_order_relaxed);
+		t.gain_permille.store(0, std::memory_order_relaxed);
+		t.fps_before_x100.store(-1, std::memory_order_relaxed);
+		t.fps_after_x100.store(-1, std::memory_order_relaxed);
+		t.p50_deci_ms.store(-1, std::memory_order_relaxed);
+		t.p95_deci_ms.store(-1, std::memory_order_relaxed);
+		t.thermal_status.store(-1, std::memory_order_relaxed);
+		t.profile_hash.store(0ULL, std::memory_order_relaxed);
+	}
 }

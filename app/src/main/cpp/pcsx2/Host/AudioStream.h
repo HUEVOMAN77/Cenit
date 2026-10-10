@@ -71,6 +71,25 @@ public:
 
 	u32 GetBufferedFramesRelaxed() const;
 
+	// Cenit 0.6.31 (Fase 1 del prompt directo): el sintonizador CPU/VU tiene que
+	// poder decir "este candidato rompio el audio" con un numero, no con la
+	// impresion del que prueba. Antes de esto NO HABIA observable: los tres unicos
+	// sitios que saben que el stream perdio un tren de cuadros (silencio por
+	// underflow, chunk descartado por overflow y activacion del timestretch)
+	// estaban escritos bajo LOG_UNDERRUN, que en AudioStream.cpp esta definido a
+	// (void)0 — o sea, descartados en tiempo de compilacion. Contar es lo minimo
+	// que convierte "se escucho mal" en una metrica de adopcion.
+	//
+	// Son contadores ACUMULADOS de proceso, leidos en delta por ventana. relaxed:
+	// un conteo ligeramente desfasado solo afecta a un criterio de estabilidad,
+	// nunca a la mezcla ni al timing del juego. Se leen desde el hilo de la UI por
+	// JNI; el que escribe es el callback de audio (silencio/stretch) y el emisor
+	// SPU2 (overflow), y por eso son atomicos, no campos de instancia.
+	static u64 GetAudioSilenceEvents();   // underflow: se llenaron cuadros con silencio
+	static u64 GetAudioDroppedChunks();   // overflow: se descartó un chunk escrito
+	static u64 GetAudioStretchEvents();   // el timestretch tuvo que entrar en accion
+	static void ResetAudioFaultStats();   // cambio de juego: deltas desde cero
+
 	/// Temporarily pauses the stream, preventing it from requesting data.
 	virtual void SetPaused(bool paused);
 

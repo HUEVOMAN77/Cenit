@@ -11,6 +11,7 @@
 #include "common/Error.h"
 #include "common/ZipHelpers.h"
 #include "pcsx2/GS.h"
+#include "pcsx2/Host/AudioStream.h" // Cenit 0.6.31: contadores de fallo de audio (Fase 1)
 #include "pcsx2/VMManager.h"
 #include "CDVD/CDVD.h"
 #include "CDVD/ThreadedFileReader.h" // Cenit 0.6.28: ventana de streaming del ISO
@@ -996,6 +997,26 @@ Java_com_izzy2lost_psx2_NativeApp_getVUSuperblockEffective(JNIEnv*, jclass)
 // Vuelca el informe bajo demanda (botón de la UI / depuración): escribe
 // logs/vu_superblock.txt con el detalle de validación y el resumen al emulog.
 // No cambia nada.
+//
+// Cenit 0.6.31 (Fase 1) — ¿Ocupado el motor de superbloques? Arriba de este
+// vuelco porque la consulta es del tuner, no del informe. El contrato completo
+// esta en MvuSuperblock-arm64.h: es la contraparte nativa de la puerta
+// "superblockBusy" del sintonizador CPU/VU. El prompt exige un solo dueño por
+// intervalo, y un candidato en VERIFY alterna cadena normal / superbloque dentro
+// de la misma ventana que el tuner quiere medir. Sin esta lectura el tuner tendria
+// que adivinar, y un "creo que no esta validando" es la clase de opinion que el
+// prompt prohibe. Sin binario arm64 responde false: no hay motor, no hay
+// validacion, y la puerta no bloquea nada.
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_izzy2lost_psx2_NativeApp_superblockValidating(JNIEnv*, jclass)
+{
+#ifdef __aarch64__
+    return mVUSuperblock::Validating() ? JNI_TRUE : JNI_FALSE;
+#else
+    return JNI_FALSE;
+#endif
+}
 extern "C"
 JNIEXPORT void JNICALL
 Java_com_izzy2lost_psx2_NativeApp_dumpVUSuperblockReport(JNIEnv* env, jclass, jstring reason)
@@ -2194,6 +2215,125 @@ extern "C"
 JNIEXPORT void JNICALL
 Java_com_izzy2lost_psx2_NativeApp_resetCenitLoadVerdict(JNIEnv *env, jclass clazz) {
     CenitTelemetry::ResetLoadVerdict();
+}
+
+// Cenit 0.6.31 (Fase 1) — Estado del sintonizador CPU/VU para el HUD.
+// Mismo contrato que setCenitLoadVerdict: Java mide y decide, aqui solo se publica
+// para que se pueda VER durante la partida. Nueve enteros, todos con centinela -1
+// para "no medido" (Regla 3: la ausencia de senal no es un cero). El perfil viaja
+// como hash de 64 bits de la identidad, no como cadena: leer una std::string desde
+// el hilo de ImGui mientras Java la reemplaza es una carrera de destruccion.
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setCenitTunerStatus(JNIEnv *env, jclass clazz,
+                                                      jint state,
+                                                      jint mode,
+                                                      jint gainPermille,
+                                                      jint fpsBeforeX100,
+                                                      jint fpsAfterX100,
+                                                      jint p50DeciMs,
+                                                      jint p95DeciMs,
+                                                      jint thermalStatus,
+                                                      jlong profileHash) {
+    CenitTelemetry::PublishTunerStatus(static_cast<int>(state),
+                                       static_cast<int>(mode),
+                                       static_cast<int>(gainPermille),
+                                       static_cast<int>(fpsBeforeX100),
+                                       static_cast<int>(fpsAfterX100),
+                                       static_cast<int>(p50DeciMs),
+                                       static_cast<int>(p95DeciMs),
+                                       static_cast<int>(thermalStatus),
+                                       static_cast<unsigned long long>(profileHash));
+}
+
+// Borra el estado del sintonizador. Lo llama el regidor al arrancar y al cerrar,
+// igual que resetCenitLoadVerdict: al volver al menu no debe quedar pintado el
+// ensayo de la partida anterior.
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_resetCenitTunerStatus(JNIEnv *env, jclass clazz) {
+    CenitTelemetry::ResetTunerStatus();
+}
+
+// Cenit 0.6.31 (Fase 1) — Texturas de reemplazo cargadas, como puerta del tuner.
+// El prompt prohibe aprender durante una carga: una textura que aun se esta
+// trayendo desde disco infla el P95 y baja el FPS, y eso no es CPU-bound ni
+// VU-bound. GetLoadedTextureCount ya existia, pero solo lo leia el overlay de
+// reemplazos; aqui se expone a Java para que la puerta sea medible y no una
+// impresion. Devuelve -1 cuando no hay senal (sin binario, sin array, excepcion
+// JNI), y CpuVUTuner trata -1 como "desconocido": NO como "carga terminada".
+// La funcion del core ya toma su propio mutex de cache, asi que no hay doble lock.
+extern "C"
+JNIEXPORT jlong JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getLoadedTextureCount(JNIEnv *env, jclass clazz) {
+    return static_cast<jlong>(GSTextureReplacements::GetLoadedTextureCount());
+}
+
+// Cenit 0.6.31 (Fase 1) — Borrar una clave del INI GLOBAL.
+// Precedente exacto: deleteGameSettingKey (linea ~1300) hace lo mismo en la capa
+// por-juego. Hace falta porque el diario anti-cierre apunta si una clave global
+// EXISTIA antes del ensayo: si el tuner creó EECycleSkip porque el usuario nunca
+// lo toco, restaurar "0" no es neutro — siembra una clave que pisa el default del
+// core y del GameDB. Borrar es la unica marcha atras honesta.
+// Solo puede borrar; no escribe. Esa asimetria es deliberada: el tuner ya tiene
+// setSpeedhackEECycleRate/Skip y setMTVU para escribir, y reducir esta superficie
+// a "quitar lo que puse" hace que un fallo de JNI no pueda corromper un valor.
+// s_settings_interface es la capa base en memoria que el core relee en ApplySettings.
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_izzy2lost_psx2_NativeApp_deleteGlobalSettingKey(JNIEnv* env, jclass,
+                                                         jstring p_section,
+                                                         jstring p_key)
+{
+    const std::string section = GetJavaString(env, p_section);
+    const std::string key = GetJavaString(env, p_key);
+    if (section.empty() || key.empty())
+        return JNI_FALSE;
+
+    if (!s_settings_interface.ContainsValue(section.c_str(), key.c_str()))
+        return JNI_TRUE; // ya estaba limpia: objetivo cumplido, sin tocar nada
+
+    s_settings_interface.DeleteValue(section.c_str(), key.c_str());
+    Console.WriteLn("Global settings: deleted INI key %s [%s]", key.c_str(), section.c_str());
+    if (VMManager::HasValidVM())
+        VMManager::ApplySettings();
+    return JNI_TRUE;
+}
+
+// Cenit 0.6.31 (Fase 1) — Fallas de audio como metrica, no como impresion.
+// Tres contadores acumulados de proceso: underflow (el stream se quedo sin datos y
+// rellenó con silencio), chunk descartado por overflow y entrada en timestretch.
+// Se leen en DELTA por ventana desde Java: lo absoluto no sirve porque un juego que
+// lleve diez minutos abierto ya tiene su historial. El sintonizador CPU/VU exige
+// "audio estable" para adoptar un candidato, y hasta ahora eso no era verificable:
+// los tres unicos sitios que detectan esos eventos estan detras de LOG_UNDERRUN, que
+// el core define a (void)0.
+// Devuelve un long[3] {silencio, descartes, stretch}, o null si el array no se puede
+// crear. En los dos casos Java interpreta "sin cifras" como "sin senal", nunca como
+// "audio perfecto" — la misma regla de Regla 3 que rige la muestra de carga.
+extern "C"
+JNIEXPORT jlongArray JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getAudioFaultStats(JNIEnv *env, jclass clazz) {
+    const u64 stats[3] = {
+        AudioStream::GetAudioSilenceEvents(),
+        AudioStream::GetAudioDroppedChunks(),
+        AudioStream::GetAudioStretchEvents(),
+    };
+    jlongArray result = env->NewLongArray(3);
+    if (result == nullptr)
+        return nullptr;
+    const jlong as_long[3] = {static_cast<jlong>(stats[0]), static_cast<jlong>(stats[1]),
+                              static_cast<jlong>(stats[2])};
+    env->SetLongArrayRegion(result, 0, 3, as_long);
+    if (env->ExceptionCheck())
+        return nullptr;
+    return result;
+}
+
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_resetAudioFaultStats(JNIEnv *env, jclass clazz) {
+    AudioStream::ResetAudioFaultStats();
 }
 
 extern "C"

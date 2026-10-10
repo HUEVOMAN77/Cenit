@@ -108,6 +108,20 @@ namespace mVUSuperblock
 	bool WasKilled();
 
 	// ------------------------------------------------------------------
+	// Fase 1 (0.6.31) — Que esta ocupado el motor de superbloques.
+	// El prompt impone un solo dueño por intervalo: mientras el tuner CPU/VU mide,
+	// el regidor se congela; la misma regla aplica al revés. Un superbloque en
+	// VERIFY cambia CUANTAS VECES entra el recompilador y cómo se cobra el paso
+	// (SbResolve alterna cadena normal / superbloque dentro de la misma ventana de
+	// 8 samples). Dejar que el tuner ensaye MTVU o CycleRate encima de esa
+	// alternación es medir dos cosas a la vez y no saber cuál ganó. Devuelve true
+	// SOLO si hay candidatos en VERIFY; TRUSTED no cuenta (su camino ya no se
+	// alterna: despacha directo a la variante) y un hueco libre tampoco.
+	// s_live y SbState son internos al .cpp, así que la consulta vive allí.
+	// ------------------------------------------------------------------
+	bool Validating();
+
+	// ------------------------------------------------------------------
 	// Política — constantes de elegibilidad (Fase 2) y validación (Replay).
 	// Ajustadas para que un falso positivo de hotness cueste una
 	// compilación, no la corrección: la corrección la decide el replay.

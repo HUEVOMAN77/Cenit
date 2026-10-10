@@ -96,6 +96,10 @@ SmallString s_capture_line;
 SmallString s_gpu_usage_line;
 SmallString s_mtvu_sync_line; // Cenit 0.6.13: espera EE->VU1 visible en el HUD
 SmallString s_cenit_load_line; // Cenit 0.6.30: veredicto del clasificador de carga
+// Cenit 0.6.31 (Fase 1): estado del sintonizador CPU/VU. Dos lineas porque el
+// prompt pide siete campos y uno solo de ellos ya es una frase.
+SmallString s_cenit_tuner_line;
+SmallString s_cenit_tuner_line2;
 // Cenit 0.6.15 (Fase 1 sonda de trazas VU): solo se dibuja con la sonda ON.
 SmallString s_vu_probe_line;
 // Cenit 0.6.21 (motor de superbloques VU): solo se dibuja con el motor ON.
@@ -732,6 +736,74 @@ __ri void ImGuiManager::DrawPerformanceOverlay(float& position_y, float scale, f
 								state_str, conf, gpu, ee, action_str);
 						}
 						DRAW_LINE(osd_font, font_size, s_cenit_load_line.c_str(), white_color);
+					}
+				}
+
+				// Cenit 0.6.31 (Fase 1) — Estado del sintonizador CPU/VU.
+				// El prompt lo pide textualmente: TUNER / STATE / PROFILE / GAIN /
+				// FPS antes->despues / FRAME P50-P95 / THERMAL. Y la razon no es
+				// decorativa: "AUTO_SAFE es seguro" no se puede auditar desde el sofa
+				// si no se ve en que estado esta en cada instante y que gano o perdio.
+				//
+				// Se pinta SOLO si state >= 0. Con el tuner en OFF tambien se pinta
+				// (OFF es un estado, no una ausencia): ocultarlo haria que "apagado" y
+				// "sin datos" se vieran igual, y son dos cosas distintas que el usuario
+				// necesita distinguir.
+				//
+				// Los numeros llegan escalados a entero desde Java (fps x100, frame
+				// time x10, ganancia x1000) y con -1 como "no medido". El -1 se pinta
+				// como "-", nunca como 0: un 0,00 fps en el HUD es un numero inventado,
+				// y ese es exactamente el tipo de mentira que el contrato de
+				// CenitTelemetry esta escrito para impedir.
+				{
+					const CenitTelemetry::TunerStatus& ts = CenitTelemetry::g_tuner_status;
+					const int state = ts.state.load(std::memory_order_relaxed);
+					if (state >= 0)
+					{
+						const int mode = ts.mode.load(std::memory_order_relaxed);
+						const int gain = ts.gain_permille.load(std::memory_order_relaxed);
+						const int fb = ts.fps_before_x100.load(std::memory_order_relaxed);
+						const int fa = ts.fps_after_x100.load(std::memory_order_relaxed);
+						const int p50 = ts.p50_deci_ms.load(std::memory_order_relaxed);
+						const int p95 = ts.p95_deci_ms.load(std::memory_order_relaxed);
+						const int therm = ts.thermal_status.load(std::memory_order_relaxed);
+						const unsigned long long prof = ts.profile_hash.load(std::memory_order_relaxed);
+
+						// Diccionario CpuVUTuner.ST_* (0..11). Fuera de rango se pinta
+						// STATE_?? en vez del nombre vecino: si Java agrega un estado y
+						// esta tabla no lo sigue, el HUD tiene que gritar la desalineacion,
+						// no mostrar "IDLE" mientras el tuner esta adoptando.
+						static constexpr const char* kTunerStates[] = {
+							"OFF", "MANUAL", "IDLE", "LEARNING", "MEASURING_BASELINE",
+							"MEASURING_CANDIDATE", "VERIFYING_ADOPTION", "ADOPTED",
+							"REJECTED", "SUSPENDED", "POST_VERIFY", "RECOVERED"};
+						// kTunerModes[]: el TEXTO de cada modo tiene que coincidir con
+						// CpuVUTuner.modeName(), no solo el orden. Si el HUD dijera
+						// "AUTO_noRS" y el log "AUTO_SAFE_sinRS", el usuario cruzaria
+						// dos nombres distintos contra la misma linea y el reporte de
+						// evidencia saldria con dos modos que no existen. Verificado por
+						// /tmp/jnidict.py en cada version.
+						static constexpr const char* kTunerModes[] = {
+							"OFF", "MANUAL", "AUTO_SAFE", "AUTO_MTVU", "AUTO_SAFE_sinRS"};
+						const char* state_str = (state < 12) ? kTunerStates[state] : "STATE_??";
+						const char* mode_str = (mode >= 0 && mode < 5) ? kTunerModes[mode] : "MODE_??";
+
+						s_cenit_tuner_line.format("TUNER:{} STATE:{} GAIN:{:+.1f}% PROFILE:{}",
+							mode_str, state_str, static_cast<double>(gain) / 10.0,
+							prof != 0ULL ? fmt::format("{:08x}", static_cast<unsigned int>(prof >> 32))
+							              : std::string("sin-id"));
+						DRAW_LINE(osd_font, font_size, s_cenit_tuner_line.c_str(), white_color);
+
+						// Segunda linea: la evidencia, no la etiqueta. FPS antes/despues
+						// son las MEDIANAS de las ventanas alternadas A/B de este candidato;
+						// si aun no hay ambas, "-".
+						s_cenit_tuner_line2.format("FPS:{}->{} FRAME:P50{} P95{} THERMAL:{}",
+							fb >= 0 ? fmt::format("{:.1f}", static_cast<double>(fb) / 100.0) : std::string("-"),
+							fa >= 0 ? fmt::format("{:.1f}", static_cast<double>(fa) / 100.0) : std::string("-"),
+							p50 >= 0 ? fmt::format("{:.1f}ms", static_cast<double>(p50) / 10.0) : std::string("-"),
+							p95 >= 0 ? fmt::format("{:.1f}ms", static_cast<double>(p95) / 10.0) : std::string("-"),
+							therm >= 0 ? fmt::format("{}", therm) : std::string("-"));
+						DRAW_LINE(osd_font, font_size, s_cenit_tuner_line2.c_str(), white_color);
 					}
 				}
 #endif
