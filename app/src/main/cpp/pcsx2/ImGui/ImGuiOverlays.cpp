@@ -676,14 +676,19 @@ __ri void ImGuiManager::DrawPerformanceOverlay(float& position_y, float scale, f
 				// motor se auto-apagó por divergencias (por sesión); se pinta
 				// aunque el config siga pidiendo ON, porque effective=false lo
 				// ocultaría y el usuario necesita ver POR qué se fue solo.
+				// Cenit 0.6.32 (Fase 2): la linea la DICE LA MAQUINA, no el HUD.
+				// Antes se pintaban acumulados del proceso (bld/conf/match/div) y con
+				// ellos un "match 4000" junto a un candidato de 3 pares hacia parecer
+				// que habia evidencia donde no la hay. HudSummary emite la etiqueta de
+				// estado del candidato mas adelantado con SUS pares y SUS ventanas
+				// (VU-SB: OFF/VALIDATE/SHADOW/VALIDATED/TRUSTED/...); el acumulado
+				// completo sigue en logs/vu_superblock.txt.
 				if (mVUSuperblock::IsEnabled() || mVUSuperblock::WasKilled())
 				{
-					const auto& sb = mVUSuperblock::g_stats[1];
-					s_vu_sb_line.format("VUSB: bld {} conf {} match {} div {} kill {}",
-						static_cast<unsigned long long>(sb.built.load(std::memory_order::relaxed)),
-						static_cast<unsigned long long>(sb.promoted.load(std::memory_order::relaxed)),
-						static_cast<unsigned long long>(sb.matched.load(std::memory_order::relaxed)),
-						static_cast<unsigned long long>(sb.diverged.load(std::memory_order::relaxed)),
+					char sb_hud[192];
+					sb_hud[0] = '\0';
+					mVUSuperblock::HudSummary(sb_hud, static_cast<u32>(sizeof(sb_hud)));
+					s_vu_sb_line.format("{} kill {}", sb_hud,
 						mVUSuperblock::WasKilled() ? 1u : 0u);
 					DRAW_LINE(osd_font, font_size, s_vu_sb_line.c_str(), white_color);
 				}

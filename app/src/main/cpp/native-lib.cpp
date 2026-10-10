@@ -2244,6 +2244,15 @@ Java_com_izzy2lost_psx2_NativeApp_setCenitTunerStatus(JNIEnv *env, jclass clazz,
                                        static_cast<int>(p95DeciMs),
                                        static_cast<int>(thermalStatus),
                                        static_cast<unsigned long long>(profileHash));
+#ifdef __aarch64__
+    // Cenit 0.6.32 (Fase 2) — el MISMO hash de identidad juego+dispositivo que
+    // pinta el HUD del sintonizador es el que la maquina de superbloques mete en
+    // la identidad de cada candidato, porque el FNV-1a lo construye Java y el
+    // C++ no lo recalcula (regla de la Fase 1: identidad completa o no se
+    // adopta). Con 0 (sin juego/perfil) la identidad queda incompleta y la
+    // maquina no promociona nada: se reenvia tal cual, no se rellena.
+    mVUSuperblock::SetProfileHash(static_cast<unsigned long long>(profileHash));
+#endif
 }
 
 // Borra el estado del sintonizador. Lo llama el regidor al arrancar y al cerrar,

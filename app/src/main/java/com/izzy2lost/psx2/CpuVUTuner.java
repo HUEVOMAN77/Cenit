@@ -339,6 +339,16 @@ final class CpuVUTuner {
              GameLoadClassifier.Verdict verdict, int thermalStatus, boolean behind,
              boolean atFloor, boolean metricsAlive, boolean turbo, boolean settling,
              boolean thermal, boolean superblockBusy) {
+        // Cenit 0.6.32 (Fase 2): la identidad juego+telefono se calcula aqui, en
+        // cabecera, sea cual sea el modo — incluso con el sintonizador apagado o
+        // en manual. publish() reenvia ese hash al motor de superbloques VU1, que
+        // lo mete en la identidad de cada candidato (Machine::IdentityComplete).
+        // Sin esto, un usuario con el tuner en OFF tendria candidatos con
+        // identidad incompleta para siempre y la maquina jamas promocionaria nada:
+        // vender como "no aplica" algo que nunca se dejo medir. identityFor esta
+        // memoizado por URI, asi que el coste es una lectura por juego.
+        identityFor(uri);
+
         final int mode = modeOf(prefs);
         if (mode == MODE_OFF || mode == MODE_MANUAL) {
             if (mPhase != PH_NONE) abort("el modo paso a " + modeName(mode));
