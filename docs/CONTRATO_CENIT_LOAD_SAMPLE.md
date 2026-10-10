@@ -1,4 +1,4 @@
-# Cenit 0.6.30 — CONTRATO de la muestra unificada (Fase 0/1 del prompt maestro)
+# Cenit 0.6.30/0.6.31 — CONTRATO de la muestra unificada y del estado del sintonizador (Fases 0/1 del prompt maestro)
 
 Este archivo es la INTERFAZ entre el lado nativo y el lado Java. Ambos equipos la
 implementan LITERAL. Nadie cambia un índice, un tipo o un nombre sin actualizar
@@ -209,6 +209,87 @@ reconoce ambos: un perfil viejo se traduce, no se malinterpreta.
 ```
 UNKNOWN_LOAD, NO_BOTTLENECK, GPU_BOUND, CPU_BOUND, VU_BOUND, THERMAL_BOUND, INVALID_SAMPLE
 ```
+
+## Sintonizador CPU/VU: estado publicado por Java al HUD (0.6.31, Fase 1)
+
+Mismo patrón que `setCenitLoadVerdict`: **Java mide y publica, el C++ solo lee y
+pinta.** El nativo no escribe nunca `g_tuner_status`; si lo hiciera, habría dos dueños
+del mismo cuadro y el HUD podría mostrar un estado que nadie decidió.
+
+```java
+// NativeApp.java
+public static native void setCenitTunerStatus(int state, int mode, int gainPermille,
+    int fpsBeforeX100, int fpsAfterX100, int p50DeciMs, int p95DeciMs,
+    int thermalStatus, long profileHash);
+public static native void resetCenitTunerStatus(); // sin argumentos
+```
+
+```cpp
+// native-lib.cpp -> CenitTelemetry::PublishTunerStatus(...) / ResetTunerStatus()
+```
+
+El wrapper `safeSetCenitTunerStatus(...)` recibe `float p50Ms, float p95Ms` y `String
+profileId` y **convierte aquí, no en C++**, por tres motivos escritos en el código:
+la firma nativa queda puramente de enteros (nada de `std::string` entre TUs con hilos
+no sincronizados), no viaja un `double` por campo, y un `NaN` no puede llegar nunca a
+un `%f` del HUD. Las conversiones son:
+
+| campo | escala | centinela |
+|---|---|---|
+| `gainPermille` | milésimas de **ratio**: +5 % → `50`, +10 % → `100` | `0` = sin ganancia medida |
+| `fpsBeforeX100` / `fpsAfterX100` | fps × 100 | `-1` = "no medido" → el HUD pinta `-` |
+| `p50DeciMs` / `p95DeciMs` | ms × 10 | `-1` (también lo pone el wrapper si el float era NaN o < 0) |
+| `thermalStatus` | escalón de `PowerManager` | `-1` = sin señal, `-2` = la API no existe |
+| `profileHash` | FNV-1a 64 bits de la identidad | `0` = sin identidad → el HUD pinta `sin-id` |
+
+El `0` importa y por eso se filtra: `mBaseAgg` arranca en 0 y publicar "0.0 fps de
+base" daría al HUD un número inventado justo en los estados donde aún no se midió
+nada (`OFF`, `IDLE`, `LEARNING`). Es la Regla 3 aplicada al cuadro.
+
+### Diccionario de estados (`CpuVUTuner.ST_*` ↔ `kTunerStates[]`)
+
+Doce casillas, **escritas a mano en los dos lados** (nunca `ordinal()`), en este orden
+exacto:
+
+```
+0=OFF  1=MANUAL  2=IDLE  3=LEARNING  4=MEASURING_BASELINE  5=MEASURING_CANDIDATE
+6=VERIFYING_ADOPTION  7=ADOPTED  8=REJECTED  9=SUSPENDED  10=POST_VERIFY  11=RECOVERED
+```
+
+### Diccionario de modos (`CpuVUTuner.MODE_*` ↔ `kTunerModes[]` ↔ `arrays.xml`)
+
+```
+0=MODE_OFF              "OFF"            spinner: "Desactivado"
+1=MODE_MANUAL           "MANUAL"         spinner: "Manual (solo mira, no toca)"
+2=MODE_AUTO_SAFE        "AUTO_SAFE"      spinner: "Automático seguro (predeterminado)"
+3=MODE_AUTO_MTVU_ONLY   "AUTO_MTVU"      spinner: "Automático sólo MTVU"
+4=MODE_AUTO_NO_RATE_SKIP "AUTO_SAFE_sinRS" spinner: "Automático sin Rate/Skip"
+```
+
+**La posición del spinner ES el valor**: `arrays.xml` está ordenado por ordinal y el
+`onItemSelected` escribe su índice en `cpu_tuner_mode` (int). Agregar un modo es
+agregarlo al final de los tres sitios, en el mismo commit.
+
+`ResetTunerStatus()` lo llama el regidor en `start()` y en `stop()` (después de
+`tuner.onGameStop()`), igual que con el veredicto de carga: sin ese llamante, al
+volver al menú y entrar en otro disco quedaría pintado el `TUNER:` del juego anterior.
+
+### Quién verifica todo esto, sin teléfono
+
+`tools/arneses/baseline.sh` corre los cuatro arneses y dos verificadores estáticos:
+
+- `jnisig.py` — cada `native` de `NativeApp.java` tiene su `Java_...()` en el C++ con
+  el **mismo número de argumentos**. Un desajuste no rompe CI (los símbolos JNI se
+  resuelven por nombre en runtime): revienta en el teléfono como
+  `UnsatisfiedLinkError`. Este es el único sitio donde se ve antes.
+- `jnidict.py` — las tres tablas de arriba dicen lo mismo en Java, en el HUD C++ y en
+  `arrays.xml`, y los guardas de rango del C++ coinciden con el tamaño real de sus
+  tablas. En 0.6.31 cazó un desajuste real: el HUD decía `AUTO_noRS` mientras el log y
+  Ajustes decían `AUTO_SAFE_sinRS` para el mismo modo 4.
+- `Harness8` — compila y ejecuta `CpuVUTuner.java` y `TunerProfileStore.java` **del
+  repo**. Ninguno de los arneses anteriores los compilaba (`Harness6` sustituye el
+  tuner por un stub), así que hasta 0.6.31 "el tuner compila" no estaba cubierto por
+  ninguna línea base.
 
 ## Reglas de oro para ambos equipos
 
