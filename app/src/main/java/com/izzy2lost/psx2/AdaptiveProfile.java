@@ -66,6 +66,23 @@ final class AdaptiveProfile {
     /** FPS medios con los que terminó el último benchmark (0 = sin dato). */
     float tunerNow = 0f;
 
+    // ------------------------------------------------------------------
+    // 0.6.29: tally de veredictos del clasificador universal
+    // ------------------------------------------------------------------
+    /**
+     * Cuántos ticks de esta partida vio el clasificador cada cuello en ESTE
+     * juego, escrito como "gpu,emu,vu,unk". No decide nada: es la evidencia que
+     * falta para saber si los umbrales de GameLoadClassifier (85/35/80) están
+     * bien puestos en un Snapdragon 6 o 7. Sin este número, la respuesta es mi
+     * criterio; con él es una curva medida en teléfonos ajenos, que es como se
+     * han corregido ya tres cosas de este regidor.
+     *
+     * Se cuenta por JUEGO y no global porque un umbral que sirva para un juego
+     * GPU-bound a 60 Hz puede no servir para un entrelazado: lo que se quiere ver
+     * es la MEZCLA de veredictos que da cada disco.
+     */
+    int[] loadMix = new int[GameLoadClassifier.TALLY_SLOTS]; // GPU, EMULATION, VU_WAIT, UNKNOWN
+
     private final SharedPreferences prefs;
     private final String uri;
 
@@ -108,6 +125,17 @@ final class AdaptiveProfile {
                     case "tap": tunerAplicado = "1".equals(v); break;
                     case "tat": tunerAt = Long.parseLong(v); break;
                     case "tnow": tunerNow = Float.parseFloat(v); break;
+                    // 0.6.29: "gpu,emu,vu,unk". Se valida el tamaño: un perfil de
+                    // 0.6.28 no trae la clave y se queda en ceros, y uno roto a mano
+                    // no puede desplazar un veredicto a otra casilla.
+                    case "load": {
+                        final String[] parts = v.split(",");
+                        if (parts.length == loadMix.length) {
+                            for (int i = 0; i < parts.length; i++)
+                                loadMix[i] = Integer.parseInt(parts[i].trim());
+                        }
+                        break;
+                    }
                     default: break;
                 }
             } catch (NumberFormatException ignored) {
@@ -135,7 +163,9 @@ final class AdaptiveProfile {
                         + ";tad=" + tunerAdoptado
                         + ";tap=" + (tunerAplicado ? 1 : 0)
                         + ";tat=" + tunerAt
-                        + ";tnow=" + tunerNow).apply();
+                        + ";tnow=" + tunerNow
+                        + ";load=" + loadMix[0] + "," + loadMix[1] + ","
+                                + loadMix[2] + "," + loadMix[3]).apply();
     }
 
     /** Borrar el aprendizaje de un juego (desde sus Ajustes por juego). */
