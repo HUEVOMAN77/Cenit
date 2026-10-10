@@ -50,12 +50,20 @@
 //    pendings Q/P, anillos fmac/ialu/fdiv/efu, nextBlockCycles, respaldo
 //    VI, contadores XGKICK y memoria de datos VU1). Dos episodios con
 //    entrada idéntica (== la del candidato) forman un par: MATCH cuenta,
-//    DIVERGENCE invalida la variante (fallback permanente), la reporta y,
-//    a las kSbKills divergencias, apaga el motor por sesión. Sin kSbVerify-
-//    Pares MATCH la ventana se agota -> candidato "unproven": se libera el
-//    superbloque y el PC vuelve a la cadena normal para siempre. Con
+//    DIVERGENCE invalida la variante (fallback permanente) y la reporta.
+//    Quién decide «cuánto» es la máquina de estados por candidato
+//    (mVUSbLife.h), no este encabezado: MATCHes solo forman VALIDATED con
+//    kValidPairs pares limpios repartidos en más de una ventana, y VALIDATED
+//    solo se sirve como TRUSTED si además hay ganancia medida (≥
+//    kTrustedGainPermille sobre ≥ kMinGainPairs pares cronometrados) con P95
+//    no peor. Ventana agotada sin esa evidencia -> candidato archivado
+//    (INVALIDATED) o retirado sin ganancia (unprofitable): su hueco vuelve a
+//    ser reasignable y solo su PC queda quemado, no el proceso. El apagado de
+//    proceso es otra regla, dependiente del modo (kSbBreak* más abajo). Con
 //    TRUSTED el despacho usa la variante con solo un memcmp de entrada —
-//    cero hashing en régimen estable. El interpretador de VU1 NO puede ser
+//    cero hashing en régimen estable, salvo la comprobación puntal que
+//    reabre la ventana alternada cada kTrustedSpotPeriod despachos. El
+//    interpretador de VU1 NO puede ser
 //    oráculo: MTVU mantiene su imagen de registers desincronizada a
 //    propósito; el par normal/SB con entrada idéntica sí mide exactamente
 //    la equivalencia que se afirma.
@@ -110,7 +118,6 @@ namespace mVUSuperblock
 	bool WasKilled();
 
 	// ------------------------------------------------------------------
-	// ------------------------------------------------------------------
 	// Cenit 0.6.32 (Fase 2 del prompt directo) — Observadores que el TU de
 	// microVU REGISTRA en mVUinit. El motor no puede ver VURegs ni el ABI del
 	// compilador desde este TU (vive libre de vixl a proposito), y la maquina de
@@ -145,7 +152,9 @@ namespace mVUSuperblock
 	void SetProfileHash(u64 hash);
 	u64 ProfileHash();
 
- prompt impone un solo dueño por intervalo: mientras el tuner CPU/VU mide,
+	// ------------------------------------------------------------------
+	// Fase 1 (0.6.31) — Que esta ocupado el motor de superbloques.
+	// El prompt impone un solo dueño por intervalo: mientras el tuner CPU/VU mide,
 	// el regidor se congela; la misma regla aplica al revés. Un superbloque en
 	// VERIFY cambia CUANTAS VECES entra el recompilador y cómo se cobra el paso
 	// (SbResolve alterna cadena normal / superbloque dentro de la misma ventana de
@@ -185,7 +194,7 @@ namespace mVUSuperblock
 	// candidato malo no apaga a los sanos — lo que el prompt pide como «DEAD por
 	// candidato, no quemado de proceso» —, pero un motor que diverge en todas
 	// partes esta roto y eso si es del proceso.
-		// Quemado por PC (no por proceso): evita RECOMPILAR en bucle lo que la
+	// Quemado por PC (no por proceso): evita RECOMPILAR en bucle lo que la
 	// maquina ya rechazo o ya no puede financiar. Se quema (a) rechazo
 	// determinista de forma, (b) DEAD por divergencia, (c) medido sin ganancia y
 	// (d) presupuesto agotado — los dos ultimos con el matiz de que la maquina
@@ -335,9 +344,11 @@ namespace mVUSuperblock
 	// microVU-arm64.cpp, que es el TU que ve VURegs/VU1; el motor solo lo
 	// compara) y empareja con el episodio de la otra ruta que entro con la
 	// misma clave: MATCH cuenta, DIVERGENCE invalida la variante + fallback
-	// + reporte, kSbKills divergencias auto-apagan el motor por proceso,
-	// ventana agotada sin los pares -> candidato "unproven" (superbloque
-	// liberado). Solo VU1, solo con motor ON. Llamable SIEMPRE (el motor
+	// + reporte y alimenta la regla de apagado del proceso (kSbBreak*, que
+	// depende del modo). Ventana agotada sin la evidencia que la maquina pide
+	// -> INVALIDATED (archivado, hueco reasignable) o retirado por sin
+	// ganancia; nunca "unproven y ya esta". Solo VU1, solo con motor ON.
+	// Llamable SIEMPRE (el motor
 	// decide si hay episodio abierto).
 	// episodeNs: duracion REAL del episodio (el llamador la toma con
 	// Common::Timer, monotonia). Con las DOS patas de un par medidas se forma la

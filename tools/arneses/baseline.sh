@@ -24,6 +24,7 @@ CXX=${CXX:-g++}
 command -v "$CXX" >/dev/null 2>&1 || CXX=
 
 HERE=$(cd "$(dirname "$0")" && pwd)
+ROOT=$(cd "$HERE/../.." && pwd)
 SRC=$(cd "$HERE/../../app/src/main/java/com/izzy2lost/psx2" && pwd)
 CPP=$(cd "$HERE/../../app/src/main/cpp/pcsx2/arm64" && pwd)
 WORK=${WORK:-/tmp/cenit-arneses}
@@ -72,13 +73,121 @@ runh9() { # arnes C++ puro de host: la maquina de estados del superbloque
   echo "$OUT" | grep -q "Comprobaciones" || { echo "h9: el arnes no imprime recuento"; RC=1; }
 }
 
+runh10() { # arnes de SINTAXIS del area arm64: tres patas, y cada una cuenta.
+  #
+  # Pata A (autocontencion): cada cabecera del area se compila SOLA. CI no hace esto —
+  #   compila los .cpp, y un header que "casualmente" funciona porque otro ya trajo sus
+  #   tipos se cae en el telefono de otra manera o no, pero nunca lo ves.
+  # Pata B (contrato): un TU que fija con static_assert las leyes de promocion, los
+  #   ocho ordinales, la mascara de 14 regiones y las FIRMAS del puente. Las firmas se
+  #   comprueban asignando punteros de funcion: una firma distinta no se puede asignar,
+  #   asi que cambiar SbFinish/HudSummary sin cambiar al llamador se ve aqui, no 25
+  #   minutos despues en CI.
+  # Pata C (el TU del motor ENTERO en host): MvuSuperblock-arm64.cpp vive libre de vixl
+  #   y de arm_neon a proposito, asi que se puede analizar con g++ de x86 contra el
+  #   arbol REAL del repo, con el fmt real de 3rdparty (no hay shim: fmt esta en el
+  #   arbol, lo descubri al intentar el uno). El arnes nunca enlaza, y eso acota lo que
+  #   prueba: sintaxis y tipos del TU completo, no el contenido de las cadenas de
+  #   formato. El camino printf de Console (DevCon.WriteLn / Console.Error, que es el
+  #   que usa el motor) NO lleva atributo format en el repo, asi que quitar un argumento
+  #   aqui pasa verde — se probo, y por eso la cuenta especificador/argumento la hace
+  #   jnidict.py a mano sobre HudSummary y la auditoria de SbPrintf sigue siendo humana.
+  #   -std=gnu++20 y -msse4.1 son LOS FLAGS DEL CI, leidos del log del run #64 (clang++
+  #   del NDK compila pcsx2 con -std=gnu++20) y de common/VectorIntrin.h. Con -std=c++17
+  #   el arbol del repo no pasa (usa std::memory_order::relaxed con qualificador, que es
+  #   C++20): un standard elegido a ojo daria rojos que no son defectos nuestros.
+  #
+  # Nace de dos fallos reales de 0.6.32: una linea de prosa en espanol quedo FUERA de un
+  # comentario en MvuSuperblock-arm64.h, y despues se uso `i32`, que no existe en PCSX2
+  # (los alias son s32/u32). h5..h8 son Java y h9 solo mira MvuSbLife.h, asi que ni la
+  # cabecera publica del motor ni su .cpp los verificaba nadie en host; el CI los tardo
+  # 25 minutos y el segundo ni siquiera llego a verse (ninja paro antes). La pata C
+  # encontro un TERCERO que el CI aun no habia visto: dos memset que borraban el
+  # candidato a cero DESPUES de que Candidate pasara a contener la maquina, cuyos
+  # valores por defecto ya no son cero (Evidence::windows=1 y gainPermille=-1 «sin
+  # medir»). Borrado a bytes, el motor habria dicho «ganancia medida 0» de un candidato
+  # que nunca se midio. Y la mutacion de control encontro un defecto DEL VERIFICADOR:
+  # el filtro de rutas era [A-Za-z-]* y no aceptaba el «64» del nombre de archivo, o sea
+  # que dejaba pasar cualquier aviso del area. Un verde que no mira es peor que no medir.
+  local box=$WORK/h10
+  if [ -z "$CXX" ]; then
+    echo "h10: SIN COMPILAR - no hay g++ de host (CXX='$CXX'); las cabeceras del area arm64 NO se verificaron en esta corrida"
+    RC=1
+    return
+  fi
+  local FMT="$ROOT/app/src/main/cpp/3rdparty/fmt/include"
+  if [ ! -f "$FMT/fmt/base.h" ]; then
+    # Sin fmt no se pasa de common/Console.h, y por tanto NO se puede mirar el TU del
+    # motor. Un verde sin esta comprobacion seria el verde vacio del que este script
+    # existe para huir: se ruida y se deja RC=1.
+    echo "h10: SIN COMPROBACION DE TU - no hay fmt en $FMT; el arbol del motor no se analizo"
+    RC=1
+    return
+  fi
+  # -std=gnu++20 y -msse4.1: LO QUE EL CI USA. El log del run #64 dice que el clang++
+  # del NDK compila pcsx2 con -std=gnu++20, y common/VectorIntrin.h exige SSE 4.1.
+  # Usar otro standard daria un arnes que discute con el arbol real (con -std=c++17 el
+  # repo no pasa: usa std::memory_order::relaxed con qualificador), o sea un rojo que
+  # no es un defecto nuestro.
+  local STD=-std=gnu++20
+  local INC="-I$ROOT/app/src/main/cpp -I$ROOT/app/src/main/cpp/pcsx2 -I$ROOT/app/src/main/cpp/common -I$CPP -I$FMT"
+  rm -rf "$box"; mkdir -p "$box"
+  cp "$HERE/h10-src/hdr_tu.cpp" "$HERE/h10-src/selfcont_tu.cpp" "$box/" || { echo "h10: no se pudo traer el arnes"; RC=1; return; }
+  # Las cabeceras se traen DEL REPO en cada corrida (regla anti-copia-vieja de h5..h9) y
+  # la caja va PRIMERA en la ruta de includes, asi que las tres patas ven siempre el
+  # arbol vivo. La pata A ademas la usa aislada (-DH10_HEADER): lo que prueba es que el
+  # header funciona SOLO, sin que otro include le haya traido sus tipos antes.
+  local headers="MvuSbLife.h MvuSuperblock-arm64.h MvuTraceProbe-arm64.h"
+  for c in $headers; do
+    if [ ! -f "$CPP/$c" ]; then echo "h10: FALTA $c en el repo ($CPP)"; RC=1; return 1; fi
+    cp "$CPP/$c" "$box/" || { echo "h10: no se pudo copiar $c"; RC=1; return 1; }
+  done
+  local n=0
+  for c in $headers; do
+    if ! "$CXX" $STD -fsyntax-only -Wall -Wextra -I"$box" $INC -DH10_HEADER=$c "$box/selfcont_tu.cpp" 2>"$box/sc.err"; then
+      echo "h10: $c NO ES AUTOCONTENIDA (depende de que otro include aparezca antes)"
+      head -20 "$box/sc.err"; RC=1; return 1
+    fi
+    n=$((n+1))
+  done
+  if ! "$CXX" $STD -fsyntax-only -Wall -Wextra -I"$box" $INC "$box/hdr_tu.cpp" 2>"$box/contract.err"; then
+    echo "h10: FALLO DE CONTRATO EN CABECERAS arm64 (ordinales, leyes, mascara o firmas)"; head -30 "$box/contract.err"; RC=1; return 1
+  fi
+  local b s
+  b=$(grep -c "static_assert" "$box/hdr_tu.cpp")
+  s=$(grep -c "\*const s_fn" "$box/hdr_tu.cpp")
+
+  # --- pata C: el TU del motor completo ---
+  # El umbral es CERO diagnosticos propios, no solo RC=0: el arbol del repo (Console.h)
+  # trae avisos ajenos a esta fase, y filtrar por ruta del area arm64 evita tanto el
+  # falso rojo como tapar un aviso nuestro.
+  local eng="$CPP/MvuSuperblock-arm64.cpp"
+  if [ ! -f "$eng" ]; then echo "h10: FALTA MvuSuperblock-arm64.cpp en el repo"; RC=1; return 1; fi
+  if ! "$CXX" $STD -fsyntax-only -Wall -Wextra -msse4.1 -mpopcnt $INC "$eng" 2>"$box/tu.err"; then
+    echo "h10: EL TU DEL MOTOR NO COMPILA EN HOST"
+    grep -E "arm64/Mvu[A-Za-z0-9-]*\.(cpp|h):" "$box/tu.err" | head -20; RC=1; return 1
+  fi
+  local own
+  own=$(grep -cE "arm64/Mvu[A-Za-z0-9-]*\.(cpp|h):[0-9]+:[0-9]+: (error|warning)" "$box/tu.err")
+  if [ "$own" != "0" ]; then
+    echo "h10: el TU del motor compila pero con $own diagnosticos propios del area arm64"
+    grep -E "arm64/Mvu[A-Za-z0-9-]*\.(cpp|h):[0-9]+:[0-9]+: (error|warning)" "$box/tu.err" | head -12
+    RC=1; return 1
+  fi
+
+  # Recuento honesto: lo que el arnes AFIRMA. Cada static_assert es una comprobacion,
+  # cada puntero de funcion es una firma atada, cada cabecera que compilo sola es una
+  # autocontencion, y el TU del motor limpio es una mas.
+  echo "Harness10: $((n + b + s + 1)) Comprobaciones, 0 Fallos"
+}
+
 ONLY=${ARNES:-all}
 case "$ONLY" in
-  all|h5|h6|h7|h8|h9) ;;
+  all|h5|h6|h7|h8|h9|h10) ;;
   # Un nombre mal escrito tiene que ruidar: si no, "corrí los arneses" se convierte
   # en "no corrí ninguno y volvi con RC=0", que es exactamente el verde vacio que
   # este script existe para evitar.
-  *) echo "baseline.sh: ARNES='$ONLY' no existe (valores: all h5 h6 h7 h8 h9)"; exit 2 ;;
+  *) echo "baseline.sh: ARNES='$ONLY' no existe (valores: all h5 h6 h7 h8 h9 h10)"; exit 2 ;;
 esac
 [ "$ONLY" = all ] || [ "$ONLY" = h5 ] && run h5 Harness5 GameLoadClassifier CenitLoadSample LoadPolicy LoadTrend CenitTelemetry
 [ "$ONLY" = all ] || [ "$ONLY" = h6 ] && run h6 Harness6 DynamicResolutionGovernor GameLoadClassifier AdaptiveProfile CenitLoadSample LoadPolicy LoadTrend CenitTelemetry GameSerialUtils
@@ -93,6 +202,11 @@ esac
 # que se quiere verificar aqui es la LOGICA de estados/promocion, no la emision.
 # Por eso se compila con g++ de host contra el header real del repo.
 [ "$ONLY" = all ] || [ "$ONLY" = h9 ] && runh9
+# h10 (0.6.32): arnes de SINTAXIS de las cabeceras arm64. No mira logica — mira que
+# el area arm64 sea C++ valido por si sola y que las firmas del contrato no se hallan
+# movido. Es barato (segundos) y es justo lo que el CI de arm64 tardaba 25 minutos en
+# decirnos, asi que va en la linea base y no al final del ritual.
+[ "$ONLY" = all ] || [ "$ONLY" = h10 ] && runh10
 
 # Verificadores que no necesitan javac: las tablas que cruzan la frontera JNI.
 # jnisig: cada `native` de NativeApp.java tiene su Java_...() con el mismo numero de

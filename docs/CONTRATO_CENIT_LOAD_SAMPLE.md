@@ -276,7 +276,7 @@ volver al menú y entrar en otro disco quedaría pintado el `TUNER:` del juego a
 
 ### Quién verifica todo esto, sin teléfono
 
-`tools/arneses/baseline.sh` corre los cinco arneses (h5–h9) y dos verificadores estáticos:
+`tools/arneses/baseline.sh` corre los seis arneses (h5–h10) y dos verificadores estáticos:
 
 - `jnisig.py` — cada `native` de `NativeApp.java` tiene su `Java_...()` en el C++ con
   el **mismo número de argumentos**. Un desajuste no rompe CI (los símbolos JNI se
@@ -349,7 +349,35 @@ Reglas del HUD, codificadas en la propia etiqueta y no delegadas al llamador:
 
 ### Quién verifica esto, sin teléfono
 
-- `Harness9` (`tools/arneses/h9-src/`): 227 comprobaciones sobre la máquina.
+- `Harness9` (`tools/arneses/h9-src/`): 231 comprobaciones sobre la máquina.
+- `Harness10` (`tools/arneses/h10-src/`, **34 comprobaciones**, 1,1 s): **arnés de
+  sintaxis, no de lógica.** Tres patas:
+  - **A — autocontención:** cada cabecera del área arm64 (`MvuSbLife.h`,
+    `MvuSuperblock-arm64.h`, `MvuTraceProbe-arm64.h`) se compila **sola**; un header que
+    funciona solo porque otro ya trajo sus tipos se ve aquí, no en el CI.
+  - **B — contrato:** fija con `static_assert` lo que este contrato publica (los ocho
+    ordinales de `State`, `kValidPairs`/`kValidWindows`/`kMinGainPairs`/
+    `kTrustedGainPermille`/`kBudgetEpisodes`, la igualdad de `kRequiredRegions` con las
+    14 regiones) y las firmas del puente (`SbFinish(u32,u32,u64)`, `HudSummary(char*,u32)`,
+    `SetProfileHash(u64)`, `SbResolve(u32,const void*,s32)`) más el tipo atómico de
+    `g_exitMask`, `g_engineAbi`, `g_rollbackSurface` y `g_enabled`.
+  - **C — el TU del motor entero:** `MvuSuperblock-arm64.cpp` vive libre de vixl y de
+    `arm_neon` a propósito, así que se analiza completo con g++ de host contra el árbol
+    real del repo y el fmt real de `3rdparty`, con `-std=gnu++20 -msse4.1` (los flags que
+    el log del CI muestra que usa el clang++ del NDK). El umbral es **cero diagnósticos
+    propios del área**, no solo RC=0: `common/Console.h` del repo trae avisos ajenos.
+  Nace de dos fallos reales de 0.6.32 (prosa fuera de un comentario en la cabecera del
+  motor, y `i32`, que no existe en PCSX2); ambos los avisó el CI de arm64 **25 minutos**
+  después. Por mutación se comprobó que fallan las tres patas: cabecera rota → RC=1 con
+  la línea 148; `#include <cstdint>` fuera de `MvuSbLife.h` → RC=1; `DataMem` fuera de las
+  regiones exigidas, firma de `ProfileHash` cambiada o `g_engineAbi` como `u32` a secas →
+  RC=1; `i32` devuelto al TU → RC=1; volver al `memset` del candidato → RC=1 con
+  `-Wclass-memaccess`. La pata C encontró un defecto que el CI aún no había visto (dos
+  `memset` que borraban el candidato a cero cuando los valores por defecto de la máquina
+  ya no eran cero) y la mutación encontró además un defecto del propio verificador: el
+  filtro de rutas no aceptaba el `64` de los nombres de archivo.
+  Nada enlaza, así que una declaración sin definición **no** es un fallo de este arnés
+  (eso lo cubren `jnisig.py` y el enlace del APK).
 - `jnidict.py`: que la enum no tenga huecos ni cambie de orden, que ninguna
   etiqueta prometa velocidad, que `g_exitMask` declare exactamente
   `kRequiredRegions` y que **cada región declarada esté realmente hashkeada**

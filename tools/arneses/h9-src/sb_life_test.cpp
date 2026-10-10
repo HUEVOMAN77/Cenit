@@ -683,6 +683,19 @@ static void testSpotCheckReplay()
 	z.EndSpotCheck(true);
 	CK(z.trialLeg == false && z.state == State::Trusted, "cerrada, sigue Trusted sin prueba");
 
+	// Un Trusted que vive en SHADOW NO tiene vigilancia por replay: la sombra se
+	// comprueba con snapshot/restore dentro del episodio, y mientras ese mecanismo
+	// no exista no se finge uno reabriendo la ventana alternada (que en sombra
+	// seria servir la variante por la puerta de atras). El candidato se queda
+	// Trusted sin vigilancia, y el motor lo deja en la cadena normal.
+	Machine sh = shadowCandidate();
+	feed(sh, kValidPairs, 2);
+	sh.ReportGain(kTrustedGainPermille, 0, kMinGainPairs);
+	CK(sh.state == State::Trusted && sh.shadowMode, "trusted EN MODO SOMBRA (superficie + sin MTVU)");
+	CK(!sh.BeginSpotCheck(), "y BeginSpotCheck se niega: la vigilancia de la sombra no esta implementada");
+	CK(sh.state == State::Trusted && !sh.spotLeg, "la negativa no degrada al medido ni abre una ventana fantasma");
+	CK(std::strcmp(sh.HudLabel(), "VU-SB: TRUSTED") == 0, "el HUD sigue diciendo TRUSTED, no VALIDATE");
+
 	// El periodo vuelve a contar desde la vigilancia (si no, el spot-check se
 	// dispararia en cada despacho siguiente).
 	CKEQ(z.dispatches, 0u, "BeginSpotCheck pone los despachos a cero");

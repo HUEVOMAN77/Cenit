@@ -121,7 +121,7 @@ namespace mVUSuperblock
 		{
 			bool inUse = false; // hueco asignado (la MAQUINA decide si ocupa: life.Occupies())
 			u32 startPC = 0;	// bytes de microMem
-			alignas(16) u8 key[kKeyBytes]; // lpState de construccion, tal cual
+			alignas(16) u8 key[kKeyBytes] = {}; // lpState de construccion, tal cual
 
 			void* entry = nullptr; // entrada host del superbloque
 			u32 junctions = 0;
@@ -165,6 +165,18 @@ namespace mVUSuperblock
 		};
 
 		Candidate s_tab[kSbMaxVariants];
+
+		// Hueco vacio: la tabla existe pero nadie lo ocupo nunca. Se define aqui, y
+		// no como literal en cada reset, por una razon de semantica: la maquina trae
+		// valores por defecto que NO son cero (Evidence::windows vale 1 — la primera
+		// ventana — y Evidence::gainPermille vale -1, que significa «sin medir»; cero
+		// significaria «medido y sin ganancia»). Borrar el candidato con memset dejaba
+		// esos dos en 0 y el motor decia que ya habia medido una ganancia que nunca se
+		// midio. gcc lo avisaba (-Wclass-memaccess sobre un tipo no trivial) porque
+		// Candidate volvio no-trivial al meter la maquina dentro: el aviso ERA el
+		// defecto, y vivia tambien en AllocSlot.
+		const Candidate kFreshCandidate{};
+
 		u32 s_live = 0; // huecos asignados (inUse), incluido maquinas ya muertas
 
 		// PCs quemados: un bit por PC de entrada posible de VU1 (0x4000/8 = 2048,
@@ -245,7 +257,7 @@ namespace mVUSuperblock
 							continue; // ya lo tomo la pasada 0
 					}
 					const bool wasOccupying = c.inUse && c.life.Occupies();
-					std::memset(&c, 0, sizeof(Candidate));
+					c = kFreshCandidate;
 					c.inUse = true;
 					if (!wasOccupying)
 						s_live++;
@@ -268,8 +280,10 @@ namespace mVUSuperblock
 
 		void ResetTableForEnable()
 		{
+			// Asignacion, no memset: ver kFreshCandidate — la maquina tiene valores por
+			// defecto que no son cero y un borrado a bytes los mentira.
 			for (u32 i = 0; i < kSbMaxVariants; i++)
-				std::memset(&s_tab[i], 0, sizeof(Candidate));
+				s_tab[i] = kFreshCandidate;
 			s_live = 0;
 			std::memset(s_burned, 0, sizeof(s_burned));
 			s_burnedCount = 0;
@@ -572,10 +586,10 @@ namespace mVUSuperblock
 			const u64 p95N = PercentileNs(c.baseRing, c.ringFill, 95);
 			const u64 p95S = PercentileNs(c.sbRing, c.ringFill, 95);
 			const s64 deltaUs = ((s64)p95S - (s64)p95N) / 1000;
-			const i32 clamp = (deltaUs > 1000000) ? 1000000 : (deltaUs < -1000000 ? -1000000 : (i32)deltaUs);
+			const s32 clamp = (deltaUs > 1000000) ? 1000000 : (deltaUs < -1000000 ? -1000000 : (s32)deltaUs);
 
 			const State before = c.life.state;
-			c.life.ReportGain((i32)gain, clamp, c.timedPairs);
+			c.life.ReportGain((s32)gain, clamp, c.timedPairs);
 			DevCon.WriteLn(Color_Yellow, "Cenit superblock: PC=%04x ganancia medida %+d.%u%% "
 				"(n=%u pares, P95 %+d us) -> %s.",
 				c.startPC, (int)(gain / 10), (unsigned)(gain < 0 ? -((-gain) % 10) : gain % 10),
