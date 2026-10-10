@@ -38,6 +38,14 @@
 #include "common/Timer.h"
 #ifdef __ANDROID__
 #include "AndroidDeviceDetection.h"
+// Cenit 0.6.30 (Fase 1.8): telemetría del clasificador de carga. Va fuera del
+// guard ARCH_ARM64 a propósito: el clasificador corre en el hilo de la UI de
+// Android y lee el snapshot del core, ninguna de las dos cosas depende del juego
+// de instrucciones. Si se hubiera metido bajo ARCH_ARM64, una compilacion x86
+// perdida la linea del HUD sin mas aviso que un overlay mudo.
+// El almacen es un objeto inline en el header: no hay `extern` que declarar a
+// mano (y por eso no los hay: ver CenitTelemetry.h).
+#include "CenitTelemetry.h"
 #endif
 #if defined(ARCH_ARM64)
 // Cenit 0.6.15 (Fase 1): fila de telemetría de la sonda de trazas VU. El
@@ -87,6 +95,7 @@ std::vector<SmallString> s_software_thread_lines;
 SmallString s_capture_line;
 SmallString s_gpu_usage_line;
 SmallString s_mtvu_sync_line; // Cenit 0.6.13: espera EE->VU1 visible en el HUD
+SmallString s_cenit_load_line; // Cenit 0.6.30: veredicto del clasificador de carga
 // Cenit 0.6.15 (Fase 1 sonda de trazas VU): solo se dibuja con la sonda ON.
 SmallString s_vu_probe_line;
 // Cenit 0.6.21 (motor de superbloques VU): solo se dibuja con el motor ON.
@@ -673,6 +682,57 @@ __ri void ImGuiManager::DrawPerformanceOverlay(float& position_y, float scale, f
 						static_cast<unsigned long long>(sb.diverged.load(std::memory_order::relaxed)),
 						mVUSuperblock::WasKilled() ? 1u : 0u);
 					DRAW_LINE(osd_font, font_size, s_vu_sb_line.c_str(), white_color);
+				}
+
+#endif
+
+#ifdef __ANDROID__
+				// Cenit 0.6.30 (Fase 1.8) — Veredicto del clasificador de carga.
+				// Guardado __ANDROID__ y NO ARCH_ARM64: lo publica el hilo de la UI de
+				// Android leyendo el snapshot del core; no toca nada del recompiler, así
+				// que no tiene razón para depender del juego de instrucciones.
+				// Se pinta solo si hay veredicto (confidence_pct >= 0): antes del primer
+				// tick del governor el cuadro estaria mostrando ceros disfrazados de
+				// medicion, que es peor que un overlay vacio.
+				{
+					const CenitTelemetry::LoadVerdict& lv = CenitTelemetry::g_load_verdict;
+					const int conf = lv.confidence_pct.load(std::memory_order_relaxed);
+					if (conf >= 0)
+					{
+						const int state = lv.state.load(std::memory_order_relaxed);
+						const int action = lv.action.load(std::memory_order_relaxed);
+						const double gpu = lv.gpu_pct.load(std::memory_order_relaxed);
+						const double ee = lv.ee_pct.load(std::memory_order_relaxed);
+						const int therm = lv.thermal_status.load(std::memory_order_relaxed);
+
+						// Diccionario de estados: 0=UNKNOWN, 1=NO_BOTTLENECK, 2=GPU_BOUND,
+						// 3=CPU_BOUND, 4=VU_BOUND, 5=THERMAL_BOUND, 6=INVALID_SAMPLE.
+						// Un valor fuera de rango se pinta UNKNOWN_?? en vez del nombre de
+						// otro estado: si Java agrega un estado y este switch no lo sigue,
+						// el HUD tiene que gritar la desalineación, no inventar.
+						static constexpr const char* kStates[] = {"UNKNOWN", "NO_BOTTLENECK",
+							"GPU_BOUND", "CPU_BOUND", "VU_BOUND", "THERMAL_BOUND", "INVALID_SAMPLE"};
+						const char* state_str = (state >= 0 && state < 7) ? kStates[state] : "UNKNOWN_??";
+						static constexpr const char* kActions[] = {"HOLD", "SCALE_DOWN",
+							"BLOCK_DROP", "WAIT_EVID"};
+						const char* action_str = (action >= 0 && action < 4) ? kActions[action] : "HOLD_??";
+
+						// El termico es el numero crudo de PowerManager (0..6), y -1 se pinta
+						// como "-" porque un "-1" suelto en un log se lee como temperatura
+						// negativa. Ver THERMAL_BOUND en el clasificador: sin este numero no
+						// se puede auditar por que el regidor se nego a recortar.
+						if (therm >= 0)
+						{
+							s_cenit_load_line.format("LOAD: {} CONF: {}% GPU: {:.0f}% EMU: {:.0f}% ACTION: {} THERM:{}",
+								state_str, conf, gpu, ee, action_str, therm);
+						}
+						else
+						{
+							s_cenit_load_line.format("LOAD: {} CONF: {}% GPU: {:.0f}% EMU: {:.0f}% ACTION: {} THERM:-",
+								state_str, conf, gpu, ee, action_str);
+						}
+						DRAW_LINE(osd_font, font_size, s_cenit_load_line.c_str(), white_color);
+					}
 				}
 #endif
 

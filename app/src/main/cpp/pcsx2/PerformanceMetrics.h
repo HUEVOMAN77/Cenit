@@ -132,6 +132,34 @@ namespace PerformanceMetrics
 	const FrameTimeHistory& GetFrameTimeHistory();
 	u32 GetFrameTimeHistoryPos();
 
+	/// Cenit 0.6.30 (contrato CenitLoadSample): presents de la ventana CERRADA
+	/// (la misma que produjó s_gpu_usage y s_fps), NO el contador vivo de la
+	/// ventana que está corriendo ahora — ese se pone a 0 al cerrar, así que
+	/// leerlo desde JNI después de un Update() sería la ventana siguiente.
+	/// Es lo único que puede distinguir "GPU realmente holgada" de "el driver no
+	/// reporta tiempo de GPU", y por eso se expone el CRUDO, no un bool derivado.
+	u32 GetPresentsInWindow();
+
+	/// Cenit 0.6.30 (contrato CenitLoadSample): segundos reales de la última
+	/// ventana cerrada. El clasificador necesita saber si la ventana fue
+	/// completa o un Update() recortado, porque un denominador chico infla o
+	/// anula los porcentajes.
+	float GetLastWindowSeconds();
+
+	/// Cenit 0.6.30 (contrato CenitLoadSample, Regla 3): si la lectura de EE de la
+	/// última ventana tiene denominador valido (hilo EE vivo, ticks_delta > 0 y
+	/// GetThreadTicksPerSecond() > 0). NO se deriva de "EE% > 0": eso confundiria
+	/// metrica invalida con EE ocioso. Se calcula en el mismo punto donde se
+	/// calcula s_cpu_thread_usage, y se limpia junto con ella en Clear().
+	bool GetEEThreadMetricValid();
+
+	/// Cenit 0.6.30 (contrato CenitLoadSample): secuencia de ventana. Se
+	/// incrementa al FINAL de Update() (donde se limpian los contadores de
+	/// ventana, ~L385-387). Sirve para detectar si el snapshot es de un
+	/// Update() posterior al último ResetStatistics/Clear (arranque de VM,
+	/// cambio de juego).
+	u64 GetWindowSequence();
+
 	struct SavedMetrics
 	{
 		float num_samples;

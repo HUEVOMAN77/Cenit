@@ -4,6 +4,7 @@
 #include <chrono>
 #include <vector>
 #include <cmath>
+#include <atomic>
 
 #include "common/Timer.h"
 #include "common/Threading.h"
@@ -21,6 +22,35 @@ namespace PerformanceMetrics
 	static const float UPDATE_INTERVAL = 0.5f;
 
 	static float s_fps = 0.0f;
+	// Cenit 0.6.30 (contrato CenitLoadSample): segundos reales de la última
+	// ventana cerrada. El clasificador necesita saber si la ventana fue
+	// completa o un Update() recortado, porque un denominador chico infla o
+	// anula los porcentajes.
+	static float s_last_window_seconds = 0.0f;
+	// Cenit 0.6.30 (contrato CenitLoadSample): presents de la ventana CERRADA.
+	// Ojo con el off-by-one temporal que esta línea evita:
+	// s_presents_since_last_update se pone a 0 AL CERRAR la ventana (abajo), así
+	// que leerlo desde JNI después de un Update() devuelve la ventana que RECIÉN
+	// EMPIEZA, no la que produjó s_gpu_usage. Con ese error, GPU_METRIC_VALID
+	// habría sido casi siempre FALSO (la ventana recién abierta suele tener 0 o
+	// 1 presents) y el clasificador se habría pasado la partida entera en
+	// UNKNOWN_LOAD — el fallo conservador, pero igualmente ciego. Se guarda el
+	// valor de la ventana medida junto con s_fps y s_last_window_seconds, que son
+	// del mismo instante: las tres magnitudes tienen que describir el MISMO
+	// intervalo o el snapshot pierde su razón de existir.
+	static u32 s_presents_last_window = 0;
+	// Cenit 0.6.30 (contrato CenitLoadSample): secuencia de ventana. Se
+	// incrementa al FINAL de Update() (donde se limpian los contadores de
+	// ventana, ~L385-387). Sirve para detectar si el snapshot es de un
+	// Update() posterior al último ResetStatistics/Clear (arranque de VM,
+	// cambio de juego).
+	static std::atomic<u64> s_window_seq{0};
+	// Cenit 0.6.30 (contrato CenitLoadSample): flag de validez de la métrica
+	// de EE. Se pone donde se calcula s_cpu_thread_usage (L319) con la
+	// condición real: ticks_delta > 0 y GetThreadTicksPerSecond() > 0. NO se
+	// deriva de "EE% > 0" (eso confundiría métrica inválida con EE ocioso,
+	// que es justo lo que la Regla 3 del contrato prohíbe).
+	static bool s_ee_metric_valid = false;
 	static AvgFPS s_avg_vps;
 	static float s_internal_fps = 0.0f;
 	static float s_minimum_frame_time = 0.0f;
@@ -108,6 +138,13 @@ namespace PerformanceMetrics
 		Reset();
 
 		s_fps = 0.0f;
+		// Cenit 0.6.30: las tres magnitudes de ventana se limpian CON s_fps. Si
+		// no, un VM nuevo publicaría un snapshot con la ventana del juego anterior
+		// mientras los porcentajes ya son de cero: el clasificador vería
+		// "ventana completa y métrica válida" sobre datos que ya no existen.
+		s_last_window_seconds = 0.0f;
+		s_presents_last_window = 0;
+		s_ee_metric_valid = false;
 		s_avg_vps.ClearStats();
 		s_internal_fps = 0.0f;
 		s_minimum_frame_time = 0.0f;
@@ -228,6 +265,17 @@ namespace PerformanceMetrics
 		s_average_frame_time = std::exchange(s_average_frame_time_accumulator, 0.0f) / static_cast<float>(s_unskipped_frames_since_last_update);
 		s_maximum_frame_time = std::exchange(s_maximum_frame_time_accumulator, 0.0f);
 		s_fps = static_cast<float>(s_frames_since_last_update) / time;
+		// Cenit 0.6.30 (contrato CenitLoadSample): presents de la ventana que se
+		// está cerrando AHORA, guardados junto con s_fps y s_last_window_seconds.
+		// El contador vivo se pone a 0 al final de esta función, así que quien
+		// lea s_presents_since_last_update desde JNI después de un Update() ve la
+		// ventana siguiente, no esta.
+		s_presents_last_window = s_presents_since_last_update;
+		// Cenit 0.6.30 (contrato CenitLoadSample): guardar los segundos reales
+		// de esta ventana. El clasificador necesita saber si la ventana fue
+		// completa o un Update() recortado, porque un denominador chico infla
+		// o anula los porcentajes.
+		s_last_window_seconds = time;
 		s_avg_vps.UpdateAvgFPS(s_fps);
 		s_average_gpu_time = s_accumulated_gpu_time / static_cast<float>(s_unskipped_frames_since_last_update);
 		s_average_gpu_vs_invocations = static_cast<double>(s_accumulated_gpu_vs_invocations) / static_cast<double>(s_unskipped_frames_since_last_update);
@@ -317,6 +365,16 @@ namespace PerformanceMetrics
 		s_last_capture_time = capture_time;
 
 		s_cpu_thread_usage = static_cast<double>(cpu_delta) * pct_divider;
+		// Cenit 0.6.30 (contrato CenitLoadSample, Regla 3): validez de la metrica
+		// de EE, con la condicion REAL de denominador, no derivada del resultado.
+		// Derivarla de "EE% > 0" confundiria "metrica invalida" con "EE ocioso",
+		// que es exactamente lo que la Regla 3 prohibe distinguir. Las tres guardas:
+		//  - handle de hilo EE valido (antes de arrancar la VM no hay hilo que
+		//    medir, y GetCPUTime() sobre un handle nulo no es una medicion);
+		//  - ticks_delta > 0 (el divisor del porcentaje; con 0 el factor es inf);
+		//  - GetThreadTicksPerSecond() > 0 (no se puede convertir ticks a tiempo).
+		s_ee_metric_valid = static_cast<bool>(s_cpu_thread_handle) &&
+		                    (ticks_delta > 0) && (Threading::GetThreadTicksPerSecond() > 0);
 		s_gs_thread_usage = static_cast<double>(gs_delta) * pct_divider;
 		s_vu_thread_usage = static_cast<double>(vu_delta) * pct_divider;
 		s_capture_thread_usage = static_cast<double>(capture_delta) * pct_divider;
@@ -385,6 +443,13 @@ namespace PerformanceMetrics
 		s_frames_since_last_update = 0;
 		s_unskipped_frames_since_last_update = 0;
 		s_presents_since_last_update = 0;
+
+		// Cenit 0.6.30 (contrato CenitLoadSample): incrementar la secuencia de
+		// ventana al FINAL de Update(), donde se limpian los contadores de
+		// ventana. Sirve para detectar si el snapshot es de un Update()
+		// posterior al último ResetStatistics/Clear (arranque de VM, cambio de
+		// juego).
+		s_window_seq.fetch_add(1, std::memory_order_relaxed);
 
 		Host::OnPerformanceMetricsUpdated();
 	}
@@ -553,6 +618,26 @@ namespace PerformanceMetrics
 	u32 GetFrameTimeHistoryPos()
 	{
 		return s_frame_time_history_pos;
+	}
+
+	u32 GetPresentsInWindow()
+	{
+		return s_presents_last_window;
+	}
+
+	float GetLastWindowSeconds()
+	{
+		return s_last_window_seconds;
+	}
+
+	bool GetEEThreadMetricValid()
+	{
+		return s_ee_metric_valid;
+	}
+
+	u64 GetWindowSequence()
+	{
+		return s_window_seq.load(std::memory_order_relaxed);
 	}
 
 	void StartSavingMetrics(u32 seconds)

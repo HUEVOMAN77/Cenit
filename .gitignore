@@ -36,6 +36,10 @@ MEMCARD_ARCHITECTURE.md
 # But do NOT ignore README.md
 !README.md
 !PRIVACY_POLICY.md
+# Cenit 0.6.30: el contrato de la muestra es INTERFAZ entre el equipo nativo y el
+# de Java (y lo lee el arnés 7). Un .md ignorado no viaja en el repo, así que el
+# "único dueño de los números" se quedaría en mi disco: se excepciona a propósito.
+!docs/CONTRATO_CENIT_LOAD_SAMPLE.md
 !app/src/main/cpp/3rdparty/adrenotools/CMakeLists.txt
 !app/src/main/cpp/3rdparty/adrenotools/lib/linkernsbypass/CMakeLists.txt
 !app/src/main/cpp/3rdparty/adrenotools/src/hook/CMakeLists.txt

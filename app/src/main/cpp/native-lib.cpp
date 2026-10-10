@@ -15,6 +15,12 @@
 #include "CDVD/CDVD.h"
 #include "CDVD/ThreadedFileReader.h" // Cenit 0.6.28: ventana de streaming del ISO
 #include "PerformanceMetrics.h"
+// Cenit 0.6.30: el almacen del veredicto que Java publica para el HUD. Va aqui
+// y no solo en ImGuiOverlays.cpp porque este archivo es quien ESCRIBE (el JNI
+// setCenitLoadVerdict) y el otro solo lo lee. Es un header con estado inline:
+// incluirlo dos veces en dos unidades de traduccion es correcto, declararlo
+// "static" en una y "extern" en la otra revienta en el link.
+#include "CenitTelemetry.h"
 #include "GameList.h"
 #include "GameDatabase.h"
 #include "GS/GSPerfMon.h"
@@ -47,10 +53,12 @@
 #include <atomic>
 #include <algorithm>
 #include <cctype>
+#include <cmath>   // Cenit 0.6.30: std::ceil para el percentil nearest-rank
 #include <condition_variable>
 #include <deque>
 #include <functional>
 #include <future>
+#include <limits>  // Cenit 0.6.30: quiet_NaN para percentiles sin muestra
 #include <mutex>
 #ifdef __ANDROID__
 #include "SDL3/SDL.h"
@@ -2003,6 +2011,189 @@ extern "C"
 JNIEXPORT jfloat JNICALL
 Java_com_izzy2lost_psx2_NativeApp_getGPUAverageTime(JNIEnv *env, jclass clazz) {
     return (jfloat)PerformanceMetrics::GetGPUAverageTime();
+}
+
+// Cenit 0.6.30 — Muestra unificada de carga (contrato CenitLoadSample).
+// Un solo cruce JNI por tick en vez de doce lecturas sueltas: las doce lecturas
+// pueden saltarse el borde de la ventana de 0,5 s y mezclar dos intervalos. Un
+// solo array es un SNAPSHOT de un mismo instante de PerformanceMetrics::Update.
+// Eso ES el requisito "mismo intervalo temporal" del prompt.
+// Devuelve NULL solo si SetDoubleArrayRegion falla o hay excepción pendiente;
+// en cualquier otro caso devuelve la muestra con lo que hubiera.
+namespace {
+    // Reutilizado (evita alojar en cada tick; el governor llama una vez por segundo).
+    static jdouble s_cenit_sample[24];
+    // Cenit 0.6.30 (contrato CenitLoadSample): secuencia de la última ventana
+    // leída. Sin esto, Java leería dos veces la misma ventana y creería que son
+    // dos mediciones independientes.
+    static u64 s_last_read_seq = 0;
+}
+
+extern "C"
+JNIEXPORT jdoubleArray JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getCenitSample(JNIEnv *env, jclass clazz) {
+    // Campos 0-4: FPS, speed%, frametime avg/min/max (todos de la ventana de 0.5 s).
+    s_cenit_sample[0] = static_cast<jdouble>(PerformanceMetrics::GetFPS());
+    s_cenit_sample[1] = static_cast<jdouble>(PerformanceMetrics::GetSpeed());
+    s_cenit_sample[2] = static_cast<jdouble>(PerformanceMetrics::GetAverageFrameTime());
+    s_cenit_sample[3] = static_cast<jdouble>(PerformanceMetrics::GetMinimumFrameTime());
+    s_cenit_sample[4] = static_cast<jdouble>(PerformanceMetrics::GetMaximumFrameTime());
+
+    // Campos 5-6: P50/P95 del anillo de 150 presents (~2.5-5 s), NO la ventana.
+    // Percentil nearest-rank: ceil(p*n)-1 sobre muestras no nulas. Con n < 20
+    // escribe NaN (un P95 sobre 4 cuadros es ruido, y el clasificador trata NaN
+    // como "sin percentil", no como cuadro barato).
+    const auto& history = PerformanceMetrics::GetFrameTimeHistory();
+    const u32 hist_pos = PerformanceMetrics::GetFrameTimeHistoryPos();
+    const u32 hist_size = PerformanceMetrics::NUM_FRAME_TIME_SAMPLES;
+    float temp[150];
+    u32 n = 0;
+    for (u32 i = 0; i < hist_size; ++i) {
+        const u32 idx = (hist_pos + i) % hist_size;
+        const float ft = history[idx];
+        if (ft > 0.0f) {
+            temp[n++] = ft;
+        }
+    }
+    if (n < 20) {
+        // NaN no se reemplaza por 0: un P95 falso-bajo convence al clasificador
+        // de que no hay picos.
+        s_cenit_sample[5] = std::numeric_limits<jdouble>::quiet_NaN();
+        s_cenit_sample[6] = std::numeric_limits<jdouble>::quiet_NaN();
+    } else {
+        // Ordenación por inserción (n<=150, no hace falta qsort).
+        for (u32 i = 1; i < n; ++i) {
+            float key = temp[i];
+            u32 j = i;
+            while (j > 0 && temp[j - 1] > key) {
+                temp[j] = temp[j - 1];
+                --j;
+            }
+            temp[j] = key;
+        }
+        // nearest-rank: ceil(p*n)-1
+        const u32 p50_idx = static_cast<u32>(std::ceil(0.50 * n)) - 1;
+        const u32 p95_idx = static_cast<u32>(std::ceil(0.95 * n)) - 1;
+        s_cenit_sample[5] = static_cast<jdouble>(temp[p50_idx]);
+        s_cenit_sample[6] = static_cast<jdouble>(temp[p95_idx]);
+    }
+
+    // Campos 7-12: GPU%, GPU avg ms, EE%, EE avg ms, GS%, VU% (todos de la ventana).
+    // NaN se propaga tal cual (GetGPUAverageTime puede venir NaN con cero presents).
+    s_cenit_sample[7] = static_cast<jdouble>(PerformanceMetrics::GetGPUUsage());
+    s_cenit_sample[8] = static_cast<jdouble>(PerformanceMetrics::GetGPUAverageTime());
+    s_cenit_sample[9] = static_cast<jdouble>(PerformanceMetrics::GetCPUThreadUsage());
+    s_cenit_sample[10] = static_cast<jdouble>(PerformanceMetrics::GetCPUThreadAverageTime());
+    s_cenit_sample[11] = static_cast<jdouble>(PerformanceMetrics::GetGSThreadUsage());
+    s_cenit_sample[12] = static_cast<jdouble>(PerformanceMetrics::GetVUThreadUsage());
+
+    // Campos 13-15: MTVU sync stats (ms acumulados, llamadas, exec ms).
+    const auto mtvu = PerformanceMetrics::GetMtvuSyncStats();
+    s_cenit_sample[13] = static_cast<jdouble>(mtvu.wait_ms);
+    s_cenit_sample[14] = static_cast<jdouble>(mtvu.wait_calls);
+    s_cenit_sample[15] = static_cast<jdouble>(mtvu.exec_ms);
+
+    // Campo 16: Hz verticales del modo de vídeo (NO son fps del juego). Saneado
+    // a 0 si no está en (5,240): la frecuencia NTSC/PAL es editable por INI, y
+    // GetVerticalFrequency no puede devolver 0 pero sí basura.
+    const double vert_hz = GetVerticalFrequency();
+    s_cenit_sample[16] = (vert_hz > 5.0 && vert_hz < 240.0) ? vert_hz : 0.0;
+
+    // Campos 17-18: presents en la ventana y segundos de la ventana medida.
+    s_cenit_sample[17] = static_cast<jdouble>(PerformanceMetrics::GetPresentsInWindow());
+    s_cenit_sample[18] = static_cast<jdouble>(PerformanceMetrics::GetLastWindowSeconds());
+
+    // Campos 19-22: configuración efectiva (upscale, EECycleRate, EECycleSkip, MTVU).
+    // Reutiliza la MISMA lógica de los JNI vecinos getEffectiveUpscale, etc.
+    s_cenit_sample[19] = static_cast<jdouble>(EmuConfig.GS.UpscaleMultiplier);
+    if (VMManager::HasValidVM()) {
+        s_cenit_sample[20] = static_cast<jdouble>(EmuConfig.Speedhacks.EECycleRate);
+        s_cenit_sample[21] = static_cast<jdouble>(EmuConfig.Speedhacks.EECycleSkip);
+        s_cenit_sample[22] = EmuConfig.Speedhacks.vuThread ? 1.0 : 0.0;
+    } else {
+        int rate = 0;
+        s_settings_interface.GetIntValue("EmuCore/Speedhacks", "EECycleRate", &rate);
+        s_cenit_sample[20] = static_cast<jdouble>(rate);
+        int skip = 0;
+        s_settings_interface.GetIntValue("EmuCore/Speedhacks", "EECycleSkip", &skip);
+        s_cenit_sample[21] = static_cast<jdouble>(skip);
+        s_cenit_sample[22] = s_settings_interface.GetBoolValue("EmuCore/Speedhacks", "vuThread", false) ? 1.0 : 0.0;
+    }
+
+    // Campo 23: flags (calculados AQUÍ, no en Java).
+    // bit0 GPU_METRIC_VALID: presents de la ventana CERRADA > 0 (GetPresentsInWindow
+    // ya no devuelve el contador vivo de la ventana siguiente — ver PerformanceMetrics.h)
+    // bit1 EMU_METRIC_VALID: lo decide el core, con su denominador real (hilo EE
+    //   vivo + ticks_delta > 0 + GetThreadTicksPerSecond() > 0). No lo recomputo
+    //   aqui con "window_s > 0": esa version mas debil declararia valida la metrica
+    //   de un VM al que aun no se le paso SetCPUThread().
+    // bit2 WINDOW_COMPLETE: GetLastWindowSeconds() >= 0.25 * UPDATE_INTERVAL (0.5 s)
+    // bit3 SAMPLE_FRESH: seq != s_last_read_seq
+    u32 flags = 0;
+    const u32 presents = PerformanceMetrics::GetPresentsInWindow();
+    const float window_s = PerformanceMetrics::GetLastWindowSeconds();
+
+    if (presents > 0) {
+        flags |= 0x01; // GPU_METRIC_VALID
+    }
+    if (PerformanceMetrics::GetEEThreadMetricValid()) {
+        flags |= 0x02; // EMU_METRIC_VALID
+    }
+    if (window_s >= 0.25f * 0.5f) {
+        flags |= 0x04; // WINDOW_COMPLETE
+    }
+    const u64 current_seq = PerformanceMetrics::GetWindowSequence();
+    if (current_seq != s_last_read_seq) {
+        flags |= 0x08; // SAMPLE_FRESH
+        s_last_read_seq = current_seq;
+    }
+    s_cenit_sample[23] = static_cast<jdouble>(flags);
+
+    // Crear el array y copiar los datos.
+    jdoubleArray result = env->NewDoubleArray(24);
+    if (result == nullptr) {
+        return nullptr;
+    }
+    env->SetDoubleArrayRegion(result, 0, 24, s_cenit_sample);
+    if (env->ExceptionCheck()) {
+        return nullptr;
+    }
+    return result;
+}
+
+// Cenit 0.6.30 — Veredicto de carga publicado por Java para el HUD (Fase 1.8).
+// Seis valores: estado, confianza, accion, gpu%, ee% y el estado termico que
+// solo Java conoce (PowerManager, y por reflexion). El almacen vive en
+// CenitTelemetry.h como un unico objeto inline, NO en un namespace anonimo:
+// declararlos `static` aqui y `extern` en ImGuiOverlays.cpp compila y revienta
+// en el link (enlace interno). Es telemetria unidireccional Java->HUD, nunca
+// entrada de simulacion.
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setCenitLoadVerdict(JNIEnv *env, jclass clazz,
+                                                       jint stateOrdinal,
+                                                       jint confidencePct,
+                                                       jint actionCode,
+                                                       jdouble gpuPct,
+                                                       jdouble eePct,
+                                                       jint thermalStatus) {
+    CenitTelemetry::PublishLoadVerdict(static_cast<int>(stateOrdinal),
+                                       static_cast<int>(confidencePct),
+                                       static_cast<int>(actionCode),
+                                       static_cast<double>(gpuPct),
+                                       static_cast<double>(eePct),
+                                       static_cast<int>(thermalStatus));
+}
+
+// Cenit 0.6.30 — Borra el veredicto del HUD. Lo llama el regidor al arrancar y al
+// cerrar una partida, no el nucleo: el unico que sabe cuando "cambio la partida"
+// para el clasificador es el regidor. Sin esto, al volver al menu y entrar a otro
+// juego quedaria pintado el LOAD del disco anterior hasta el primer tick del nuevo,
+// que es exactamente el numero viejo que hace confiar en una decision ajena.
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_resetCenitLoadVerdict(JNIEnv *env, jclass clazz) {
+    CenitTelemetry::ResetLoadVerdict();
 }
 
 extern "C"
