@@ -1,279 +1,434 @@
 package com.izzy2lost.psx2;
 
 /**
- * Cenit 0.6.29 — Clasificador universal de carga de juego (invento nuestro).
+ * Cenit 0.6.30 — Clasificador universal de carga de juego.
  *
- * El encargo fue claro: no quiero una lista de nombres. Quiero que CUALQUIER
- * disco del catálogo de PS2 se juegue lo mejor posible en Snapdragon 6/7/8, y
- * que la decisión salga de medir, no de lo que yo sepa sobre ese juego. Esta
- * clase es ese mecanismo: no hay ni un serial, ni un título, ni una tabla.
+ * Clasifica el cuello de botella de un juego en ejecucion comparando el % de
+ * reloj real que tiene la GPU con el % que tiene el hilo EE. Universal: no
+ * depende del nombre del disco ni de saber a cuantos cuadros juega.
  *
- * **¿Qué problema real resuelve?** El regidor de resolución necesita saber si un
- * retraso es de PÍXELES (bajar resolución recupera cuadros) o de EMULACIÓN
- * (bajar resolución solo empeora la imagen gratis). Desde 0.6.4 esa decisión se
- * tomaba comparando getGPUUsage() contra 0,65 y 0,05 — y getGPUUsage() devuelve
- * PORCENTAJE (0..100), no fracción: con 60 Hz y GPU saturada, la fórmula del core
- * da 30 cuadros x 16,6 ms / (0,5 s x 10) = 99,6, y el propio HUD lo imprime con
- * "%". Las dos consecuencias, verificadas rama por rama en
- * DynamicResolutionGovernor.evaluate():
- *   - "GPU ociosa" (gpu < 0,65) solo se declaraba con la GPU por debajo del
- *     0,65% — o sea, parada. Un juego limitado por la CPU emulada con la GPU al
- *     8% (lo habitual en un menú o en un juego de escena simple) NO entraba ahí.
- *   - Como 8 >= 0,65, caía en la rama GPU_BOUND: slowTicks++ y BAJAR resolución.
- * Es decir, el regidor recortaba imagen en TODOS los casos con métrica viva,
- * incluidos aquellos en los que recortar no recupera ni un cuadro y solo estropea
- * la imagen. La etiqueta CPU_BOUND — la guarda que el diseño pedía — casi nunca
- * se emitía, y con ella tampoco la señal cpuBoundNow que el sintonizador CPU/VU de
- * 0.6.27 recibe ya calculada: por eso el benchmark por juego era tan raro de
- * disparar en un teléfono real. (0.6.13 creyó tocar este punto añadiendo
- * UNKNOWN_GPU para gpu <= 0,05; eso solo cubrió el valor exacto 0 — que es justo
- * el caso "driver sin tiempo de GPU" — y dejó el resto del rango igual de roto.)
+ * Por que esto puede ser universal sin tabla de nombres: la metrica del core
+ * NO es "cuanto tarda un cuadro", es cuanto tiempo REAL del reloj esta la GPU
+ * ocupada. La del hilo EE se calcula con el MISMO denominador de ventana, asi
+ * que las dos son fracciones del mismo reloj y se pueden comparar entre si.
  *
- * **Por qué esto puede ser universal sin tabla de nombres.** La métrica del core
- * NO es "cuánto tarda un cuadro", es cuánto tiempo REAL del reloj está la GPU
- * ocupada:
- *   s_gpu_usage = gpu_ms_acumulados_en_la_ventana / (ventana_s * 10)
- * o sea ms de GPU por cada 1000 ms de pared, en porcentaje. La del hilo EE se
- * calcula con el MISMO denominador (GetCPUTimeToPCTFactor sobre el delta de
- * tiempo de reloj de la ventana), así que las dos son fracciones del mismo reloj y
- * se pueden comparar entre sí. Eso es lo que hace la regla universal, y lo que
- * verificó el bug de 0.6.4: un "92%" significa "la GPU tiene lleno el 92% del
- * tiempo" en un juego a 60, en uno a 50 (PAL) y en un entrelazado que presenta
- * campo a campo — el número ya no depende de saber qué disco está delante ni de
- * adivinar su presupuesto. Con las dos etapas medidas, la que manda en una
- * canalización es la MÁS llena: si el cuadro llega tarde con la GPU al 95% y el EE
- * al 70%, el que no da más de sí es el sintetizador y recortar píxeles recupera
- * cuadros; al revés (EE 95%, GPU 70%) recortar solo estropea la imagen. Y si las
- * dos están por debajo de su llenado, ningún número de estos separa los casos:
- * UNKNOWN, que es la decisión barata de equivocar.
+ * Lo que NO usamos: comparar los ms por cuadro contra un "presupuesto" 1000/fps.
+ * GetVerticalFrequency() publica la frecuencia VERTICAL del modo de video, NUNCA
+ * 30, y PerformanceMetrics::Update se llama campo a campo en entrelazado. "Cuadro"
+ * en los ms de GPU y "cuadro" en 1000/fps no son la misma unidad para un juego
+ * que diseña a 30. El presupuesto se sigue IMPRIMIENDO en la evidencia, pero
+ * ninguna decision depende de el.
  *
- * **Lo que NO usamos, y por escrito para que no vuelva.** La tentación era
- * comparar los ms por cuadro contra un "presupuesto" 1000/fps. Se verificó contra
- * el core y hay dos trampas: (a) GetVerticalFrequency() publica la frecuencia
- * VERTICAL del modo de vídeo (59,94 / 59,83 progresivo / 50 / 49,76 / 60), NUNCA
- * 30, y PerformanceMetrics::Update se llama desde GSRenderer::VSync(field, ...) —
- * o sea campo a campo en entrelazado. "Cuadro" en los ms de GPU y "cuadro" en
- * 1000/fps no son la misma unidad para un juego que diseña a 30, así que la
- * comparación no está bien definida: se prestaría a declarar "píxeles" con un
- * número que no significa lo que parece; (b) el % de GPU y los ms de GPU salen del
- * MISMO acumulador (s_gpu_usage = acm/(ventana_s*10), s_average_gpu_time =
- * acm/presents), así que es matemáticamente imposible tener "% sin métrica"
- * (>0,5%) con ms altos: una rama que comparase ms "cuando falta el %" sería código
- * muerto que finge decidir. Y los ms además pueden llegar NaN — si en la ventana
- * de 0,5 s no hubo ni un present, el core divide acm/0 —, otra razón para no
- * gobernar con ellos.
- * El presupuesto se sigue IMPRIMIENDO en la evidencia, porque es un número que
- * ayuda a leer el log, pero ninguna decisión depende de él.
- *
- * Ninguna decisión de esta clase escribe ajustes ni toca el motor: CLASIFICA.
- * Quien actúa es el regidor (píxeles) y el sintonizador CPU/VU (emulación), con
- * sus propias guardas de reversibilidad de siempre.
+ * Ninguna decision de esta clase escribe ajustes ni toca el motor: CLASIFICA.
+ * Quien actua es el regidor (pixeles) y el sintonizador CPU/VU (emulacion).
  */
-final class GameLoadClassifier {
+public final class GameLoadClassifier {
 
     private GameLoadClassifier() {}
 
-    /** En qué cree el clasificador que está el cuello. */
-    enum Bottleneck {
-        /** GPU saturada: bajar resolución AYUDA. */
-        GPU,
-        /** EE trabajándose el cuadro con la GPU holgada: bajar resolución NO ayuda. */
-        EMULATION,
-        /** El EE bloqueado esperando al VU1 (MTVU puesto): hay que revisar el hilo. */
-        VU_WAIT,
-        /** Sin lecturas que autoricen a actuar, o contradictorias: no inventar. */
-        UNKNOWN;
+    /** Estados de carga del clasificador (Fase 1.2 del contrato). */
+    public enum LoadState {
+        /** Sin evidencia suficiente para clasificar. */
+        UNKNOWN_LOAD,
+        /** El juego va a tiempo, no hay cuello. */
+        NO_BOTTLENECK,
+        /** GPU saturada: bajar resolucion AYUDA. */
+        GPU_BOUND,
+        /** EE/GS trabajandose el cuadro con GPU holgada: bajar resolucion NO ayuda. */
+        CPU_BOUND,
+        /** EE bloqueado esperando al VU1 (MTVU puesto). */
+        VU_BOUND,
+        /** Throttle termico moderado o superior. */
+        THERMAL_BOUND,
+        /** Muestra invalida (null, longitud incorrecta, sin validez). */
+        INVALID_SAMPLE;
 
         /**
-         * Casilla del tally que guarda AdaptiveProfile.loadMix. Se escribe a mano
-         * (no ordinal()) porque el perfil persiste estos índices en sus prefs: si
-         * mañana se reordena la enum, un ordinal silencioso mezclaría los
-         * veredictos de partidas anteriores con los de ahora.
+         * Codigo para el HUD nativo, escrito A MANO y no con ordinal().
+         * Debe coincidir con el diccionario del contrato:
+         * {0=UNKNOWN,1=NO_BOTTLENECK,2=GPU_BOUND,3=CPU_BOUND,4=VU_BOUND,
+         *  5=THERMAL_BOUND,6=INVALID_SAMPLE}
+         *
+         * Por que no ordinal(): el numero cruza la frontera JNI y lo traduce un
+         * switch en C++ que esta en OTRO archivo y en OTRO lenguaje. Si manana
+         * alguien inserta un estado en el medio de esta enum, ordinal() cambia en
+         * silencio el significado de los numeros viejos y el HUD empieza a pintar
+         * "GPU_BOUND" donde el clasificador dijo THERMAL_BOUND: un numero equivale
+         * a una decision de recorte. Con el mapeo explicito, reordenar la enum no
+         * mueve ningun codigo, y agregar un estado sin agregarlo aqui se nota.
+         * Es el mismo motivo por el que AdaptiveProfile tampoco usa indices
+         * propios en su tally: ahi el numero vive dentro de las preferencias del
+         * telefono, entre versiones.
          */
-        int tallySlot() {
+        public int ordinalForHud() {
             switch (this) {
-                case GPU: return 0;
-                case EMULATION: return 1;
-                case VU_WAIT: return 2;
-                default: return 3;
+                case UNKNOWN_LOAD:   return 0;
+                case NO_BOTTLENECK:  return 1;
+                case GPU_BOUND:      return 2;
+                case CPU_BOUND:      return 3;
+                case VU_BOUND:       return 4;
+                case THERMAL_BOUND:  return 5;
+                case INVALID_SAMPLE: return 6;
+                default: return 0;
             }
         }
     }
 
-    /** Casillas de {@link Bottleneck#tallySlot()}: una por veredicto posible. */
-    static final int TALLY_SLOTS = 4;
+    /** Acciones permitidas segun la confianza. */
+    public enum Action {
+        /** No actuar, mantener estado actual. */
+        HOLD,
+        /** Permitir recorte de resolucion (GPU_BOUND con confianza suficiente). */
+        ALLOW_RESOLUTION_DROP,
+        /** Bloquear recorte de resolucion (CPU_BOUND, THERMAL_BOUND). */
+        BLOCK_RESOLUTION_DROP,
+        /** Esperar mas evidencia (INVALID_SAMPLE, UNKNOWN_LOAD). */
+        WAIT_FOR_EVIDENCE;
 
-    // ------------------------------------------------------------------
-    // Umbrales, todos en PORCENTAJE (0..100) porque así llega la métrica.
-    // Cada número lleva su porqué medible, no su gusto.
-    // ------------------------------------------------------------------
-
-    /** GPU por encima de esto con el juego atrasado: está ocupando casi todo el
-     *  reloj, recortar píxeles recupera cuadros. 85 y no 100 porque un teléfono
-     *  con vsync/present nunca llega al 100: el hueco es el propio present. */
-    static final float GPU_SATURATED_PCT = 85f;
-
-    /** GPU por debajo de esto con el juego atrasado: está holgada la mayor parte
-     *  del reloj, así que el retraso no puede ser de píxeles. 35 deja un margen
-     *  grande por debajo de "saturada" para no cambiar de opinión a cada muestra. */
-    static final float GPU_IDLE_PCT = 35f;
-
-    /** EE (hilo de emulación) por encima de esto: la CPU emulada es el cuello. */
-    static final float EE_BUSY_PCT = 80f;
-
-    /** La métrica de GPU "no existe todavía": driver que no reporta tiempo de GPU,
-     *  o GS recién abierto. Antes valía 0,05 porque se creía fracción. No es lo
-     *  mismo que "GPU ociosa": con 0 no se sabe nada, y eso va a UNKNOWN. */
-    static final float GPU_METRIC_MISSING_PCT = 0.5f;
-
-    // ------------------------------------------------------------------
-    // Lo que sigue NO entra en ninguna decisión: son números para leer el log.
-    // ------------------------------------------------------------------
-
-    /** Objetivo de cuadros por defecto si el GS aún no publica uno: 50, el
-     *  presupuesto MÁS holgado de los modos reales. Solo afecta al número que se
-     *  IMPRIME en la evidencia, nunca a la decisión (ver el bloque "Lo que NO
-     *  usamos" de arriba), así que no puede inclinar ningún veredicto. */
-    static final float FALLBACK_TARGET_FPS = 50f;
-
-    /**
-     * Clasifica con las lecturas del motor en la mano. Puro: no lee prefs, no
-     * escribe nada, no llama al nativo. Así se puede ejercitar en el arnés con
-     * números sintéticos de los casos que más importan (GPU-bound real, y
-     * emulación-cuello con GPU holgada).
-     *
-     * La firma NO lleva ms de GPU ni el objetivo de cuadros del juego: con ellos
-     * no se decide nada (ver el bloque "Lo que NO usamos" del encabezado) y poner
-     * un parámetro que no manda es exactamente cómo se cuela una regla mal
-     * definida. Esos dos números sí van a evidence(), que es donde aportan.
-     *
-     * @param speedPct     % de velocidad de emulación (100 = a tiempo).
-     * @param gpuUsagePct  uso de GPU EN PORCENTAJE de reloj real (getGPUUsage).
-     * @param eeUsagePct   uso del hilo EE en % (0 = sin métrica o EE parado).
-     * @param mtvuWaitMs   ms que el EE quedó bloqueado esperando al VU1.
-     * @param mtvuWaitCalls número de esas esperas en la ventana.
-     */
-    static Bottleneck classify(float speedPct, float gpuUsagePct, float eeUsagePct,
-                               float mtvuWaitMs, long mtvuWaitCalls) {
-        return classify(speedPct, gpuUsagePct, eeUsagePct, mtvuWaitMs, mtvuWaitCalls,
-                GPU_IDLE_PCT);
+        /**
+         * Codigo para el HUD nativo, escrito A MANO y no con ordinal(). Debe
+         * coincidir con el contrato:
+         * {0=HOLD,1=ALLOW_RESOLUTION_DROP,2=BLOCK_RESOLUTION_DROP,
+         *  3=WAIT_FOR_EVIDENCE}
+         *
+         * Lo mismo que LoadState.ordinalForHud(): este numero cruza la frontera
+         * JNI y lo traduce un switch en C++. Reordenar la enum con ordinal()
+         * cambiaria en silencio el significado de los numeros viejos.
+         */
+        public int codeForHud() {
+            switch (this) {
+                case HOLD: return 0;
+                case ALLOW_RESOLUTION_DROP: return 1;
+                case BLOCK_RESOLUTION_DROP: return 2;
+                case WAIT_FOR_EVIDENCE: return 3;
+                default: return 0;
+            }
+        }
     }
 
     /**
-     * Versión con el umbral de "GPU holgada" ajustado por evidencia aprendida.
-     * El regidor la usa cuando el perfil del juego ya demostró que el cuello es
-     * de emulación: SUBIR el umbral (no bajarlo) hace más fácil seguir
-     * declarándolo y por tanto seguir sosteniendo la escala, que es lo que esa
-     * evidencia debe comprar. Cenit 0.6.29: el governor hacía lo contrario —
-     * multiplicaba por 0,8, y así el aprendizaje de la partida anterior jugaba en
-     * contra del juego, recortándole píxeles otra vez. Se corrige la dirección;
-     * el factor (1,2) es el mismo que ya estaba escrito.
-     *
-     * Se expone separada para que el arnés pueda ejercitar las dos curvas (umbral
-     * por defecto y umbral con evidencia) sobre los mismos números.
+     * Veredicto del clasificador: estado, confianza, razon y accion permitida.
+     * Inmutable, para que el governor o MainActivity lo lean sin riesgo de carrera.
      */
-    static Bottleneck classify(float speedPct, float gpuUsagePct, float eeUsagePct,
-                               float mtvuWaitMs, long mtvuWaitCalls, float gpuIdlePct) {
-        // Sin juego delante o con la consola arrancando no hay nada que clasificar.
-        // Se escribe !(speedPct > 0f) y NO speedPct <= 0f a propósito: con NaN la
-        // segunda forma es FALSA y el juego pasaría entero por delante de las
-        // guardas, pudiendo acabar declarado "píxeles" sobre una lectura que no es
-        // una lectura. !(x > 0) captura NaN, 0 y negativos de un solo golpe.
-        if (!(speedPct > 0f)) return Bottleneck.UNKNOWN;
-        // A tiempo: no hay cuello que buscar. Devolver UNKNOWN (no "GPU") para que
-        // nadie recorte píxeles que no hacen falta.
-        if (speedPct >= 99.5f) return Bottleneck.UNKNOWN;
+    public static final class Verdict {
+        /** Estado de carga. */
+        public final LoadState state;
+        /** Confianza en el veredicto (0..100). */
+        public final int confidencePct;
+        /** Razon legible del veredicto. */
+        public final String reason;
+        /** Accion permitida segun la confianza. */
+        public final Action action;
 
-        // El VU1 primero: si el EE está BLOQUEADO esperándolo, el resto de las
-        // lecturas miente (el EE aparece poco ocupado porque no trabaja, espera;
-        // y la GPU baja porque no le llegan cuadros). Prioridad sobre el %.
-        if (mtvuWaitMs >= 10f && mtvuWaitCalls >= 30L) return Bottleneck.VU_WAIT;
-
-        // ¿La métrica de GPU existe? Con <= 0,5% de reloj real no se puede
-        // distinguir "parada" de "el driver no reporta" — y salen del mismo
-        // acumulador, así que los ms tampoco aportan. Aquí manda el EE si trae
-        // datos; si no, UNKNOWN: es exactamente la guarda que 0.6.13 pidió y no
-        // llegó a cubrir, y evita aprender cpuBound a partir de la nada.
-        if (gpuUsagePct <= GPU_METRIC_MISSING_PCT) {
-            if (eeUsagePct >= EE_BUSY_PCT) return Bottleneck.EMULATION;
-            return Bottleneck.UNKNOWN;
+        public Verdict(LoadState state, int confidencePct, String reason, Action action) {
+            this.state = state;
+            this.confidencePct = Math.max(0, Math.min(100, confidencePct));
+            this.reason = reason;
+            this.action = action;
         }
 
-        // Con métrica viva hay dos etapas medidas, cada una como fracción del MISMO
-        // reloj real y en la MISMA ventana de 0,5 s: la GPU y el hilo EE. El cuadro
-        // de PS2 se construye en el EE y se gasta en la GPU, y las dos etapas corren
-        // a la vez, así que el rendimiento del conjunto lo manda la etapa MAS
-        // OCUPADA — la otra todavía tiene holgura que nadie está usando. De ahí
-        // sale el criterio de la zona donde las dos están calientes: se compara
-        // cuál llena más el reloj y se le apunta a esa. No es una suma (sumar dos
-        // porcentajes de recursos distintos no da nada: "GPU 60% + EE 40% = 100%"
-        // sería decir que el teléfono está lleno cuando cada uno está a medias), es
-        // un máximo, y un máximo sí es la definición de cuello en una canalización.
-        final boolean gpuHot = gpuUsagePct >= GPU_SATURATED_PCT;
-        final boolean eeHot = eeUsagePct >= EE_BUSY_PCT;
+        /** Codigo de estado para el HUD nativo. */
+        public int stateOrdinal() { return state.ordinalForHud(); }
+
+        /** Codigo de accion para el HUD nativo. */
+        public int actionCode() { return action.codeForHud(); }
+    }
+
+    /**
+     * Clasifica la muestra con la politica dada y el estado termico.
+     * Puro: no lee prefs, no escribe nada, no llama al nativo.
+     *
+     * La escalera de decision, en este orden:
+     * 1. Muestra invalida → INVALID_SAMPLE, WAIT_FOR_EVIDENCE
+     * 2. Speed no real (NaN o <= 0) → INVALID_SAMPLE
+     * 3. Thermal >= 2 con retraso → THERMAL_BOUND, BLOCK_RESOLUTION_DROP
+     * 4. Speed >= 99,5 → NO_BOTTLENECK
+     * 5. VU_WAIT sostenido → VU_BOUND
+     * 6. GPU metrica ausente → CPU_BOUND (si EE caliente) o UNKNOWN_LOAD
+     * 7. Ambas calientes → la mas llena gana
+     * 8. Solo GPU caliente → GPU_BOUND; solo EE caliente → CPU_BOUND
+     * 9. GPU <= piso de holgura → CPU_BOUND
+     * 10. Zona intermedia → UNKNOWN_LOAD, HOLD
+     *
+     * @param s muestra del snapshot
+     * @param p politica con umbrales
+     * @param thermalStatus estado termico del sistema (0..4)
+     * @return veredicto con estado, confianza, razon y accion
+     */
+    public static Verdict classify(CenitLoadSample s, LoadPolicy p, int thermalStatus) {
+        return classify(s, p, thermalStatus, null);
+    }
+
+    /**
+     * Version con LoadTrend para VU_WAIT sostenido. Si trend es null, VU_WAIT
+     * se decide con la muestra actual (sin sostenimiento).
+     */
+    public static Verdict classify(CenitLoadSample s, LoadPolicy p, int thermalStatus,
+                                   LoadTrend trend) {
+        return gate(classifyRaw(s, p, thermalStatus, trend), p);
+    }
+
+    /**
+     * La escalera desnuda: decide estado, confianza y la ACCION QUE LA RAMA
+     * PEDIRIA. No aplica el umbral de confianza: eso lo hace gate(), y lo hace
+     * AQUI es la razon por la que existe gate() separado.
+     */
+    private static Verdict classifyRaw(CenitLoadSample s, LoadPolicy p, int thermalStatus,
+                                       LoadTrend trend) {
+        // 1. Muestra invalida
+        if (s == null || !s.isValid()) {
+            return new Verdict(LoadState.INVALID_SAMPLE, 0,
+                    s == null ? "muestra nula" : s.whyInvalid(),
+                    Action.WAIT_FOR_EVIDENCE);
+        }
+        if (!s.windowComplete()) {
+            return new Verdict(LoadState.INVALID_SAMPLE, 0, "ventana recortada",
+                    Action.WAIT_FOR_EVIDENCE);
+        }
+        if (!s.sampleFresh()) {
+            return new Verdict(LoadState.INVALID_SAMPLE, 0, "muestra no fresca",
+                    Action.WAIT_FOR_EVIDENCE);
+        }
+        if (!s.emuMetricValid() && !s.gpuMetricValid()) {
+            return new Verdict(LoadState.INVALID_SAMPLE, 0, "sin metricas validas",
+                    Action.WAIT_FOR_EVIDENCE);
+        }
+
+        // 2. Validar NaN en campos numéricos críticos
+        // NaN no es cero; toda comparación con NaN es falsa. Si algún campo clave
+        // es NaN, la muestra no es válida para clasificar.
+        if (Double.isNaN(s.fps()) || Double.isNaN(s.speedPct()) ||
+            Double.isNaN(s.gpuPct()) || Double.isNaN(s.eePct()) ||
+            Double.isNaN(s.mtvuWaitMs()) || Double.isNaN(s.mtvuWaitCalls())) {
+            return new Verdict(LoadState.INVALID_SAMPLE, 0, "campo numerico NaN",
+                    Action.WAIT_FOR_EVIDENCE);
+        }
+
+        // 3. Speed no real (NaN captura con !(x > 0))
+        if (!(s.speedPct() > 0)) {
+            return new Verdict(LoadState.INVALID_SAMPLE, 0, "speed no real (NaN o cero)",
+                    Action.WAIT_FOR_EVIDENCE);
+        }
+
+        final double speed = s.speedPct();
+        final double gpu = s.gpuPct();
+        final double ee = s.eePct();
+        final boolean behind = speed < p.atTargetPct;
+
+        // 3. Thermal >= 2 con retraso → THERMAL_BOUND
+        // El calor no es un cuello de pixeles; recortar la resolucion durante un
+        // throttle aprende cpuBound falso y no se confirma GPU_BOUND.
+        if (thermalStatus >= 2 && behind) {
+            // El termico es un hecho del sistema, no una inferencia entre dos
+            // metricas: es la decision MEJOR fundada del clasificador, por eso su
+            // fuerza es alta. Y su accion es BLOCK (no recortar), la barra baja.
+            return new Verdict(LoadState.THERMAL_BOUND, 90,
+                    "thermal=" + thermalStatus + " con retraso",
+                    Action.BLOCK_RESOLUTION_DROP);
+        }
+
+        // 4. Speed >= 99,5 → NO_BOTTLENECK
+        // "A tiempo" SI es una evidencia, no una ausencia.
+        if (speed >= p.atTargetPct) {
+            return new Verdict(LoadState.NO_BOTTLENECK, 95,
+                    "velocidad " + fmt(speed) + "% >= " + fmt(p.atTargetPct) + "%",
+                    Action.HOLD);
+        }
+
+        // 5. VU_WAIT sostenido
+        // Requiere evidencia SOSTENIDA, no un pico. Si trend es null, se decide
+        // con la muestra actual (waitMs >= 10 y waitCalls >= 30).
+        final double waitMs = s.mtvuWaitMs();
+        final double waitCalls = s.mtvuWaitCalls();
+        final boolean vuWaitSustained;
+        if (trend != null) {
+            vuWaitSustained = trend.sustained(LoadTrend.COND_VU_WAIT, 3)
+                    && waitMs >= p.vuWaitMs && waitCalls >= p.vuWaitCalls;
+        } else {
+            vuWaitSustained = waitMs >= p.vuWaitMs && waitCalls >= p.vuWaitCalls;
+        }
+        if (vuWaitSustained) {
+            return new Verdict(LoadState.VU_BOUND, 85,
+                    "VU_WAIT sostenido: " + fmt(waitMs) + "ms, " + (long)waitCalls + " llamadas",
+                    Action.BLOCK_RESOLUTION_DROP);
+        }
+
+        // 6. GPU metrica ausente (bit0 = 0 o gpuPct <= 0,5)
+        // Un driver sin metrica GPU no puede provocar recortes.
+        final boolean gpuMetricMissing = !s.gpuMetricValid() || gpu <= p.gpuMetricMissingPct;
+        if (gpuMetricMissing) {
+            if (s.emuMetricValid() && ee >= p.emuHotPct) {
+                return new Verdict(LoadState.CPU_BOUND, 55,
+                        "GPU metrica ausente + EE caliente (" + fmt(ee) + "%)",
+                        Action.BLOCK_RESOLUTION_DROP);
+            }
+            return new Verdict(LoadState.UNKNOWN_LOAD, 15,
+                    "GPU metrica ausente, EE no caliente",
+                    Action.HOLD);
+        }
+
+        // 7. Ambas calientes → la mas llena gana
+        final boolean gpuHot = gpu >= p.gpuHotPct;
+        final boolean eeHot = ee >= p.emuHotPct;
         if (gpuHot && eeHot) {
-            // Las dos llenas: manda la que MAS llena el reloj. Con GPU 95 / EE 82
-            // recortar píxeles libera la etapa que estaba por delante y recupera
-            // cuadros; con GPU 88 / EE 99 la GPU vuelve a sobrar enseguida y el que
-            // no da más de sí es el EE, así que recortar sería estropear la imagen
-            // sin comprar cuadros. El EMPATE va a EMULATION (comparación estricta):
-            // sin una etapa visiblemente por delante, recortar es la única acción
-            // que daña algo, y esta clase no daña por no tener motivo.
-            return gpuUsagePct > eeUsagePct ? Bottleneck.GPU : Bottleneck.EMULATION;
+            final double margin = Math.abs(gpu - ee);
+            // La fuerza de esta decision ES el margen, no una base mas un extra:
+            // con GPU 96 / EE 78 (margen 18) la etapa dominante se distingue a
+            // simple vista; con GPU 86 / EE 85.6 no hay nada que distinguir y una
+            // decision de recorte a partir de ese numero es lanzar una moneda.
+            // 40 + 3 por punto de margen, tope 85: el umbral de recorte
+            // (confAllowDrop=55) queda entonces aproximadamente donde cae el
+            // margen de dominancia (4 pp) mas una muestra decente. Asi el margen
+            // y la confianza dicen lo mismo, y ninguno de los dos es decorativo.
+            final int conf = (int) Math.min(85, 40 + margin * 3.0);
+
+            if (gpu > ee) {
+                return new Verdict(LoadState.GPU_BOUND, conf,
+                        "GPU " + fmt(gpu) + "% > EE " + fmt(ee) + "% (margen " + fmt(margin) + "%)",
+                        Action.ALLOW_RESOLUTION_DROP);
+            } else {
+                // Empate o EE > GPU: el empate va a emulacion (regla de 0.6.29)
+                return new Verdict(LoadState.CPU_BOUND, conf,
+                        "EE " + fmt(ee) + "% >= GPU " + fmt(gpu) + "% (empate a emulacion)",
+                        Action.BLOCK_RESOLUTION_DROP);
+            }
         }
-        if (gpuHot) return Bottleneck.GPU;
 
-        // EE lleno con la GPU por debajo de su umbral: la emulación manda.
-        if (eeHot) return Bottleneck.EMULATION;
+        // 8. Solo GPU caliente → GPU_BOUND; solo EE caliente → CPU_BOUND
+        if (gpuHot) {
+            return new Verdict(LoadState.GPU_BOUND, 80,
+                    "GPU " + fmt(gpu) + "% >= " + fmt(p.gpuHotPct) + "%",
+                    Action.ALLOW_RESOLUTION_DROP);
+        }
+        if (eeHot) {
+            return new Verdict(LoadState.CPU_BOUND, 80,
+                    "EE " + fmt(ee) + "% >= " + fmt(p.emuHotPct) + "%",
+                    Action.BLOCK_RESOLUTION_DROP);
+        }
 
-        // GPU visiblemente holgada (medida, no ausente) y el juego atrasado: el
-        // retraso no puede ser de píxeles. Aquí no hace falta saber el nombre del
-        // disco: una GPU que ocupa el 15% del reloj no está costando cuadros.
-        if (gpuUsagePct <= gpuIdlePct) return Bottleneck.EMULATION;
+        // 9. GPU <= piso de holgura (medido, bit0=1) → CPU_BOUND
+        if (gpu <= p.gpuIdlePct) {
+            return new Verdict(LoadState.CPU_BOUND, 65,
+                    "GPU " + fmt(gpu) + "% <= " + fmt(p.gpuIdlePct) + "% (holgada)",
+                    Action.BLOCK_RESOLUTION_DROP);
+        }
 
-        // Zona intermedia: ninguna etapa llena, la GPU visiblemente parada tampoco.
-        // UNKNOWN a propósito, no por falta de ideas. GPU al 60% con EE al 40% es
-        // la MISMA lectura tanto si manda la GPU como si manda el EE, como si hay
-        // un throttle que aún no se declaró o una espera de disco: los números que
-        // llegan aquí no separan esos casos y recortar imagen en el peor de ellos
-        // no recupera ni un cuadro. Declarar EMULATION tampoco es neutro: tras 15
-        // ticks el governor lo convierte en profile.cpuBound y esa memoria juega a
-        // favor de no recortar aunque la evidencia no la sostuvo.
-        //
-        // El coste de este UNKNOWN es una mejora que a veces se queda sobre la
-        // mesa. Consciente, y con una salida medida: la etiqueta nueva
-        // "DynRes state: UNKNOWN_LOAD" imprime gpu%/ee%, así que si los Snapdragon
-        // 6/7 resultan pasar muchos ticks aquí con la GPU alta, eso es LA curva que
-        // falta para volver a mirar GPU_SATURATED_PCT — no una opinión mía.
-        return Bottleneck.UNKNOWN;
+        // 10. Zona intermedia → UNKNOWN_LOAD, HOLD
+        return new Verdict(LoadState.UNKNOWN_LOAD, 25,
+                "METRICS_MIXED: GPU " + fmt(gpu) + "%, EE " + fmt(ee) + "%",
+                Action.HOLD);
     }
 
     /**
-     * Presupuesto de cuadro, para el log y para el bloque FÁBRICA del reporte.
-     * OJO con lo que es: la frecuencia VERTICAL que publica el modo de vídeo, así
-     * que en un juego entrelazado a 30 cuadros este número es la mitad del
-     * presupuesto real por cuadro. Por eso es un dato para leer la evidencia, no
-     * un criterio de decisión (ver el encabezado de la clase).
+     * Regla 5 del prompt: ninguna accion automatica con confianza por debajo del
+     * umbral definido PARA ESA ACCION. Sin esto, la confianza era un numero que
+     * se imprimia pero no mandaba nada: el governor habria recortado igual con
+     * un 20%. Umbral por accion y no uno global, porque las acciones no cuestan
+     * lo mismo:
+     *  - ALLOW_RESOLUTION_DROP (>= confAllowDrop): es la unica que DANIA la
+     *    imagen y la que se aprende en el perfil. Exige la barra mas alta.
+     *  - BLOCK_RESOLUTION_DROP (>= confLearn): no estropea nada, solo impide un
+     *    recorte. Su riesgo es dejar el juego lento por pasarse de conservadora,
+     *    asi que lleva la barra baja pero no cero: con 20% tampoco hay que
+     *    convencer al governor de que ignore la GPU para siempre.
+     *  - HOLD / WAIT_FOR_EVIDENCE: no actuan, no necesitan barra.
+     * Si no alcanza la barra, el ESTADO se conserva (lo que vimos es lo que
+     * vimos) y la accion se degrada a WAIT_FOR_EVIDENCE, que el governor lee como
+     * "no aprender nada de este tick": sin eso, una CPU_BOUND de confianza 50
+     * seguiria sumando cpuBoundTicks y convirtiendo una lectura floja en memoria
+     * permanente del juego.
      */
-    static float frameBudgetMs(float targetFps) {
+    static Verdict gate(Verdict v, LoadPolicy p) {
+        if (v == null) return v;
+        final int need;
+        switch (v.action) {
+            case ALLOW_RESOLUTION_DROP: need = p.confAllowDrop; break;
+            case BLOCK_RESOLUTION_DROP: need = p.confLearn; break;
+            default: return v; // HOLD y WAIT_FOR_EVIDENCE no actuan por si solas
+        }
+        if (v.confidencePct >= need) return v;
+        return new Verdict(v.state, v.confidencePct,
+                v.reason + " | accion degradada: conf " + v.confidencePct + " < " + need,
+                Action.WAIT_FOR_EVIDENCE);
+    }
+
+    /** Formateo de numero para razones. */
+    private static String fmt(double v) {
+        if (Double.isNaN(v)) return "NaN";
+        if (Double.isInfinite(v)) return "Inf";
+        long i = (long) v;
+        if (Math.abs(v - i) < 0.05) return String.valueOf(i);
+        return String.format(java.util.Locale.US, "%.1f", v);
+    }
+
+    // --- Puente legacy (Bottleneck / classifyLegacy / TALLY_SLOTS): ELIMINADO ---
+    //
+    // Estaba marcado como "transitorio para la 0.6.30" y en esta version se va.
+    // Por que era peligroso dejarlo vivo: hacia la MISMA pregunta que classify()
+    // pero con constantes propias (GPU_SATURATED_PCT, GPU_IDLE_PCT) y sin
+    // confianza, sin FLAGS y sin termico. Un llamante nuevo que lo encontrara en
+    // el autocompletado obtendria un veredicto que se salta la Regla 5 y puede
+    // recortar imagen sin permiso. El governor ya no lo llama; AdaptiveProfile ya
+    // usa los codigos del contrato (CenitTelemetry) y traduce el tally viejo de 4
+    // casillas al leerlo, asi que aqui no queda nada que conservar.
+    //
+    // Las constantes que SI se quedan son frameBudgetMs/FALLBACK_TARGET_FPS: las
+    // usa la evidencia nueva para imprimir el presupuesto (Regla 2: se muestra,
+    // no decide).
+
+    /** Objetivo de cuadros por defecto si el GS aun no publica uno. */
+    public static final float FALLBACK_TARGET_FPS = 50f;
+
+    /**
+     * Presupuesto de cuadro, para el log. OJO: la frecuencia VERTICAL que publica
+     * el modo de video, asi que en un juego entrelazado a 30 cuadros este numero
+     * es la mitad del presupuesto real por cuadro. Por eso es un dato para leer
+     * la evidencia, no un criterio de decision.
+     */
+    public static float frameBudgetMs(float targetFps) {
         return 1000f / (targetFps > 5f ? targetFps : FALLBACK_TARGET_FPS);
     }
 
-    /** Frase corta para el log y para FÁBRICA: qué se vio y por qué. */
-    static String evidence(Bottleneck b, float speedPct, float gpuUsagePct, float gpuAvgMs,
-                           float eeUsagePct, float targetFps) {
+    /**
+     * Frase corta para el log con el veredicto nuevo (0.6.30). Lleva los numeros
+     * con los que se puede interpretar la decision desde un log ajeno: el ms de
+     * GPU por present (NaN visible como "sin-presents", porque un 0 mentiria), la
+     * frecuencia VERTICAL con su presupuesto y el P50/P95 del anillo de 150
+     * presents del core.
+     *
+     * Las dos ultimas lineas son la razon por la que este metodo existe aparte
+     * del Verdict.reason: el prompt llama "dos intervalos distintos" a la ventana
+     * de 0,5 s y al anillo de presents, y mezclarlos en una sola cifra es como
+     * sumar velocidad y odometro. Por eso el P95 va etiquetado "(anillo)", nunca
+     * se compara contra el presupuesto, y la frecuencia vertical se imprime junto
+     * a la palabra "presupuesto" para que nadie la lea como fps del juego
+     * (Regla 2).
+     */
+    public static String evidence(Verdict v, CenitLoadSample s) {
+        if (s == null || !s.isValid()) {
+            // Sin muestra no hay numeros que imprimir; la razon del veredicto ya
+            // dice por que ("muestra nula", "ventana recortada", "campo NaN").
+            return v.state + " conf=" + v.confidencePct + "% " + v.reason;
+        }
         final java.util.Locale us = java.util.Locale.US;
-        // El ms de GPU puede llegar NaN: en la ventana de 0,5 s el core lo divide
-        // entre el número de presents y con cero presents la división es 0/0. No
-        // es un error que haya que esconder, pero "gpuMs=NaN" en un log que alguien
-        // va a leer desde un teléfono se escribe mejor como "sin presents".
-        final String ms = (Float.isNaN(gpuAvgMs) || Float.isInfinite(gpuAvgMs))
-                ? "sin-presents" : String.format(us, "%.1f", gpuAvgMs);
-        return b + " speed=" + String.format(us, "%.0f", speedPct)
-                + "% gpu=" + String.format(us, "%.1f", gpuUsagePct)
-                + "%/" + ms + "ms"
-                + " ee=" + String.format(us, "%.0f", eeUsagePct)
-                + "% vertical=" + String.format(us, "%.1f", targetFps > 5f ? targetFps : FALLBACK_TARGET_FPS)
-                + "Hz presupuesto=" + String.format(us, "%.1f", frameBudgetMs(targetFps)) + "ms";
+        final double gpuMs = s.gpuAvgMs();
+        final String ms = (Double.isNaN(gpuMs) || Double.isInfinite(gpuMs))
+                ? "sin-presents" : String.format(us, "%.1f", gpuMs);
+        final double vert = s.verticalHz();
+        final String p95 = Double.isNaN(s.frametimeP95Ms())
+                ? "sin-anillo" : String.format(us, "%.1f", s.frametimeP95Ms()) + "ms(anillo)";
+        return v.state + " conf=" + v.confidencePct + "% acc=" + v.action
+                + " speed=" + fmt(s.speedPct()) + "% fps=" + fmt(s.fps())
+                + " gpu=" + fmt(s.gpuPct()) + "%/" + ms + "ms"
+                + " ee=" + fmt(s.eePct()) + "%"
+                + " vuwait=" + fmt(s.mtvuWaitMs()) + "ms/" + (long) s.mtvuWaitCalls()
+                + " presents=" + (long) s.presents() + " ventana=" + fmt(s.windowSeconds()) + "s"
+                + " flags=0x" + Integer.toHexString(s.flags())
+                + " p50=" + (Double.isNaN(s.frametimeP50Ms()) ? "sin-anillo"
+                        : String.format(us, "%.1f", s.frametimeP50Ms()) + "ms(anillo)")
+                + " p95=" + p95
+                + " vertical=" + String.format(us, "%.1f", vert) + "Hz"
+                + " presupuesto=" + String.format(us, "%.1f", frameBudgetMs((float) vert)) + "ms"
+                + " | " + v.reason;
     }
 }
