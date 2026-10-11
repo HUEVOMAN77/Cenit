@@ -14,7 +14,9 @@
 # Uso:  bash tools/arneses/baseline.sh          (todas)
 #       ARNES=h8 bash tools/arneses/baseline.sh (una)
 # Requiere JDK 21 (javac/java) en PATH o en /usr/lib/jvm/temurin-21, y g++ de host
-# para h9 (el arnes de la maquina de estados del superbloque es C++ puro).
+# para h9, h10 y h11 (los tres del superbloque: la maquina de estados, la sintaxis
+# del area arm64 y la logica del indice PC->hueco). Sin g++ esos tres avisan y
+# dejan RC=1: no compilarlos NO es un verde.
 set -u
 JAVAC=${JAVAC:-/usr/lib/jvm/temurin-21/bin/javac}
 JAVA=${JAVA:-/usr/lib/jvm/temurin-21/bin/java}
@@ -137,7 +139,7 @@ runh10() { # arnes de SINTAXIS del area arm64: tres patas, y cada una cuenta.
   # la caja va PRIMERA en la ruta de includes, asi que las tres patas ven siempre el
   # arbol vivo. La pata A ademas la usa aislada (-DH10_HEADER): lo que prueba es que el
   # header funciona SOLO, sin que otro include le haya traido sus tipos antes.
-  local headers="MvuSbLife.h MvuSuperblock-arm64.h MvuTraceProbe-arm64.h"
+  local headers="MvuSbLife.h MvuSbIndex.h MvuSuperblock-arm64.h MvuTraceProbe-arm64.h"
   for c in $headers; do
     if [ ! -f "$CPP/$c" ]; then echo "h10: FALTA $c en el repo ($CPP)"; RC=1; return 1; fi
     cp "$CPP/$c" "$box/" || { echo "h10: no se pudo copiar $c"; RC=1; return 1; }
@@ -181,13 +183,56 @@ runh10() { # arnes de SINTAXIS del area arm64: tres patas, y cada una cuenta.
   echo "Harness10: $((n + b + s + 1)) Comprobaciones, 0 Fallos"
 }
 
+runh11() { # arnes de LOGICA del indice PC->hueco del superbloque (0.6.33).
+  #
+  # MvuSbIndex.h es C++ puro y sin dependencias a proposito, igual que MvuSbLife.h,
+  # para poder verificarlo en host. Que hace falta está medido, no supuesto: SbResolve
+  # corre en CADA despacho de VU1, y antes de este cambio barría los 256 huecos de la
+  # tabla en cada uno (el encabezado decía «escaneo O(vivos)» y era falso). Un indice
+  # que se equivoca no cuesta velocidad: cuesta servir un superbloque en un PC que no
+  # es el suyo, o sea ejecutar código que nadie validó. Por eso el arnes no mira
+  # «funciona rápido» sino EQUIVALENCIA contra el barrido lineal, casilla por casilla,
+  # despues de cada una de las 20000 operaciones del diferencial.
+  #
+  # Que NO prueba este arnes, y hay que decirlo para que nadie lea de más en su verde:
+  # que el MOTOR llame a Bind/Unbind en los momentos correctos. Eso vive en
+  # MvuSuperblock-arm64.cpp y lo cubre la autoverificación de ese archivo (cada
+  # kSbIndexAuditPeriod despachos SbResolve hace además el barrido y compara; si
+  # difieren el indice se auto-destituye el resto de la sesión) y la auditoría
+  # casilla-por-casilla de DumpReport. En host no hay dispatcher.
+  #
+  # El arnes además se auto-vale: si la secuencia no pasó por los cinco caminos
+  # (armar, reasignar, liberar, rechazar, idempotente) el verde se declara inválido y
+  # ruida. Diez mil comprobaciones que nunca tocaron el camino raro no son evidencia.
+  local box=$WORK/h11
+  if [ -z "$CXX" ]; then
+    echo "h11: SIN COMPILAR - no hay g++ de host (CXX='$CXX'); la logica del indice PC->hueco NO se verifico en esta corrida"
+    RC=1
+    return
+  fi
+  rm -rf "$box"; mkdir -p "$box"
+  cp "$HERE/h11-src/sb_index_test.cpp" "$box/" || { echo "h11: no se pudo traer el arnes"; RC=1; return; }
+  # Regla anti-copia-vieja: el indice se trae DEL REPO en cada corrida.
+  if [ ! -f "$CPP/MvuSbIndex.h" ]; then echo "h11: FALTA MvuSbIndex.h en el repo ($CPP)"; RC=1; return; fi
+  cp "$CPP/MvuSbIndex.h" "$box/" || { echo "h11: no se pudo copiar MvuSbIndex.h"; RC=1; return; }
+  # -std=c++17 basta y es deliberado: el indice no usa nada de C++20, asi que si algun
+  # dia necesita un standard mas alto se ve aqui en vez de descubrirlo en el CI.
+  if ! "$CXX" -std=c++17 -Wall -Wextra -I"$box" -o "$box/h11" "$box/sb_index_test.cpp" 2>"$box/compile.err"; then
+    echo "h11: FALLO DE COMPILACION"; head -40 "$box/compile.err"; RC=1; return
+  fi
+  OUT=$("$box/h11" 2>/dev/null | grep -E "Comprobaciones|FALLO")
+  echo "$OUT"
+  echo "$OUT" | grep -qE ", [1-9][0-9]* Fallos" && RC=1
+  echo "$OUT" | grep -q "Comprobaciones" || { echo "h11: el arnes no imprime recuento"; RC=1; }
+}
+
 ONLY=${ARNES:-all}
 case "$ONLY" in
-  all|h5|h6|h7|h8|h9|h10) ;;
+  all|h5|h6|h7|h8|h9|h10|h11) ;;
   # Un nombre mal escrito tiene que ruidar: si no, "corrí los arneses" se convierte
   # en "no corrí ninguno y volvi con RC=0", que es exactamente el verde vacio que
   # este script existe para evitar.
-  *) echo "baseline.sh: ARNES='$ONLY' no existe (valores: all h5 h6 h7 h8 h9 h10)"; exit 2 ;;
+  *) echo "baseline.sh: ARNES='$ONLY' no existe (valores: all h5 h6 h7 h8 h9 h10 h11)"; exit 2 ;;
 esac
 [ "$ONLY" = all ] || [ "$ONLY" = h5 ] && run h5 Harness5 GameLoadClassifier CenitLoadSample LoadPolicy LoadTrend CenitTelemetry
 [ "$ONLY" = all ] || [ "$ONLY" = h6 ] && run h6 Harness6 DynamicResolutionGovernor GameLoadClassifier AdaptiveProfile CenitLoadSample LoadPolicy LoadTrend CenitTelemetry GameSerialUtils
@@ -207,6 +252,12 @@ esac
 # movido. Es barato (segundos) y es justo lo que el CI de arm64 tardaba 25 minutos en
 # decirnos, asi que va en la linea base y no al final del ritual.
 [ "$ONLY" = all ] || [ "$ONLY" = h10 ] && runh10
+# h11 (0.6.33): la LOGICA del indice PC->hueco. h9 mira la maquina de estados y h10
+# la sintaxis del area; ninguno de los dos mira la RESOLUCION, que es el camino por el
+# que pasa todo VU1. El indice es un acelerador, y un acelerador que se equivoca no
+# pierde velocidad — sirve codigo que nadie valido. Por eso la equivalencia con el
+# barrido se fuerza en host, casilla por casilla, antes de encenderlo en el telefono.
+[ "$ONLY" = all ] || [ "$ONLY" = h11 ] && runh11
 
 # Verificadores que no necesitan javac: las tablas que cruzan la frontera JNI.
 # jnisig: cada `native` de NativeApp.java tiene su Java_...() con el mismo numero de

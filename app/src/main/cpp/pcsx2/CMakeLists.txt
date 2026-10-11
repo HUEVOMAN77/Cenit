@@ -1136,6 +1136,7 @@ set(pcsx2arm64Headers
 	arm64/MvuTraceProbe-arm64.h
 	arm64/MvuSuperblock-arm64.h
 	arm64/MvuSbLife.h
+	arm64/MvuSbIndex.h
 )
 
 # These ones benefit a lot from LTO
