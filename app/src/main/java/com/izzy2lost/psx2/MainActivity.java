@@ -1868,7 +1868,7 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         }
         applyControlsVisibility();
         if (visible) {
-            // Cuenta los 10 s desde ahora; cualquier toque los reinicia.
+            // Cuenta los 5 s desde ahora; cualquier toque los reinicia.
             mHomeHandler.removeCallbacks(mTouchControlsHideTask);
             mHomeHandler.postDelayed(mTouchControlsHideTask, TOUCH_CONTROLS_HIDE_MS);
         }
@@ -1876,10 +1876,14 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
 
     // Cenit 0.6.23 — mandos táctiles que se apartan solos. El pedido del
     // usuario: con mando Bluetooth conectado ya no estorban, y aunque no lo
-    // haya, si lleva 10 segundos sin tocar la pantalla se ve solo el juego.
+    // haya, si lleva unos segundos sin tocar la pantalla se ve solo el juego.
     // Al volver a tocar (lo que sea, en cualquier parte), reaparecen. El botón
     // de menú y el de pausa NO se ocultan: son la única puerta para pausar.
-    private static final long TOUCH_CONTROLS_HIDE_MS = 10_000L;
+    //
+    // 0.6.34: 10 s -> 5 s, que es lo que pidió el usuario. El número corto no
+    // es capricho estético: con los mandos casi transparentes, 10 s de mando
+    // encima de una cinemática o de un menú ya es molestar.
+    private static final long TOUCH_CONTROLS_HIDE_MS = 5_000L;
     private boolean mControlsBaseVisible = false;
     private boolean mTouchControlsAutoHidden = false;
     // Dedos puestos ahora mismo. Con un joystick arrastrado durante minutos no
@@ -1924,7 +1928,7 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         // pausar; ocultarlos por inactividad dejaría al usuario sin salida.
     }
 
-    /** Despierta los mandos con cualquier toque y reinicia los 10 segundos. */
+    /** Despierta los mandos con cualquier toque y reinicia la cuenta. */
     private void wakeTouchControls() {
         if (!mControlsBaseVisible) return; // sin juego o con mando físico: nada que hacer
         if (mTouchControlsAutoHidden) {
