@@ -166,6 +166,147 @@ namespace mVUSuperblock
 
 		Candidate s_tab[kSbMaxVariants];
 
+		// ------------------------------------------------------------------
+		// 0.6.33 — indice PC->hueco (MvuSbIndex.h). Por que existe: SbResolve se
+		// llama en CADA despacho de VU1 con el motor ON (stub rapido y ruta lenta),
+		// y barria los 256 huecos buscando el PC. El encabezado decia «O(vivos)» y
+		// era falso: era O(kSbMaxVariants) por despacho en el camino mas caliente
+		// del emulador. El indice lo convierte en una lectura.
+		//
+		// DISCIPLINA (su unica fuente de verdad es la tabla; el indice es un
+		// acelerador que puede desmentirse pero nunca mandar):
+		//  - LinkSlot DESPUES de escribir startPC; UnlinkSlot ANTES de dejar
+		//    inUse=false o de cambiar el PC de un hueco ocupado.
+		//  - Un Bind que encuentra otro hueco enlazado al mismo PC ES la
+		//    invariante rota: se cuenta, se rechaza el armado y la tabla sigue
+		//    siendo correcta (el Lookup solo puede servir el hueco que la tabla
+		//    diria). No se pisa en silencio.
+		//  - DumpReport audita indice vs barrido y lo escribe: un indice que se
+		//    desincroniza se ve en el informe, no dentro de un juego.
+		// Harness11 (tools/arneses/h11-src) prueba el indice contra un modelo
+		// lineal en host; lo que aqui se conecta es la disciplina de los enlaces.
+		// ------------------------------------------------------------------
+		mVUSbIndex::Index s_idx;
+
+		// Los dos acotes que MvuSbIndex.h PROMETE en su encabezado y que solo se
+		// pueden comprobar aqui, donde el motor ve la sonda y la tabla a la vez. Sin
+		// ellos el header diria algo falso (que es justo el defecto que esta version
+		// esta cerrando):
+		//  - el DOMINIO: el indice indexa por PcIdx(), el mismo indice que usa la
+		//    sonda. Si kProbeSlots cambiara, IdxOf plegaria PCs distintos en la misma
+		//    casilla y un Lookup podria decir un hueco que la tabla niega — la
+		//    confirmacion contra la tabla lo convertiria en un despacho perdido, no
+		//    en una variante equivocada, pero el motor perderia sus candidatos en
+		//    silencio y eso tiene que sonar AL COMPILAR.
+		//  - el TECHO del id: kSbMaxVariants tiene que caber en el uint16_t que
+		//    guarda el indice (id+1). Si alguien subiera la tabla por encima, el id
+		//    se truncaria y un hueco se resolveria como OTRO.
+		static_assert(mVUSbIndex::kSlots == static_cast<uint32_t>(mVUTraceProbe::kProbeSlots),
+			"indice superbloque: el dominio de PCs debe ser el MISMO que el de la sonda "
+			"(kProbeSlots), si no IdxOf plegaria PCs distintos en la misma casilla");
+		static_assert(kSbMaxVariants <= mVUSbIndex::kMaxSlotId,
+			"indice superbloque: kSbMaxVariants no cabe en el uint16_t del indice "
+			"(se guarda slotId+1); un id truncado sirve el hueco equivocado");
+
+		__fi u32 IdxOfPc(u32 startPC_bytes)
+		{
+			return mVUSbIndex::Index::IdxOf(startPC_bytes);
+		}
+
+		// Enlaza el PC ACTUAL del hueco. 0 = ok/re-bind, -2 = hueco ajeno ya
+		// enlazado a ese PC (invariante rota).
+		int LinkSlot(u32 slotId)
+		{
+			const Candidate& c = s_tab[slotId];
+			const int r = s_idx.Bind(IdxOfPc(c.startPC), slotId);
+			if (r == -2)
+			{
+				g_stats[1].index_desync.fetch_add(1, std::memory_order_relaxed);
+				Console.Error("Cenit superblock: indice PC=%04x ya enlazado a otro "
+					"hueco (%d) -> desincronizacion, se rechaza el enlace.",
+					c.startPC, s_idx.Lookup(IdxOfPc(c.startPC)));
+			}
+			return r;
+		}
+
+		// Quita el enlace del PC ACTUAL del hueco, solo si apunta a este hueco.
+		void UnlinkSlot(u32 slotId)
+		{
+			const Candidate& c = s_tab[slotId];
+			s_idx.Unbind(IdxOfPc(c.startPC), slotId);
+		}
+
+		// El barrido VIEJO, conservado como oraculo del indice (y como camino de
+		// reserva cuando el indice se auto-destitujo). Misma condicion que hacia
+		// SbResolve: hueco asignado con este PC exacto.
+		int SweepForPc(u32 startPC_bytes)
+		{
+			for (u32 i = 0; i < kSbMaxVariants; i++)
+			{
+				if (s_tab[i].inUse && s_tab[i].startPC == startPC_bytes)
+					return static_cast<int>(i);
+			}
+			return -1;
+		}
+
+		// Estado del acelerador. s_indexTrusted=false lo apaga del todo: SbResolve
+		// vuelve al barrido y el motor sigue correcto — el indice es una ganancia de
+		// velocidad, nunca una fuente de verdad.
+		//
+		// s_indexDispatches cuenta RESOLUCIONES POR INDICE, no «despachos»: las tres
+		// llamadas pasan por FindSlotForPc — SbResolve (el pesado, uno por despacho
+		// de VU1), el chequeo de armado de SbArmCompile y SbFinish. Contar las tres
+		// es lo que hace el muestreo MAS denso de lo pedido, no menos, y por eso vale
+		// la pena decirlo en vez de prometer una unidad que no se mide. SbResolve se
+		// llama exactamente una vez por despacho (la ruta lenta NO lo llama: ver el
+		// comentario junto a mVUlookupProg_VU1 en microVU-arm64.cpp, que es justo el
+		// sitio donde se explico por que llamarlo dos veces colgaria los contadores de
+		// ventana), asi que el termino que domina el contador es el despacho.
+		bool s_indexTrusted = true;
+		u32 s_indexDispatches = 0;
+
+		// Resuelve el hueco de un PC de despacho. LA CORRECCION NO DEPENDE DEL
+		// INDICE: lo que devuelve se confirma contra la tabla (`inUse` + PC exacto),
+		// que es la fuente de verdad, asi que un indice equivocado a lo sumo hace
+		// perder un despacho (la cadena normal lo toma), nunca sirve la variante
+		// equivocada. Eso es lo que hace legitimo el acelerador.
+		//
+		// Cada kSbIndexAuditPeriod despachos se hace ADEMAS el barrido viejo y el
+		// resultado se compara con el del indice (autoverificacion). Un mismatch:
+		// se cuenta, se toma el del barrido para ese despacho, y el indice se
+		// auto-destituye para el resto de la sesion — el motor vuelve al O(256) de
+		// siempre, mas lento pero intacto, y el informe lo dice en voz alta.
+		// Preferir la velocidad a la evidencia seria repetir el error de 0.6.25.
+		int FindSlotForPc(u32 startPC_bytes)
+		{
+			if (!s_indexTrusted)
+				return SweepForPc(startPC_bytes);
+
+			const int idx = s_idx.Lookup(IdxOfPc(startPC_bytes));
+			const bool hit = (idx >= 0) && s_tab[idx].inUse &&
+				(s_tab[idx].startPC == startPC_bytes);
+
+			if (++s_indexDispatches >= kSbIndexAuditPeriod)
+			{
+				s_indexDispatches = 0;
+				g_stats[1].index_audited.fetch_add(1, std::memory_order_relaxed);
+				const int oracle = SweepForPc(startPC_bytes);
+				const int got = hit ? idx : -1;
+				if (oracle != got)
+				{
+					g_stats[1].index_mismatch.fetch_add(1, std::memory_order_relaxed);
+					Console.Error("Cenit superblock: indice PC=%04x dijo %d y el "
+						"barrido %d -> indice DESTITUIDO para el resto de la sesion "
+						"(el motor vuelve al barrido: mas lento, intacto).",
+						startPC_bytes, got, oracle);
+					s_indexTrusted = false;
+					return oracle;
+				}
+			}
+
+			return hit ? idx : -1;
+		}
+
 		// Hueco vacio: la tabla existe pero nadie lo ocupo nunca. Se define aqui, y
 		// no como literal en cada reset, por una razon de semantica: la maquina trae
 		// valores por defecto que NO son cero (Evidence::windows vale 1 — la primera
@@ -222,12 +363,8 @@ namespace mVUSuperblock
 
 		Candidate* FindForPc(u32 startPC_bytes)
 		{
-			for (u32 i = 0; i < kSbMaxVariants; i++)
-			{
-				if (s_tab[i].inUse && s_tab[i].startPC == startPC_bytes)
-					return &s_tab[i];
-			}
-			return nullptr;
+			const int i = FindSlotForPc(startPC_bytes);
+			return (i < 0) ? nullptr : &s_tab[i];
 		}
 
 		Candidate* AllocSlot()
@@ -239,6 +376,13 @@ namespace mVUSuperblock
 			// 256 muertes dejaban el motor sin sitio, que se reportaba como
 			// "rejected_identity" y parecia un problema de identidad cuando era
 			// basura que no se barría.
+			//
+			// 0.6.33 — el indice: en la segunda pasada el hueco VIENE con un PC
+			// enlazado, y el PC nuevo lo pone el llamador despues. Se desliga AQUI,
+			// antes de pisar el candidato (kFreshCandidate borra startPC y un unlink
+			// despues no sabria que PC era el viejo). El enlace nuevo lo hace
+			// SbArmCompile con LinkSlot una vez escrito startPC: asi no existe
+			// ninguna ventana en la que el indice apunte a un hueco con otro PC.
 			for (u32 pass = 0; pass < 2; pass++)
 			{
 				for (u32 i = 0; i < kSbMaxVariants; i++)
@@ -255,6 +399,7 @@ namespace mVUSuperblock
 							continue;
 						if (!c.inUse)
 							continue; // ya lo tomo la pasada 0
+						UnlinkSlot(i); // se va a otro PC: el enlace viejo muere aqui
 					}
 					const bool wasOccupying = c.inUse && c.life.Occupies();
 					c = kFreshCandidate;
@@ -285,6 +430,15 @@ namespace mVUSuperblock
 			for (u32 i = 0; i < kSbMaxVariants; i++)
 				s_tab[i] = kFreshCandidate;
 			s_live = 0;
+			// 0.6.33 — con la tabla limpia el indice tiene que estar limpio, y con
+			// el indice limpio vuelve a ser legitimo confiar en el (si una sesion
+			// anterior lo auto-destituyo por un mismatch). Se reinician tambien los
+			// contadores de salud del indice — van en el mismo vuelco de stats de
+			// abajo — para que el informe de este encendido no arrastre la sospecha
+			// del anterior.
+			s_idx.ClearAll();
+			s_indexTrusted = true;
+			s_indexDispatches = 0;
 			std::memset(s_burned, 0, sizeof(s_burned));
 			s_burnedCount = 0;
 			s_divergences = 0;
@@ -302,6 +456,8 @@ namespace mVUSuperblock
 				s.mask_rejected.store(0); s.epochs.store(0); s.validated.store(0);
 				s.dead_candidates.store(0); s.archived.store(0); s.trials.store(0);
 				s.spot_checks.store(0); s.unprofitable.store(0);
+				s.index_desync.store(0); s.index_audited.store(0);
+				s.index_mismatch.store(0);
 			}
 		}
 
@@ -349,6 +505,140 @@ namespace mVUSuperblock
 				s.validated.load(std::memory_order::relaxed), s.dead_candidates.load(std::memory_order::relaxed),
 				s.archived.load(std::memory_order::relaxed), s.trials.load(std::memory_order::relaxed),
 				s.spot_checks.load(std::memory_order::relaxed), s.unprofitable.load(std::memory_order::relaxed));
+			// 0.6.33 — salud del INDICE. Con desync=0 y mism=0 el acelerador es
+			// equivalente al barrido en todo lo muestreado; con mism>0 el motor ya
+			// NO lo usa (volvio al barrido) y esta linea es la prueba de ello.
+			SbPrintf(f, "%s indice desync=%" PRIu64 " auditado=%" PRIu64 " mism=%" PRIu64 "\n",
+				tag, s.index_desync.load(std::memory_order::relaxed),
+				s.index_audited.load(std::memory_order::relaxed),
+				s.index_mismatch.load(std::memory_order::relaxed));
+		}
+
+		// ------------------------------------------------------------------
+		// 0.6.33 — AUDITORIA del indice contra la tabla, hecha en el momento del
+		// vuelco. Reconstruye en un modelo lo que la TABLA dice — que es la fuente
+		// de verdad — y lo compara casilla por casilla con el indice vivo.
+		//
+		// LIMITACION que hay que escribir, no esconder: este vuelco corre en el
+		// hilo del HUD/JNI, y la tabla y el indice los escribe el hilo dispatcher
+		// de VU1 sin lock (igual que todo lo otro que este informe lee — el mismo
+		// bucle de arriba ya recorre s_tab desprotegido desde 0.6.32). Por eso una
+		// diferencia aqui puede ser un INSTANTE de armado legitimo: SbArmCompile
+		// escribe startPC e inUse y despues llama a LinkSlot, y si el vuelco cae en
+		// ese medio paso ve la tabla con un hueco que el indice aun no tiene. Eso
+		// no es un bug de enlace, es una fotografia a destiempo, y el informe lo
+		// dice como lo que es.
+		//
+		// Lo que SI es prueba dura vive en el otro lado: FindSlotForPc, en el MISMO
+		// hilo dispatcher, confronta indice y barrido cada kSbIndexAuditPeriod sin
+		// ninguna ventana de instante — ahi un mismatch no tiene explicacion
+		// benigna. Esta auditoria es complemento (cubre las 2048 casillas, el
+		// muestreo no), no el veredicto.
+		//
+		// Las dos direcciones se cuentan aparte porque significan cosas distintas:
+		// - la tabla tiene el hueco y el indice no => a lo sumo se pierde un
+		//   despacho (la cadena normal lo toma); es el unico dano posible de un
+		//   indice incompleto, y es justo el instante de armado.
+		// - el indice tiene algo que la tabla no tiene => el caso peligroso EN
+		//   POTENCIA; ni siquiera ese sirve la variante equivocada, porque
+		//   FindSlotForPc confirma inUse + PC exacto antes de devolver nada.
+		// ------------------------------------------------------------------
+		void AuditIndex(std::FILE* fp)
+		{
+			if (!fp)
+				return;
+
+			// Modelo = lo que la TABLA dice, casilla por casilla. La tabla es la
+			// fuente de verdad; el indice solo puede ser su copia o quedar desenmascarado.
+			// Se guarda el PRIMER hueco de cada PC, que es exactamente lo que devuelve
+			// SweepForPc: si alguien rompiera la invariante de «un hueco por PC», el
+			// modelo tiene que decir lo mismo que el oraculo, no lo ultimo escrito.
+			uint16_t model[mVUSbIndex::kSlots];
+			for (u32 i = 0; i < mVUSbIndex::kSlots; i++)
+				model[i] = mVUSbIndex::kEmpty;
+			u32 modelCount = 0;
+			for (u32 i = 0; i < kSbMaxVariants; i++)
+			{
+				const Candidate& c = s_tab[i];
+				if (!c.inUse)
+					continue;
+				const u32 casilla = mVUSbIndex::Index::IdxOf(c.startPC);
+				if (model[casilla] == mVUSbIndex::kEmpty)
+					model[casilla] = static_cast<uint16_t>(i + 1u);
+				modelCount++;
+			}
+
+			const uint16_t* live = s_idx.Raw();
+			// Las dos direcciones, contadas y anotadas APARTE (ver el encabezado de
+			// la funcion) porque significan cosas distintas y porque la primera
+			// diferencia de cada sentido tiene que poder citarse con su PC exacto:
+			// si no, el aviso del sentido «ghost» podria citar una casilla «missing»
+			// y decir que el indice senala un hueco que en realidad no senala.
+			// missing = la tabla tiene un hueco que el indice aun no muestra (el
+			//   instante de armado; a lo sumo se pierde un despacho).
+			// ghost   = el indice muestra un hueco que la tabla NO tiene en ese PC
+			//   (ningun instante legitimo lo explica).
+			struct Side
+			{
+				u32 count = 0;
+				u32 pc = 0;
+				int got = -1;
+				int want = -1;
+				bool taken = false;
+			};
+			Side missing, ghost;
+			for (u32 s = 0; s < mVUSbIndex::kSlots; s++)
+			{
+				if (live[s] == model[s])
+					continue;
+				Side& d = (model[s] != mVUSbIndex::kEmpty) ? missing : ghost;
+				d.count++;
+				// Se anota con una bandera, no comparando contra -1: en el sentido
+				// «missing» el indice dice -1 LEGITIMAMENTE porque no tiene enlace, y
+				// una condicion `got == -1` volveria ambigua la primera casilla.
+				if (d.taken)
+					continue;
+				d.taken = true;
+				d.pc = s << 3;
+				d.got = (live[s] == mVUSbIndex::kEmpty) ? -1 : static_cast<int>(live[s] - 1u);
+				d.want = (model[s] == mVUSbIndex::kEmpty) ? -1 : static_cast<int>(model[s] - 1u);
+			}
+
+			SbPrintf(fp, "indice PC->hueco: enlazados=%u (modelo tabla=%u) auditados=%" PRIu64
+				" desync=%" PRIu64 " confianza=%s\n",
+				s_idx.Count(), modelCount,
+				g_stats[1].index_audited.load(std::memory_order::relaxed),
+				g_stats[1].index_desync.load(std::memory_order::relaxed),
+				s_indexTrusted ? "ACTIVA" : "DESTITUIDA (motor en barrido O(256))");
+			if (missing.count == 0 && ghost.count == 0)
+				SbPrintf(fp, "indice: COHERENTE con la tabla casilla por casilla (%u entradas): "
+					"la resolucion O(1) sustituye al barrido con el mismo resultado.\n",
+					(unsigned)mVUSbIndex::kSlots);
+			else if (ghost.count == 0)
+				SbPrintf(fp, "indice: %u casilla(s) con hueco en la tabla y aun sin enlace "
+					"(primera: PC=%04x, la tabla tiene el hueco %d). Coherente con un INSTANTE "
+					"de armado: este vuelco lee la tabla desde OTRO hilo y sin lock, y "
+					"SbArmCompile escribe startPC antes de enlazar. El dano posible de eso es "
+					"PERDER un despacho, nunca servir el hueco equivocado, y la prueba dura de "
+					"la equivalencia es el muestreo de FindSlotForPc (auditados=%" PRIu64
+					", mism=%" PRIu64 "), no esta fotografia.\n",
+					missing.count, missing.pc, missing.want,
+					g_stats[1].index_audited.load(std::memory_order::relaxed),
+					g_stats[1].index_mismatch.load(std::memory_order::relaxed));
+			else
+				SbPrintf(fp, "AVISO indice: %u casilla(s) donde el INDICE tiene un hueco que la "
+					"tabla no tiene en ese PC (y %u al reves). Primera: PC=%04x, el indice dice "
+					"hueco %d y la tabla tiene el %d. Esto NO se explica por el instante de "
+					"armado (ahi el desfase va en el otro sentido): es un enlace viejo que no "
+					"se quito o un Bind mal dirigido. FindSlotForPc confirma inUse + PC exacto "
+					"contra la tabla antes de devolver nada, asi que NINGUNA variante se sirvio "
+					"por error — a lo sumo se perdio un despacho — y el contador mism dice %"
+					PRIu64 ". Motor: %s\n",
+					ghost.count, missing.count, ghost.pc, ghost.got, ghost.want,
+					g_stats[1].index_mismatch.load(std::memory_order::relaxed),
+					s_indexTrusted ? "SIGUE CONFIANDO EN EL (el muestreo lo destituira si "
+						"reaparece)" : "ya lo DESTITUYO: nadie sirve una variante por el "
+						"indice, solo barrido");
 		}
 
 		// ------------------------------------------------------------------
@@ -809,6 +1099,20 @@ namespace mVUSuperblock
 		c->startPC = startPC_bytes;
 		std::memcpy(c->key, pState96, kKeyBytes);
 
+		// 0.6.33 — enlace AL INDICE, justo despues de escribir startPC y antes de
+		// que la maquina entre en BUILDING. Un Bind rechazado significa que ese PC
+		// ya tenia otro hueco enlazado (invariante rota): se libera el hueco SIN
+		// enlazar, se devuelve -1 y el despacho toma la cadena normal. Es un fallo
+		// hacia lo seguro: no hay candidato, no hay variante servida.
+		if (LinkSlot(static_cast<u32>(c - s_tab)) == -2)
+		{
+			c->inUse = false;
+			if (s_live)
+				s_live--;
+			st.rejected_identity.fetch_add(1, std::memory_order_relaxed);
+			return -1;
+		}
+
 		// Identidad ANTES de armar: si el hueco traia otra identidad (reasignado
 		// de un candidato muerto), RebindIfChanged limpia y deja la maquina en
 		// UNSEEN, que es exactamente desde donde StartBuild es legal.
@@ -948,6 +1252,10 @@ namespace mVUSuperblock
 			// reasignable: quien decide el "no permanente" aqui es la forma, y
 			// la forma no cambia sin reescribir microcodigo (SbKillAll).
 			c.entry = nullptr;
+			// 0.6.33 — el hueco se libero: el enlace que SbArmCompile hizo al armar
+			// tiene que morir aqui, no despues de pisar el candidato (UnlinkSlot lee
+			// el startPC actual para saber que casilla soltar).
+			UnlinkSlot(static_cast<u32>(slot));
 			c.inUse = false;
 			if (s_live)
 				s_live--;
@@ -995,14 +1303,19 @@ namespace mVUSuperblock
 		if (!IsEnabled() || s_killed)
 			return nullptr;
 
-		// Escaneo lineal: con la tabla casi vacía (el caso común) esto es una
-		// comprobación de estado fallida por hueco; el hook del dispatcher
-		// solo llama aquí cuando el motor está ON.
-		for (u32 i = 0; i < kSbMaxVariants; i++)
+		// 0.6.33 — resolucion O(1) por el indice PC->hueco (antes: barrido de los 256
+		// huecos en CADA despacho de VU1 con el motor ON). La correccion NO depende
+		// del indice: FindSlotForPc confirma `inUse` + PC exacto contra la tabla, y
+		// cada kSbIndexAuditPeriod despachos confronta el resultado con el barrido
+		// viejo; si alguna vez difieren, el indice se auto-destituye y el motor
+		// vuelve al barrido. Con la tabla vacia (el caso comun) esto es ahora UNA
+		// lectura, no 256.
+		const int foundSlot = FindSlotForPc(startPC_bytes);
+		if (foundSlot < 0)
+			return nullptr;
+
 		{
-			Candidate& c = s_tab[i];
-			if (!c.inUse || c.startPC != startPC_bytes)
-				continue;
+			Candidate& c = s_tab[foundSlot];
 
 			// La maquina manda, no el deseo: si no esta en un estado que despacha
 			// la variante (VALIDATE, SHADOW/TRIAL, VALIDATED/TRIAL, TRUSTED o
@@ -1132,18 +1445,12 @@ namespace mVUSuperblock
 		// para un episodio que SbResolve declaró pendiente. Un despacho a un
 		// PC con candidato VERIFY pero sin episodio emparejado (clave distinta
 		// o presupuesto corto) es telemetría, no evidencia.
-		Candidate* c = nullptr;
-		for (u32 i = 0; i < kSbMaxVariants; i++)
-		{
-			Candidate& t = s_tab[i];
-			if (t.inUse && t.startPC == startPC_bytes)
-			{
-				c = &t;
-				break;
-			}
-		}
-		if (!c)
+		// 0.6.33: misma resolucion O(1) del indice (con confirmacion contra la
+		// tabla), no un barrido de 256 por episodio cerrado.
+		const int finishSlot = FindSlotForPc(startPC_bytes);
+		if (finishSlot < 0)
 			return;
+		Candidate* c = &s_tab[finishSlot];
 
 		const u32 idx = PcIdx(c->startPC);
 
@@ -1235,6 +1542,9 @@ namespace mVUSuperblock
 			if (!c->life.Occupies())
 			{
 				Retire(*c);
+				// 0.6.33 — hueco liberado => enlace fuera (leer c->startPC antes de
+				// tocar nada: sigue siendo el PC con el que se enlazo).
+				UnlinkSlot(static_cast<u32>(c - s_tab));
 				c->inUse = false;
 				if (s_live)
 					s_live--;
@@ -1376,7 +1686,11 @@ namespace mVUSuperblock
 		// Macro, no lambda: conserva el attribute format(printf) de SbPrintf.
 #define P(...) SbPrintf(fp, __VA_ARGS__)
 
-		P("Cenit VU Superblock Engine — informe Fases 2-5 (0.6.32: maquina por candidato)\n");
+		// Sin numero de version aqui: la linea de abajo ya imprime
+		// BuildVersion::AppVersion, y repetir «0.6.32» a mano es exactamente como
+		// se queda un informe mintiendo sobre su propia version.
+		P("Cenit VU Superblock Engine — informe Fases 2-5 (maquina por candidato + "
+			"resolucion O(1) con autoverificacion de indice)\n");
 		P("build=%s (%s)  motivo=%s  motor=%s\n",
 			BuildVersion::AppVersion, BuildVersion::GitShort, reason ? reason : "?",
 			IsEnabled() ? "ON" : "OFF");
@@ -1428,6 +1742,9 @@ namespace mVUSuperblock
 		P("\n");
 		DumpStatsLine(fp, "[VU1]", g_stats[1]);
 		P("\n");
+		// 0.6.33 — el informe puede desmentir al acelerador: esta linea se escribe
+		// contra la tabla, que es la fuente de verdad.
+		AuditIndex(fp);
 		P("tabla: %u huecos asignados (building=%u validate=%u shadow=%u validated=%u trusted=%u "
 			"dead=%u archived=%u)  PCs quemados=%u  divergencias=%u en %u candidatos  "
 			"episodios max=%u\n",

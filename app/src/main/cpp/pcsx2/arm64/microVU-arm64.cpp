@@ -2125,8 +2125,11 @@ void* mVUlookupProg_VU1(u32 startPC, u32 cycles)
 	}
 	void* r = mVUlookupProg<1>(maskedPC, (uptr)&microVU1.prog.lpState);
 	// Cenit VU Superblock Engine — misma cobertura sobre la resolucion rapida
-	// del stub (ruta sin sonda). Barato: SbResolve sale de inmediato si no
-	// hay motor, y su escaneo es O(vivos) con la tabla vacia.
+	// del stub (ruta sin sonda). Barato desde 0.6.33 y dicho con la unidad
+	// correcta: SbResolve sale de inmediato si no hay motor, y con el motor ON
+	// su resolucion es O(1) por el indice PC->hueco. Antes este comentario decia
+	// «escaneo O(vivos)», que era falso: el motor barria los 256 huecos de la
+	// tabla en cada despacho, hubiera candidatos o no (ver MvuSbIndex.h).
 	if (mVUSuperblock::IsEnabled())
 	{
 		void* sb = mVUSuperblock::SbResolve(maskedPC, (const void*)&microVU1.prog.lpState,

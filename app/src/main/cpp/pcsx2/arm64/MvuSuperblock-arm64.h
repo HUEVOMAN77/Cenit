@@ -87,14 +87,15 @@
 // (EnableVUTraceProbe || EnableVUSuperblock), grabación en disco forzada a
 // OFF con cualquiera de los dos activa.
 //
-// Threading: todo el estado (tabla de candidatos, digests de ventana,
-// contadores) lo escribe UN solo hilo — el dispatcher de VU1 (MTVU con
+// Threading: todo el estado (tabla de candidatos, indice PC->hueco, digests de
+// ventana, contadores) lo escribe UN solo hilo — el dispatcher de VU1 (MTVU con
 // THREAD_VU1); los flancos de SyncFromConfig corren en el hilo de settings
 // con el VM ya parado o el cache recién vaciado. Los lectores (HUD,
 // informe) usan relaxed: telemetría, nunca entrada de simulación. Header
 // puro C++ (sin vixl, sin tipos de microVU).
 
 #include "MvuSbLife.h"
+#include "MvuSbIndex.h"
 
 #include "common/Pcsx2Defs.h"
 
@@ -205,6 +206,21 @@ namespace mVUSuperblock
 	static constexpr u32 kSbBreakWithSurface = 8;
 	static constexpr u32 kSbBreakCandidates = 3;
 	static constexpr u32 kSbMaxVariants = 256;     // superbloques vivos a la vez
+
+	// kSbIndexAuditPeriod (0.6.33) — cada cuantas RESOLUCIONES por indice SbResolve
+	// hace ADEMAS el barrido lineal de la tabla y lo confronta con lo que dijo el
+	// indice. La unidad es «resolucion», no «despacho»: tambien cuentan el chequeo de
+	// armado de SbArmCompile y SbFinish, que llaman a la misma resolucion. Como el
+	// termino que domina con el motor encendido es el despacho de VU1, el muestreo
+	// sale MAS denso de lo que la constante sugiere a primera vista, nunca menos.
+	// Es POLITICA de muestreo, no un numero medido: un barrido cuesta 256 lecturas,
+	// asi que pagarlo 1 de cada 512 anade ~0.5 del coste del camino viejo y en cambio
+	// da una probabilidad alta de pillar cualquier desincronizacion del acelerador
+	// (que seria un superbloque servido en el PC equivocado — lo peor que puede hacer
+	// este motor). Con cualquier mismatch el indice se RETIRA solo (SbResolve vuelve
+	// al barrido) y el informe lo canta: el acelerador puede dejar de existir, pero
+	// no puede mandar.
+	static constexpr u32 kSbIndexAuditPeriod = 512;
 
 	// Bits de rasguño de identidad de variante — byte 6 de microRegInfo
 	// (blockType; los bits 0-1 son los blockType originales 0/1/2). Viven
@@ -333,8 +349,17 @@ namespace mVUSuperblock
 	// suficiente: o corre entera, o no corre; con presupuesto corto manda
 	// la cadena normal, que si rompe bloque a bloque como siempre.
 	// pState96 = &mVU.prog.lpState (clave con la que el dispatcher resuelve
-	// esta entrada). Llamado SIEMPRE con el motor ON (el escaneo interno
-	// es O(vivos) y caro-cero cuando no hay candidatos).
+	// esta entrada). Llamado SIEMPRE con el motor ON.
+	//
+	// COSTE REAL, dicho para que el comentario no mienta (0.6.33): hasta 0.6.32
+	// este encabezado prometio «escaneo O(vivos) y caro-cero cuando no hay
+	// candidatos» y las dos cosas eran falsas — SbResolve barria los 256 huecos de
+	// la tabla en CADA despacho, hubiera uno o ninguno, o sea el camino mas
+	// caliente del emulador pagando 256 lecturas por cuadro. Hoy la resolucion es
+	// O(1) por el indice PC->hueco (MvuSbIndex.h) con la confirmacion contra la
+	// tabla, y el pago fijo con la tabla vacia es UNA lectura. El barrido sigue
+	// existiendo como oraculo de la autoverificacion muestreada y como camino de
+	// reserva si el indice se auto-destituye.
 	void* SbResolve(u32 startPC_bytes, const void* pState96, s32 budget);
 
 	// Cierre del episodio (recMicroVU1::Execute, tras volver startFunct):
@@ -405,6 +430,19 @@ namespace mVUSuperblock
 		std::atomic<u64> trials{0};          // ventanas de prueba declaradas
 		std::atomic<u64> spot_checks{0};     // comprobaciones puntuales de un TRUSTED
 		std::atomic<u64> unprofitable{0};    // VALIDATED sin ganancia: equivale pero no vale la pena
+		// 0.6.33 — salud del INDICE PC->hueco. Un superbloque «conectado de verdad
+		// al emulador» no puede depender de una suposicion. index_desync cuenta los
+		// enlaces rechazados porque ese PC ya tenia otro hueco (la invariante de
+		// «un hueco por PC» rota). index_audited/index_mismatch son la
+		// AUTOCOMPROBACION: cada kSbIndexAuditPeriod despachos, SbResolve hace
+		// ADEMAS el barrido viejo de la tabla y lo compara con lo que dijo el
+		// indice — un indice que miente se pilla solo, sin pagar el barrido en cada
+		// despacho (muestrear es lo que hace viable comprobar; callar no). Ambos
+		// contadores tienen que decir 0 mismatches en cualquier informe con el motor
+		// encendido; si no, el informe lo escribe en la cara.
+		std::atomic<u64> index_desync{0};
+		std::atomic<u64> index_audited{0};
+		std::atomic<u64> index_mismatch{0};
 	};
 	extern Stats g_stats[2];
 
