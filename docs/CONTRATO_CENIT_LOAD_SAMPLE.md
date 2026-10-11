@@ -469,8 +469,8 @@ lee de más:**
   tocarlo nunca), y una prueba de aliasing asumía un enlace vivo que la prueba anterior
   había liberado.
   Por mutación se comprobó que el arnés **sí mira**, y el ejecutor de esa comprobación
-  está versionado (`bash tools/arneses/mutacion_h11.sh`, RC=0 solo si los nueve
-  mutantes caen y las nueve anclas se encuentran): `Bind` que pisa en silencio → 15
+  está versionado (`bash tools/arneses/mutacion_h11.sh`, dos fases, RC=0 solo si caen
+  los **once** mutantes y todas las anclas se encuentran): `Bind` que pisa en silencio → 15
   fallos; `Unbind` sin comprobar el dueño → 3; `IdxOf` con `>>4` → 154; perder el
   `id+1` → 44; `ClearAll` a media tabla → 3; `Count` contando vacíos → 12; `SlotOf` sin
   máscara → 2; quitar el guard del techo del id en `Bind` → 1; quitarlo en `Unbind` → 1.
@@ -486,6 +486,17 @@ lee de más:**
   primera versión re-copiaba el encabezado limpio sobre el mutante en cada corrida, así
   que los siete mutantes salieron «NO DETECTADO» estando el código sano. Quedó escrito
   en el script, porque un verde falso puede venir del verificador y no del verificado.
+  **Fase 2 — los dos acoples que el arnés no puede ver.** `kSlots == kProbeSlots` y
+  `kSbMaxVariants <= kMaxSlotId` son `static_assert` del **TU del motor**, no del header:
+  `MvuSbIndex.h` es libre de dependencias a propósito y no ve ni la sonda ni la tabla.
+  Se prueba mutando el **dato del header** (`kSlots` 2048→1024, `kMaxSlotId` 65534→200) y
+  analizando el TU completo con los flags del CI: los dos caen al compilar con el mensaje
+  del assert, y hay un **control con la caja sin mutar** que exige RC=0 antes de creer
+  ningún RC=1 — sin ese control, un rojo por ruta mal armada contaría como "detectado"
+  y la fase sería decorativa. La primera versión de esta fase **lo fue**: mutaba la
+  comparación del assert (`kSbMaxVariants + 1u <= kMaxSlotId`) y salía RC=0, porque
+  256+1 sigue cabiendo en 65534 — o sea el "mutante" no violaba ninguna invariante y su
+  verde no probaba nada. Se muta el dato, no la ley, que es lo que un cambio real mueve.
 - `jnidict.py`: que la enum no tenga huecos ni cambie de orden, que ninguna
   etiqueta prometa velocidad, que `g_exitMask` declare exactamente
   `kRequiredRegions` y que **cada región declarada esté realmente hashkeada**
