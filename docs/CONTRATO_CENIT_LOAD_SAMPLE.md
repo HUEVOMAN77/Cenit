@@ -347,14 +347,83 @@ Reglas del HUD, codificadas en la propia etiqueta y no delegadas al llamador:
 - Breaker de proceso: 3 divergencias sin superficie de rollback; con superficie,
   8 repartidas en ≥ 3 candidatos distintos.
 
+### Resolución del candidato: índice PC→hueco y su autoverificación (0.6.33)
+
+Dueño de la estructura: `pcsx2/arm64/MvuSbIndex.h` (header puro, sin
+dependencias de PCSX2, por la misma razón que `MvuSbLife.h`: es verificable en
+host). Nadie más define el dominio ni el código de la casilla.
+
+| Término | Valor | Quién lo fija |
+|---|---|---|
+| Dominio de PCs de entrada de VU1 | `kSlots = 2048` (`0x4000/8`) | `MvuSbIndex.h`; es el mismo dominio que `mVUTraceProbe::kProbeSlots` y que `PcIdx()` del motor |
+| Código de casilla | `uint16_t` con `id+1`, `0` = vacío | `MvuSbIndex.h` (el hueco 0 no puede confundirse con «nadie») |
+| `Bind` | `1` nuevo · `0` idempotente · `-2` invariante rota | `-2` **no pisa** el enlace existente: rechaza el armado y la cadena normal toma el despacho |
+| `Unbind` | solo si la casilla apunta a *ese* hueco | un `Unbind` mal dirigido no le roba el enlace a un candidato legítimo |
+| Muestreo de autoverificación | `kSbIndexAuditPeriod = 512` | política de muestreo del motor, no un número medido |
+
+**El defecto que esto cierra, medido:** con el motor encendido, `SbResolve` corre
+en *cada* despacho de VU1 (por el stub emitido y por la ruta lenta) y barría los
+256 huecos de la tabla en cada uno. El encabezado del motor decía «escaneo
+`O(vivos)` y caro-cero cuando no hay candidatos» y las dos cosas eran falsas:
+el camino más caliente del emulador pagaba 256 lecturas aunque la tabla estuviera
+vacía. Hoy la resolución es `O(1)`.
+
+**Tres leyes, en este orden, para que el acelerador no pueda mandar:**
+
+1. **La tabla es la única fuente de verdad.** Lo que devuelve el índice se
+   confirma contra el hueco (`inUse` + `startPC` exacto). Un índice equivocado a
+   lo sumo *pierde* un despacho —lo toma la cadena normal—; no puede servir una
+   variante en un PC que no es el suyo.
+2. **Se comprueba muestreando, no confiando.** Cada `kSbIndexAuditPeriod`
+   resoluciones se hace *además* el barrido viejo y se confronta. Cualquier
+   diferencia cuenta `index_mismatch`, toma el resultado del barrido para ese
+   despacho y **destituye el índice para el resto de la sesión**: el motor vuelve
+   al `O(256)` de siempre, más lento pero intacto, y el informe lo escribe.
+3. **La disciplina de enlace es del motor.** `LinkSlot` justo después de escribir
+   `startPC`; `UnlinkSlot` antes de dejar `inUse = false` o de cambiar el PC de un
+   hueco ocupado. Los sitios son `AllocSlot` (segunda pasada), `SbArmCompile`,
+   `SbCloseCompile` (candidato quemado), `SbFinish` (retiro por ventana) y
+   `ResetTableForEnable`. `Retire()` **no** desenlaza a propósito: deja el hueco
+   asignado (`inUse` sigue diciendo que ese PC ya fue juzgado), así que su enlace
+   sigue siendo válido.
+
+**Unidades de los contadores del informe** (`logs/vu_superblock.txt`):
+
+| Contador | Qué cuenta exactamente |
+|---|---|
+| `indice desync` | enlaces rechazados porque ese PC ya tenía otro hueco (`Bind` devolvió `-2`) |
+| `indice auditado` | resoluciones en las que se pagó el barrido de confronta |
+| `indice mism` | auditorías en las que índice y barrido dijeron números distintos |
+
+`index_mismatch > 0` no es un fallo del motor: es el motor habiéndose salvado
+solo, y el informe dice `confianza=DESTITUIDA (motor en barrido O(256))`. Con
+`mism=0` el acelerador es equivalente al barrido en todo lo muestreado.
+
+**Dos precisiones que van escritas aquí porque sin ellas el párrafo de arriba se
+lee de más:**
+
+1. **El sentido del desfase importa.** `AuditIndex` cuenta aparte «la tabla tiene
+   el hueco y el índice aún no» (`missing`) y «el índice tiene algo que la tabla
+   no» (`ghost`). El vuelco corre en el hilo del HUD/JNI mientras el dispatcher de
+   VU1 escribe la tabla **sin lock** — como ya hace todo lo que este informe lee
+   desde 0.6.32 —, así que `missing` puede ser un instante legítimo de armado
+   (`SbArmCompile` escribe `startPC` antes de llamar a `LinkSlot`) y sale escrito
+   como fotografía a destiempo. `ghost` no tiene explicación benigna y sale como
+   `AVISO`. En ningún caso una variante servida por error: `FindSlotForPc`
+   confirma `inUse` + PC exacto antes de devolver nada.
+2. **La prueba dura es el muestreo, no la auditoría.** `FindSlotForPc` confronta
+   índice y barrido en el *mismo* hilo dispatcher, sin ventana de instante; por eso
+   `mism` es el número que manda y la auditoría casilla-por-casilla es complemento
+   (cubre las 2048 casillas, el muestreo no).
+
 ### Quién verifica esto, sin teléfono
 
 - `Harness9` (`tools/arneses/h9-src/`): 231 comprobaciones sobre la máquina.
-- `Harness10` (`tools/arneses/h10-src/`, **34 comprobaciones**, 1,1 s): **arnés de
+- `Harness10` (`tools/arneses/h10-src/`, **35 comprobaciones**, 1,1 s): **arnés de
   sintaxis, no de lógica.** Tres patas:
   - **A — autocontención:** cada cabecera del área arm64 (`MvuSbLife.h`,
-    `MvuSuperblock-arm64.h`, `MvuTraceProbe-arm64.h`) se compila **sola**; un header que
-    funciona solo porque otro ya trajo sus tipos se ve aquí, no en el CI.
+    `MvuSbIndex.h`, `MvuSuperblock-arm64.h`, `MvuTraceProbe-arm64.h`) se compila **sola**;
+    un header que funciona solo porque otro ya trajo sus tipos se ve aquí, no en el CI.
   - **B — contrato:** fija con `static_assert` lo que este contrato publica (los ocho
     ordinales de `State`, `kValidPairs`/`kValidWindows`/`kMinGainPairs`/
     `kTrustedGainPermille`/`kBudgetEpisodes`, la igualdad de `kRequiredRegions` con las
@@ -378,6 +447,45 @@ Reglas del HUD, codificadas en la propia etiqueta y no delegadas al llamador:
   filtro de rutas no aceptaba el `64` de los nombres de archivo.
   Nada enlaza, así que una declaración sin definición **no** es un fallo de este arnés
   (eso lo cubren `jnisig.py` y el enlace del APK).
+- `Harness11` (`tools/arneses/h11-src/`, **14067 comprobaciones**): **arnés de lógica
+  del índice**, no de sintaxis. Compara el índice contra un modelo lineal de referencia
+  (el barrido tal como lo hacía `SbResolve`) en cinco frentes: el contrato del dominio
+  (`kSlots == 2048` y `IdxOf == (pc >> 3) & 2047`, la misma fórmula que `PcIdx` y la
+  sonda), la semántica de cada operación aislada (`Lookup` en vacío, `Bind` nuevo /
+  idempotente / rechazado, `Unbind` dirigido y mal dirigido, `Count`, `ClearAll`, y el
+  truco `id+1` que evita que el hueco 0 se lea como «nadie»), la reasignación (el caso
+  real de `AllocSlot`: el PC viejo queda libre, el nuevo se encuentra, el vecino no se
+  pisa, y el orden inverso se rechaza con `-2`), el **diferencial de 20 000 pasos** con
+  semilla fija comprobando *después de cada operación* las 2048 casillas, y la tabla
+  llena (los 256 huecos conviven y todos resuelven).
+  Qué **no** prueba, dicho para que nadie lea de más en su verde: que el *motor* enlaze
+  en los momentos correctos — eso vive en `MvuSuperblock-arm64.cpp` y lo cubren la
+  autoverificación muestreada y la auditoría casilla-por-casilla de `DumpReport`. Un
+  arnés de host no ve esos llamadores.
+  El arnés se auto-valúa: si la secuencia no pasó por los cinco caminos (armar,
+  reasignar, liberar, rechazar, idempotente) el verde se declara inválido. Esa
+  comprobación encontró dos defectos del propio arnés antes de cerrar la versión: el
+  camino idempotente salía por azar 1 de cada 2048 pasos (hubiera quedado verde sin
+  tocarlo nunca), y una prueba de aliasing asumía un enlace vivo que la prueba anterior
+  había liberado.
+  Por mutación se comprobó que el arnés **sí mira**, y el ejecutor de esa comprobación
+  está versionado (`bash tools/arneses/mutacion_h11.sh`, RC=0 solo si los nueve
+  mutantes caen y las nueve anclas se encuentran): `Bind` que pisa en silencio → 15
+  fallos; `Unbind` sin comprobar el dueño → 3; `IdxOf` con `>>4` → 154; perder el
+  `id+1` → 44; `ClearAll` a media tabla → 3; `Count` contando vacíos → 12; `SlotOf` sin
+  máscara → 2; quitar el guard del techo del id en `Bind` → 1; quitarlo en `Unbind` → 1.
+  Los nueve detectados. Los dos últimos son los que demostraron que esas dos
+  comprobaciones no son decorativas: sin el guard, un `slotId` que el `uint16_t` no
+  puede expresar trunca a 0 — que es «vacío» — y `Bind` se reportaría «idempotente» habiendo
+  enlazado nada, o `Unbind` afirmaría que borró un enlace que nunca existió.
+  El último de la lista vieja (máscara) **escapó en el primer intento**: el arnés estaba
+  verde con el código roto, así que se añadió la comprobación de `idx` fuera de dominio;
+  un índice que escribe fuera del arreglo no es un índice más lento, es memoria
+  corrupta, y eso tiene que costar un rojo aunque hoy nadie lo provoque.
+  Y el propio script de mutación se cayó una vez por su lado, no por el arnés: la
+  primera versión re-copiaba el encabezado limpio sobre el mutante en cada corrida, así
+  que los siete mutantes salieron «NO DETECTADO» estando el código sano. Quedó escrito
+  en el script, porque un verde falso puede venir del verificador y no del verificado.
 - `jnidict.py`: que la enum no tenga huecos ni cambie de orden, que ninguna
   etiqueta prometa velocidad, que `g_exitMask` declare exactamente
   `kRequiredRegions` y que **cada región declarada esté realmente hashkeada**
