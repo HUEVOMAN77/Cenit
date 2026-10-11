@@ -1,19 +1,63 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Mandos en pantalla: estilo "fantasma" (casi invisible en reposo,
-         cobra vida al presionar). Negro puro + anillos azul-violeta tenues. -->
-    <color name="overlay_ring">#596B7FAD</color>
-    <color name="overlay_ring_pressed">#CC94A8FF</color>
-    <color name="overlay_fill">#0A121A28</color>
-    <color name="overlay_fill_pressed">#2A243458</color>
-    <color name="overlay_text">#C2CBD8</color>
-    <color name="overlay_text_pressed">#FFFFFFFF</color>
-    <color name="overlay_ripple">#3380A0FF</color>
+    <!-- ==========================================================================
+         Mandos en pantalla — paleta "neón fantasma" (0.6.34)
+         ==========================================================================
+         El pedido fue que se vean como la captura del usuario (contornos finos
+         cian/magenta sobre negro, formas achaflanadas) pero MAS transparentes,
+         para que no tapen el juego. Dos reglas que se sostienen en estos valores:
 
-    <!-- Paleta del stick analógico -->
-    <color name="overlay_stick_ring">#99A9B8E8</color>
-    <color name="overlay_stick_ring_active">#E0A9BCFF</color>
-    <color name="overlay_stick_base">#B30B1018</color>
-    <color name="overlay_stick_knob_hi">#FF39445A</color>
-    <color name="overlay_stick_knob_lo">#FF0C1017</color>
+         1) El RELLENO es prácticamente nada (#0… → 0-8 % de opacidad). Lo que se
+            ve es el contorno, no la pastilla. Un relleno de 25 % sobre un menú
+            brillante ya es una mancha.
+         2) El CONTORNO en reposo anda por el 45-55 % de opacidad y al presionar
+            sube a ~90 %. Es el único canal por el que el usuario sabe que tocó:
+            bajarlo más sería un mando que no responde, y subirlo en reposo sería
+            tapar el juego. El pressed es generoso a propósito; el reposo no.
+            La MISMA banda aplica a los glifos (Δ ○ ✕ □, la cruceta) y al texto de
+            las etiquetas: no es una ley de los anillos, es del mando entero.
+
+         Cian y magenta no son decorativas: se alternan por familia de botones
+         (hombro izquierdo cian / derecho magenta, igual SELECT/START) para que
+         se lean como pares, igual que en la captura. -->
+
+    <!-- Neón base -->
+    <color name="neon_cyan">#FF35E7FF</color>
+    <color name="neon_magenta">#FFC24DFF</color>
+
+    <!-- Contornos de las pastillas (L1/L2/R1/R2/SELECT/START). El estado
+         "reposo" es el alpha bajo del que habla la regla 2. -->
+    <color name="overlay_ring">#736B7FAD</color>
+    <color name="overlay_ring_pressed">#E694A8FF</color>
+    <color name="overlay_ring_cyan">#8C35E7FF</color>
+    <color name="overlay_ring_cyan_pressed">#F06FF2FF</color>
+    <color name="overlay_ring_magenta">#8CC24DFF</color>
+    <color name="overlay_ring_magenta_pressed">#F0DA8CFF</color>
+
+    <!-- Relleno: casi invisible en reposo, apenas insinuado al presionar. -->
+    <color name="overlay_fill">#00000000</color>
+    <color name="overlay_fill_pressed">#14243458</color>
+
+    <!-- Texto de los botones (L1/L2/SELECT/…): legible sin ser un cartel. Mismo
+         presupuesto de la regla 2 que contornos y glifos (#8C = 55 %): la primera
+         versión de esta paleta lo dejaba en #B3 = 70 %, y el verificador lo dejó
+         pasar porque solo miraba los anillos. Una etiqueta al 70 % sobre un anillo
+         al 55 % es el mando pintándose dos veces. -->
+    <color name="overlay_text">#8CC2CBD8</color>
+    <color name="overlay_text_pressed">#FFFFFFFF</color>
+    <color name="overlay_ripple">#2680A0FF</color>
+
+    <!-- ==========================================================================
+         Paleta del stick analógico (JoystickView lo pinta a mano en Canvas)
+         ==========================================================================
+         En la captura el stick es un disco oscuro con un aro cian brillante y
+         un anillo exterior fino. Se baja el alfa de la base (antes #B3 = 70 %
+         de negro sólido, que era un parche opaco encima del juego) y se deja el
+         aro como lo único que se ve. -->
+    <color name="overlay_stick_ring">#8C35E7FF</color>
+    <color name="overlay_stick_ring_active">#F06FF2FF</color>
+    <color name="overlay_stick_ring_outer">#66C24DFF</color>
+    <color name="overlay_stick_base">#4D0B1018</color>
+    <color name="overlay_stick_knob_hi">#CC39445A</color>
+    <color name="overlay_stick_knob_lo">#CC0C1017</color>
 </resources>
