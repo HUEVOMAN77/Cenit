@@ -65,7 +65,7 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_pad_l2"
-            style="@style/PSX2.OverlayPill"
+            style="@style/PSX2.OverlayPill.WingCyanLeft"
             android:layout_width="60dp"
             android:layout_height="34dp"
             android:layout_marginEnd="6dp"
@@ -74,7 +74,7 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_pad_l1"
-            style="@style/PSX2.OverlayPill"
+            style="@style/PSX2.OverlayPill.WingMagentaRight"
             android:layout_width="60dp"
             android:layout_height="34dp"
             android:text="L1"
@@ -96,7 +96,7 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_pad_r2"
-            style="@style/PSX2.OverlayPill"
+            style="@style/PSX2.OverlayPill.WingCyanRight"
             android:layout_width="60dp"
             android:layout_height="34dp"
             android:layout_marginEnd="6dp"
@@ -105,7 +105,7 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_pad_r1"
-            style="@style/PSX2.OverlayPill"
+            style="@style/PSX2.OverlayPill.WingMagentaLeft"
             android:layout_width="60dp"
             android:layout_height="34dp"
             android:layout_marginEnd="6dp"
@@ -172,7 +172,7 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_pad_select"
-            style="@style/PSX2.OverlayPill"
+            style="@style/PSX2.OverlayPill.Cyan"
             android:layout_width="wrap_content"
             android:layout_height="38dp"
             android:layout_marginEnd="8dp"
@@ -181,7 +181,7 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_pad_start"
-            style="@style/PSX2.OverlayPill"
+            style="@style/PSX2.OverlayPill.Magenta"
             android:layout_width="wrap_content"
             android:layout_height="38dp"
             android:layout_marginStart="8dp"
@@ -235,7 +235,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_pad_y"
-                style="@style/PSX2.OverlayCircle"
+                style="@style/PSX2.OverlayCircle.FaceCyan"
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:layout_row="0"
@@ -257,7 +257,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_pad_x"
-                style="@style/PSX2.OverlayCircle"
+                style="@style/PSX2.OverlayCircle.FaceMagenta"
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:layout_row="1"
@@ -279,7 +279,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_pad_b"
-                style="@style/PSX2.OverlayCircle"
+                style="@style/PSX2.OverlayCircle.FaceMagenta"
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:layout_row="1"
@@ -301,7 +301,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_pad_a"
-                style="@style/PSX2.OverlayCircle"
+                style="@style/PSX2.OverlayCircle.FaceCyan"
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:layout_row="2"
@@ -369,7 +369,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_pad_dir_top"
-                style="@style/PSX2.OverlayCircle"
+                style="@style/PSX2.OverlayCircle.Petal"
                 android:layout_width="44dp"
                 android:layout_height="44dp"
                 android:layout_row="0"
@@ -395,7 +395,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_pad_dir_left"
-                style="@style/PSX2.OverlayCircle"
+                style="@style/PSX2.OverlayCircle.Petal"
                 android:layout_width="44dp"
                 android:layout_height="44dp"
                 android:layout_row="1"
@@ -421,7 +421,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_pad_dir_right"
-                style="@style/PSX2.OverlayCircle"
+                style="@style/PSX2.OverlayCircle.Petal"
                 android:layout_width="44dp"
                 android:layout_height="44dp"
                 android:layout_row="1"
@@ -447,7 +447,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_pad_dir_bottom"
-                style="@style/PSX2.OverlayCircle"
+                style="@style/PSX2.OverlayCircle.Petal"
                 android:layout_width="44dp"
                 android:layout_height="44dp"
                 android:layout_row="2"

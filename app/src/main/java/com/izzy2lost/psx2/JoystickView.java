@@ -20,6 +20,10 @@ public class JoystickView extends View {
     private final Paint basePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint innerRingPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint outerRingPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    // Arco magenta del borde exterior: en la referencia es lo que hace que el
+    // stick se lea como parte del mismo set que los hombros, no como un disco
+    // suelto. Es decorativo y se dibuja con sweepAngle fijo, sin estado.
+    private final Paint accentArcPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint knobPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint knobRimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private float centerX, centerY, radius, knobX, knobY, knobRadius;
@@ -51,10 +55,17 @@ public class JoystickView extends View {
         innerRingPaint.setStrokeWidth(dp(1));
         innerRingPaint.setAlpha(120);
 
-        // Anillo exterior: el aro azul/violeta que se ve en reposo
+        // Anillo exterior: el aro que se ve en reposo
         outerRingPaint.setColor(ring);
         outerRingPaint.setStyle(Paint.Style.STROKE);
         outerRingPaint.setStrokeWidth(dp(2.5f));
+
+        // Arco de acento (magenta), dos tramos opuestos del borde exterior.
+        accentArcPaint.setColor(ContextCompat.getColor(getContext(),
+                R.color.overlay_stick_ring_outer));
+        accentArcPaint.setStyle(Paint.Style.STROKE);
+        accentArcPaint.setStrokeWidth(dp(3.5f));
+        accentArcPaint.setStrokeCap(Paint.Cap.ROUND);
 
         knobPaint.setStyle(Paint.Style.FILL);
         knobRimPaint.setStyle(Paint.Style.STROKE);
@@ -122,6 +133,14 @@ public class JoystickView extends View {
         canvas.drawCircle(centerX, centerY, radius, basePaint);
         // Anillo exterior (aro)
         canvas.drawCircle(centerX, centerY, radius, outerRingPaint);
+        // Dos arcos de acento en el borde, opuestos (centrados en 137° y 317°):
+        // el detalle que en la referencia hace que el stick pertenezca al mismo
+        // set neón que los hombros.
+        final float arc = radius + dp(2f);
+        final float boxL = centerX - arc, boxT = centerY - arc;
+        final float boxW = arc * 2f, boxH = arc * 2f;
+        canvas.drawArc(boxL, boxT, boxL + boxW, boxT + boxH, 110f, 55f, false, accentArcPaint);
+        canvas.drawArc(boxL, boxT, boxL + boxW, boxT + boxH, 290f, 55f, false, accentArcPaint);
         // Anillo interior alrededor de la perla
         canvas.drawCircle(centerX, centerY, radius * 0.78f, innerRingPaint);
         // Perla: degradado + textura de puntos + borde iluminado
