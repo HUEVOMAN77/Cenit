@@ -23,6 +23,7 @@
 
 #include "microVU_Misc-arm64.h"
 #include "MvuObservedEntries.h"
+#include "MvuFastPath.h"
 #include "MvuTraceProbe-arm64.h"
 #include "MvuSuperblock-arm64.h"
 #include "microVU_Persist-arm64.h"
@@ -473,7 +474,22 @@ struct microVU
 	// against microProgram::writeGenAtAnchor so mVUcacheProg only pays the
 	// whole-image drift hash when a write can actually have occurred since
 	// the program's identity was anchored.
+	//
+	// Cenit 0.6.35: tambien es el candidateEpoch del fast path — la generacion
+	// que identifica el MICROCODIGO con el que se construyo una respuesta
+	// memoizada. mVUclear la sube en CADA escritura a la imagen micro, sin
+	// excepciones, asi que ninguna entrada del fast path puede sobrevivir a un
+	// cambio de microcodigo.
 	u64 microMemWriteGen;
+
+	// Cenit 0.6.35 — epoca del code cache. Sube en mVUreset (destruye y
+	// rehace el cache, y rehace el optionsSentinel) y en mVUclose (libera los
+	// programas y sus microBlockManagers). Es lo que hace imposible servir un
+	// puntero obsoleto: los UNICOS puntos donde se libre un microProgram o su
+	// gestor de bloques son mVUdeleteProg, y ese solo se llama desde ahi. Una
+	// entrada memoizada con otra epoca se rechaza, aunque el allocator haya
+	// reutilizado la direccion.
+	u64 codeCacheEpoch;
 
 	microProgManager               prog;
 	microProfiler                  profiler;
@@ -600,6 +616,12 @@ private:
 
 public:
 	inline int getFullListCount() const { return fListI; }
+	// Cenit 0.6.35: cuantos refs recorren los barridos de la rama rapida. Es
+	// quickLookup.size() y NO qListI: add() mete en esa lista TODOS los bloques,
+	// incluidos los needExactMatch (mascara mediante). Es el limite superior del
+	// coste del barrido que el fast path reemplaza, y lo que decide si vale la
+	// pena preguntar al memo (ver kMinRecordPos en MvuFastPath.h).
+	inline int getLookupCount() const { return static_cast<int>(quickLookup.size()); }
 	microBlockManager()
 	{
 		qListI = fListI = 0;
@@ -662,15 +684,24 @@ public:
 		}
 		return thisBlock;
 	}
-	__ri microBlock* search(microVU& mVU, microRegInfo* pState)
+	// outPos (opcional, Cenit 0.6.35): posicion del acierto dentro del orden de
+	// insercion que este mismo barrido recorre. La pide SOLO el fast path del
+	// despacho de VU1, para decidir si el barrido era lo bastante largo como para
+	// que memorizar su respuesta valga la pena (ver kMinRecordPos en
+	// MvuFastPath.h). No cambia que se devuelve: es el mismo primer match. Los
+	// demas llamadores pasan nullptr y no pagan nada.
+	__ri microBlock* search(microVU& mVU, microRegInfo* pState, u32* outPos = nullptr)
 	{
 		if (pState->needExactMatch)
 		{
 			microBlockLink* prevI = nullptr;
-			for (microBlockLink* linkI = fBlockList; linkI != nullptr; prevI = linkI, linkI = linkI->next)
+			u32 pos = 0;
+			for (microBlockLink* linkI = fBlockList; linkI != nullptr; prevI = linkI, linkI = linkI->next, ++pos)
 			{
 				if (mVU.compareState(pState, &linkI->block.pState) == 0)
 				{
+					if (outPos)
+						*outPos = pos;
 					if (linkI != fBlockList)
 					{
 						prevI->next = linkI->next;
@@ -696,17 +727,38 @@ public:
 			// layout pin (blockType inside quick64[0]) is asserted in
 			// microVU-arm64.h next to the struct.
 			const u64 quick64 = pState->quick64[0];
+			u32 pos = 0;
 			for (const microBlockLinkRef& ref : quickLookup)
 			{
+				bool hit;
 				if (mVUsFlagHack)
-				{
-					if ((ref.quick & ~0x3002) != (quick64 & ~0x3002)) continue;
-				}
-				else if (ref.quick != quick64) continue;
+					hit = ((ref.quick & ~0x3002) == (quick64 & ~0x3002));
+				else
+					hit = (ref.quick == quick64);
 
-				if (doConstProp && (ref.pBlock->pState.vi15 != pState->vi15))  continue;
-				if (doConstProp && (ref.pBlock->pState.vi15v != pState->vi15v)) continue;
-				return ref.pBlock;
+				if (hit)
+				{
+					// doConstProp es constexpr-false en arm64 (microVU_Misc-arm64.h),
+					// o sea las dos comprobaciones vi15/vi15v de arriba estaban
+					// MUERTAS: nunca podian descartar un match. Se re-escribio aqui
+					// como el filtro vivo que la version anterior fingia tener: si
+					// alguien enciende la propagacion de constantes, la clave del
+					// memo (quickKey) no la cubre y esto debe seguir filtrando.
+					// Hasta que ese filtro exista, el fast path se apaga.
+					if constexpr (doConstProp)
+					{
+						if ((ref.pBlock->pState.vi15 != pState->vi15) ||
+							(ref.pBlock->pState.vi15v != pState->vi15v))
+						{
+							++pos;
+							continue;
+						}
+					}
+					if (outPos)
+						*outPos = pos;
+					return ref.pBlock;
+				}
+				++pos;
 			}
 		}
 		return nullptr;
