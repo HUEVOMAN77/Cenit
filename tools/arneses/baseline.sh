@@ -139,7 +139,11 @@ runh10() { # arnes de SINTAXIS del area arm64: tres patas, y cada una cuenta.
   # la caja va PRIMERA en la ruta de includes, asi que las tres patas ven siempre el
   # arbol vivo. La pata A ademas la usa aislada (-DH10_HEADER): lo que prueba es que el
   # header funciona SOLO, sin que otro include le haya traido sus tipos antes.
-  local headers="MvuSbLife.h MvuSbIndex.h MvuSuperblock-arm64.h MvuTraceProbe-arm64.h"
+  # MvuFastPath.h (0.6.35) entra en la lista por la misma razon que las otras: el CI la
+  # includea desde microVU-arm64.h, y h12 la prueba en host con g++ -std=c++17. Esta pata
+  # la prueba AISLADA y con el standard del CI (gnu++20), que es lo que ni h12 ni el CI
+  # comprueban por si solos.
+  local headers="MvuSbLife.h MvuSbIndex.h MvuSuperblock-arm64.h MvuTraceProbe-arm64.h MvuFastPath.h"
   for c in $headers; do
     if [ ! -f "$CPP/$c" ]; then echo "h10: FALTA $c en el repo ($CPP)"; RC=1; return 1; fi
     cp "$CPP/$c" "$box/" || { echo "h10: no se pudo copiar $c"; RC=1; return 1; }
@@ -226,13 +230,69 @@ runh11() { # arnes de LOGICA del indice PC->hueco del superbloque (0.6.33).
   echo "$OUT" | grep -q "Comprobaciones" || { echo "h11: el arnes no imprime recuento"; RC=1; }
 }
 
+runh12() { # arnes de LOGICA del fast path VU1 (memo de despacho, 0.6.35).
+  #
+  # MvuFastPath.h es C++ puro y sin dependencias, igual que MvuSbIndex.h, para poder
+  # verificarlo en host. Que hace falta esta medido, no supuesto: search() de la rama
+  # rapida recorre quickLookup LINEALMENTE en cada despacho de VU1, y un memo que se
+  # equivoca no cuesta velocidad — cuesta saltar a la hostEntry de un bloque que nadie
+  # pidio, o sea ejecutar microcodigo que no es el del barrido. Por eso el arnes no mira
+  # «funciona rapido» sino EQUIVALENCIA bidireccional contra un modelo lineal fiel del
+  # search() real (mismo dedup de add(), misma mascara ~0x3002, mismo orden de insercion):
+  # ningun acierto puede ser falso, y con el contexto vivo el memo TIENE que acertar
+  # (si no, es solo costo y el verde estaria tapando una optimizacion muerta).
+  #
+  # Que NO prueba este arnes, y hay que decirlo para que nadie lea de mas en su verde:
+  # (a) que el MOTOR llame al memo en el momento correcto — eso vive en
+  #     microVU-arm64.cpp, que host NO puede analizar (tira de <arm_neon.h>); lo fija el
+  #     texto mutacion_h12.sh fase 2 y lo compila el CI, (b) que el llamador pase la
+  #     posicion que el barrido realmente recorrio, (c) cuanto se usa en un juego real:
+  #     esa es justo la linea de telemetria que el telefono vuelca al cerrar el VM.
+  #
+  # El arnes se auto-vale: si la secuencia no paso por los caminos (servir, barrido
+  # corto, miss, mascara volteada, micro reescrito, reset, gestor reasignado, ventana
+  # movida) el verde se declara invalido y ruida. Y mutacion_h12.sh, aparte, rompe 26
+  # cosas del encabezado una por una y exige 26 rojos con nombre: sin eso, «0 fallos»
+  # es solo un numero.
+  local box=$WORK/h12
+  if [ -z "$CXX" ]; then
+    echo "h12: SIN COMPILAR - no hay g++ de host (CXX='$CXX'); la logica del memo de despacho NO se verifico en esta corrida"
+    RC=1
+    return
+  fi
+  rm -rf "$box"; mkdir -p "$box"
+  cp "$HERE/h12-src/fastpath_test.cpp" "$box/" || { echo "h12: no se pudo traer el arnes"; RC=1; return; }
+  # Regla anti-copia-vieja: el encabezado se trae DEL REPO en cada corrida.
+  if [ ! -f "$CPP/MvuFastPath.h" ]; then echo "h12: FALTA MvuFastPath.h en el repo ($CPP)"; RC=1; return; fi
+  cp "$CPP/MvuFastPath.h" "$box/" || { echo "h12: no se pudo copiar MvuFastPath.h"; RC=1; return; }
+  # -std=c++17 y -Wall -Wextra: el estandar del arnes es el que el encabezado promete
+  # (inline variables, if constexpr en el TU es C++20 pero el header no lo usa), asi que
+  # un header que de pronto necesite mas se ve aqui y no en el CI.
+  if ! "$CXX" -std=c++17 -Wall -Wextra -I"$box" -o "$box/h12" "$box/fastpath_test.cpp" 2>"$box/compile.err"; then
+    echo "h12: FALLO DE COMPILACION"; head -40 "$box/compile.err"; RC=1; return
+  fi
+  if [ -s "$box/compile.err" ]; then
+    echo "h12: avisos del compilador (con -Wall -Wextra no se dejan pasar)"
+    head -20 "$box/compile.err"; RC=1
+  fi
+  OUT=$("$box/h12" 2>/dev/null | grep -E "Comprobaciones|FALLO|testigos")
+  echo "$OUT"
+  echo "$OUT" | grep -qE ", [1-9][0-9]* Fallos" && RC=1
+  echo "$OUT" | grep -q "Comprobaciones" || { echo "h12: el arnes no imprime recuento"; RC=1; }
+  # Anti-verde-vacio: los testigos tienen que salir no-cero. Un diferencial que nunca
+  # audito un acierto servido no probo la invariante (i), y uno sin rechazos legitimos
+  # no probo la invalidacion. El propio arnes lo Comprueba, pero si la linea de testigos
+  # desaparece del stdout la comprobacion del arnes no se entera: se exige aqui.
+  echo "$OUT" | grep -q "testigos:" || { echo "h12: falta la linea de testigos"; RC=1; }
+}
+
 ONLY=${ARNES:-all}
 case "$ONLY" in
-  all|h5|h6|h7|h8|h9|h10|h11) ;;
+  all|h5|h6|h7|h8|h9|h10|h11|h12) ;;
   # Un nombre mal escrito tiene que ruidar: si no, "corrí los arneses" se convierte
   # en "no corrí ninguno y volvi con RC=0", que es exactamente el verde vacio que
   # este script existe para evitar.
-  *) echo "baseline.sh: ARNES='$ONLY' no existe (valores: all h5 h6 h7 h8 h9 h10 h11)"; exit 2 ;;
+  *) echo "baseline.sh: ARNES='$ONLY' no existe (valores: all h5 h6 h7 h8 h9 h10 h11 h12)"; exit 2 ;;
 esac
 [ "$ONLY" = all ] || [ "$ONLY" = h5 ] && run h5 Harness5 GameLoadClassifier CenitLoadSample LoadPolicy LoadTrend CenitTelemetry
 [ "$ONLY" = all ] || [ "$ONLY" = h6 ] && run h6 Harness6 DynamicResolutionGovernor GameLoadClassifier AdaptiveProfile CenitLoadSample LoadPolicy LoadTrend CenitTelemetry GameSerialUtils
@@ -258,6 +318,14 @@ esac
 # pierde velocidad — sirve codigo que nadie valido. Por eso la equivalencia con el
 # barrido se fuerza en host, casilla por casilla, antes de encenderlo en el telefono.
 [ "$ONLY" = all ] || [ "$ONLY" = h11 ] && runh11
+# h12 (0.6.35): la LOGICA del memo de despacho de VU1. h11 mira el indice del
+# superbloque — que no esta activo en esta fase — y h10 la sintaxis del area; ninguno
+# mira RESOLUCION DE DESPACHO, que es el camino por el que pasa cada VU1 de cada frame.
+# El memo es un acelerador, y un acelerador que se equivoca no pierde velocidad: ejecuta
+# un bloque que nadie pidio. Por eso la equivalencia con el barrido se fuerza en host,
+# con las dos direcciones (nada falso servido, nada vivo negado), antes de cerrar la
+# version.
+[ "$ONLY" = all ] || [ "$ONLY" = h12 ] && runh12
 
 # Verificadores que no necesitan javac: las tablas que cruzan la frontera JNI.
 # jnisig: cada `native` de NativeApp.java tiene su Java_...() con el mismo numero de
