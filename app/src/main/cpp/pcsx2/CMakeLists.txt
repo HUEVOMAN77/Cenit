@@ -1137,6 +1137,7 @@ set(pcsx2arm64Headers
 	arm64/MvuSuperblock-arm64.h
 	arm64/MvuSbLife.h
 	arm64/MvuSbIndex.h
+	arm64/MvuFastPath.h
 )
 
 # These ones benefit a lot from LTO
