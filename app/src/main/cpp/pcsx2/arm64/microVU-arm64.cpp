@@ -523,6 +523,17 @@ void mVUinit(microVU& mVU, uint vuIndex)
 {
 	std::memset(&mVU.prog, 0, sizeof(mVU.prog));
 
+	// Cenit 0.6.35 — Fast Path VU1: arranque limpio. La tabla vive fuera del
+	// struct (mVUinit hace memset(&mVU.prog,...), y una tabla de 128 KB con
+	// punteros no sobrevive bien a un memset), asi que se limpia a mano aqui.
+	// microVU0/1 son estaticos: codeCacheEpoch puede traer el valor de la sesion
+	// VM anterior; eso es inofensivo porque la tabla esta vacia, y subirlo en
+	// cada sesion nueva es exactamente lo que queremos (ninguna entrada de la
+	// sesion anterior puede coincidir por numero de azar con la epoca viva).
+	mVU.codeCacheEpoch = 0;
+	if (vuIndex == 1)
+		mVUFastPath::g_vu1.Reset();
+
 	mVU.index        =  vuIndex;
 	mVU.cop2         =  0;
 	mVU.vuMemSize    = (mVU.index ? 0x4000 : 0x1000);
@@ -1133,6 +1144,31 @@ void mVUreset(microVU& mVU, bool resetReserve)
 		VU0.VI[REG_VPU_STAT].UL &= ~0x100;
 	}
 
+	// Cenit 0.6.35 — Fast Path VU1: invalidacion inmediata del memo. Sube la
+	// epoca del code cache y deja la tabla sin respuestas justo antes de los dos
+	// unicos peligros que este reset tiene para una direccion guardada:
+	//   (a) armSetAsmPtr mas abajo REBOBINA el cursor del cache, o sea las
+	//       proximas emisiones PISAN las instrucciones que las entradas memoizadas
+	//       senalan. Desde aqui, ninguna direccion de codigo vieja puede volver a
+	//       describir codigo valido.
+	//   (b) los unicos free() de un microProgram o de su microBlockManager estan
+	//       en mVUdeleteProg, y mVUdeleteProg solo se llama desde mVUreset y
+	//       mVUclose — los dos liberan y rehacen todo debajo de esta linea.
+	// El sync de THREAD_VU1 de arriba corre a proposito ANTES del bump: es un
+	// episodio mas con el cache y los programas todavia vivos, y tiene que
+	// resolverse con la tabla aun sincronizada con ellos (mismo criterio que el
+	// reposicionamiento de sbSlot). Con la epoca subida antes de (a) y (b), si
+	// ninguna epoca cambia DENTRO de una sesion de despacho, entonces ninguna de
+	// las direcciones guardadas (progId, mgrId, hostEntry) puede haber sido
+	// liberada, rebobinada ni reasignada a otro objeto; y si el allocator reasigna
+	// la misma direccion en la epoca siguiente, la epoca guardada ya no coincide y
+	// la entrada se rechaza por epoch, no se sirve.
+	if (mVU.index == 1)
+	{
+		mVU.codeCacheEpoch++;
+		mVUFastPath::g_vu1.Invalidate();
+	}
+
 	// Set up the code cache for vixl emission. Capacity deliberately runs
 	// mVUcacheSafeZone past prog.x86end, i.e. to the PHYSICAL end of the rec
 	// region: x86end is only the mVUcleanUp reset threshold, and the safe
@@ -1255,6 +1291,43 @@ void mVUclose(microVU& mVU)
 	// new has been added since the last reset.
 	mVUProgCache::SaveAllPrograms(mVU);
 	mVUProgCache::Close(mVU);
+
+	// Cenit 0.6.35 — Fast Path VU1: mismo trato que mVUreset, por el mismo
+	// motivo y con la misma razon: debajo de esta linea esta el
+	// mVUdeleteProg de todos los programas de este VU, o sea los unicos free()
+	// de los microBlockManager y microProgram que una entrada memoizada puede
+	// estar senalando. La epoca sube antes, asi que ningun despacho posterior
+	// puede servirse de una direccion liberada aunque el allocator la reasigne.
+	if (mVU.index == 1)
+	{
+		mVU.codeCacheEpoch++;
+
+		// Uso del memo, dicho en las unidades que se pueden interpretar. Vive en
+		// el cierre del VM y NO detras de la sonda: el fast path esta activo en
+		// produccion siempre, y un acelerador cuya tasa de uso solo se ve con un
+		// flag de diagnostico no es un acelerador medido, es una esperanza. Las
+		// cuentas son de sesion entera (mVUreset no las borra, por eso existe
+		// Invalidate aparte de Reset).
+		const mVUFastPath::Stats& s = mVUFastPath::g_vu1.stats;
+		Console.WriteLn("Cenit fastpath VU1: consults=%llu served=%llu records=%llu short-skip=%llu | "
+			"reject empty=%llu pc=%llu vu=%llu epoch=%llu prog=%llu mgr=%llu key=%llu bounds=%llu exact=%llu | "
+			"live=%u invalidations=%llu",
+			static_cast<unsigned long long>(s.consults),
+			static_cast<unsigned long long>(s.serves),
+			static_cast<unsigned long long>(s.records),
+			static_cast<unsigned long long>(s.recordSkipped),
+			static_cast<unsigned long long>(s.rejectEmpty),
+			static_cast<unsigned long long>(s.rejectPc),
+			static_cast<unsigned long long>(s.rejectVu),
+			static_cast<unsigned long long>(s.rejectEpoch),
+			static_cast<unsigned long long>(s.rejectProg),
+			static_cast<unsigned long long>(s.rejectMgr),
+			static_cast<unsigned long long>(s.rejectKey),
+			static_cast<unsigned long long>(s.rejectBounds),
+			static_cast<unsigned long long>(s.rejectExact),
+			mVUFastPath::g_vu1.Count(),
+			static_cast<unsigned long long>(s.invalidations));
+	}
 
 	// Same ownership rule as mVUreset: free via contentMap (plus the
 	// drift-evicted orphans), then drop the per-PC deque shells.
@@ -1685,6 +1758,116 @@ _mVUt __fi void* mVUsearchProg(u32 startPC, uptr pState)
 	return mVUentryGet(mVU, quick.block, startPC, pState);
 }
 
+// Cenit 0.6.35 — Fast Path VU1: el estado de UNA pregunta al memo.
+//
+// Vive a escala de archivo, no dentro de mVUlookupProg, por dos razones:
+//   * Las plantillas miembro de una funcion no existen en C++.
+//   * Todo lo que VU0 no usa queda dentro de `if constexpr`, asi que la
+//     instantacion de microVU0 no construye clave ni contadores — y el
+//     compilador no deja ni un aviso de "sin usar" que mas tarde disfrazaria un
+//     rojo real con un verde ruidoso.
+struct MvuFastPathAsk
+{
+	mVUFastPath::Query q;
+	u64 epochAtAsk;
+	bool asked;
+};
+
+// La PREGUNTA. Que es exactamente esto, dicho con la unidad correcta: una
+// MEMORIA del resultado del barrido que ya existe. Cuando Serve devuelve true,
+// `outEntry` es la hostEntry del MISMO microBlock que
+// microBlockManager::search habria devuelto con estas mismas entradas vivas — no
+// un segundo ejecutor, no una variante, no codigo nuevo. Cuando devuelve false
+// pasa lo de siempre: el barrido lineal, sin tocar.
+//
+// La clave se toma de `pState` — el estado con el que search compara DE VERDAD —
+// y no de lpState: si algun llamador futuro pasa otro estado, el memo pregunta y
+// responde sobre esa clave, y si no coincide, rechaza.
+//
+// Disciplina tipo seqlock en los dos sentidos: para SERVIR, la epoca se lee antes
+// de preguntar y se re-lee despues del acierto (una invalidacion a mitad del
+// lookup descarta el acierto, aunque la casilla pareciera buena); para REGISTRAR
+// (abajo) solo se escribe si la epoca no se movio entre leer los datos y recorrer
+// la lista, de modo que ninguna entrada queda con la epoca de un mundo distinto
+// del de los datos que guarda.
+//
+// Y el memo no cubre nada que no sea el caso rapido de verdad: VU1 (el dominio
+// del indice son PCs de VU1 y el unico escritor es este camino), sin propagacion
+// de constantes (los checks vi15/vi15v de search no entran en la clave memoizada
+// — con doConstProp activo habria que anadirlos, y la condicion de la plantilla
+// apaga el memo sola en vez de servir una clave incompleta), y sin
+// needExactMatch (comparacion de 96 bytes + promocion MRU sobre fBlockList, que
+// no se memoiza — ver MvuFastPath.h).
+//
+// Ley de costo, expresada una sola vez y aplicada en los dos sentidos: el memo
+// cuesta ~8 lecturas/comparaciones sobre una linea de cache; el barrido cuesta
+// una comparacion por ref. Preguntar al memo SOLO tiene sentido cuando la lista
+// ya es mas larga de lo que cuesta el memo (de ahi la guarda con
+// getLookupCount()), y registrar solo tiene sentido cuando el acierto cayo
+// bastante lejos como para que el barrido fuera caro (de ahi kMinRecordPos en
+// Record). Con las dos condiciones, esta seccion NUNCA puede ser mas lenta que
+// el codigo que reemplaza: o ahorra un barrido largo, o no pregunta.
+template <int vuIndex>
+__fi bool MvuFastPathServe(microVU& mVU, microProgramQuick& quick, microBlockManager* block,
+	u32 startPC, const microRegInfo* key, MvuFastPathAsk& ask, void** outEntry)
+{
+	ask.asked = false;
+	if constexpr (vuIndex == 1 && !doConstProp)
+	{
+		// Las dos guardas son estaticas de la tabla (MvuFastPath.h) y no prosa aqui:
+		// Harness12 y mutacion_h12.sh solo ven el encabezado, asi que todo lo que el
+		// arnes debe poder romper tiene que vivir en el encabezado. Una guarda escrita
+		// a mano en este archivo es una guarda que nadie prueba.
+		if (mVUFastPath::Table::ShouldAsk(key->needExactMatch, block->getLookupCount()))
+		{
+			const u64 epochBefore = mVU.codeCacheEpoch;
+
+			ask.q.pc = startPC;
+			ask.q.vuId = mVU.index;
+			ask.q.flagHack = mVUsFlagHack ? 1u : 0u;
+			ask.q.exact = 0u;
+			ask.q.cacheEpoch = epochBefore;
+			ask.q.candidateEpoch = mVU.microMemWriteGen;
+			ask.q.progId = reinterpret_cast<u64>(quick.prog);
+			ask.q.mgrId = reinterpret_cast<u64>(block);
+			ask.q.quick64 = key->quick64[0];
+			ask.q.cacheStart = reinterpret_cast<u64>(mVU.prog.x86start);
+			// La MISMA ventana que mVUexecute usa para su comprobacion de limites
+			// (x86end + safe zone): "dentro del cache" significa aqui exactamente
+			// lo mismo que significa en el despacho normal.
+			ask.q.cacheEnd = reinterpret_cast<u64>(mVU.prog.x86end) + (mVUcacheSafeZone * _1mb);
+
+			u64 served = 0;
+			ask.asked = true;
+			ask.epochAtAsk = epochBefore;
+			// La relectura de la epoca es Table::EpochStable por el mismo motivo que la
+			// guarda de arriba: es una comprobacion del arnes, no una frase nuestra.
+			if (mVUFastPath::g_vu1.Serve(ask.q, &served) &&
+				mVUFastPath::Table::EpochStable(epochBefore, mVU.codeCacheEpoch))
+			{
+				*outEntry = reinterpret_cast<void*>(served);
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+// Registrar la respuesta del barrido REAL. `entry` es lo que ESE barrido
+// devolvio — el mismo bloque que el despacho normal ejecuta — asi que no hay
+// codigo nuevo: solo se recuerda donde estaba. Solo se escribe con epoca estable
+// de principio a fin del lookup; si mVUreset ocurrio en medio, estos datos ya no
+// describen el cache y no se guardan.
+template <int vuIndex>
+__fi void MvuFastPathRecord(const microVU& mVU, const MvuFastPathAsk& ask, void* entry, u32 walkPos)
+{
+	if constexpr (vuIndex == 1 && !doConstProp)
+	{
+		if (ask.asked && mVU.codeCacheEpoch == ask.epochAtAsk)
+			mVUFastPath::g_vu1.Record(ask.q, reinterpret_cast<u64>(entry), walkPos);
+	}
+}
+
 // Read-only fast path: returns the cached block entry on a pure cache hit,
 // or nullptr if any compilation, allocation, or full-list comparison is
 // required. When nullptr, the caller must open the code cache and call
@@ -1705,9 +1888,35 @@ _mVUt __fi void* mVUlookupProg(u32 startPC, uptr pState)
 	if (!block)
 		return nullptr;
 
-	microBlock* pBlock = block->search(mVU, (microRegInfo*)pState);
-	if (!pBlock)
-		return nullptr;
+	// Cenit 0.6.35 — Fast Path VU1. Unica diferencia con el despacho de siempre:
+	// COMO se llega al bloque. Cuando el memo acierta, `entry` es la hostEntry
+	// del MISMO microBlock que el barrido lineal de microBlockManager::search
+	// habria devuelto con estas mismas entradas vivas — ni un segundo ejecutor,
+	// ni una variante, ni codigo nuevo; solo la memoria de donde estaba el
+	// bloque. Cuando falla, se corre el barrido de siempre, sin tocar.
+	//
+	// El bookkeeping (prog.cur, prog.isSame, quick.block, observed.record) vive
+	// DESPUES de la decision y se ejecuta igual en los dos caminos, a proposito:
+	// es parte de la semantica que el cache de saltos del JIT lee despues
+	// (microVU_Branch-arm64.inl:493 usa quick[].prog como identidad de programa),
+	// y si el memo tuviera su propia cola — o se la saltara — el despacho
+	// acelerado significaria otra cosa que el despacho normal. Ver los
+	// comentarios de MvuFastPathServe/MvuFastPathRecord para la validacion y las
+	// epocas.
+	void* entry = nullptr;
+	MvuFastPathAsk ask;
+	const bool memoHit = MvuFastPathServe<vuIndex>(mVU, quick, block, startPC,
+		reinterpret_cast<const microRegInfo*>(pState), ask, &entry);
+
+	if (!memoHit)
+	{
+		u32 walkPos = 0;
+		microBlock* pBlock = block->search(mVU, (microRegInfo*)pState, ask.asked ? &walkPos : nullptr);
+		if (!pBlock)
+			return nullptr;
+		entry = pBlock->hostEntry;
+		MvuFastPathRecord<vuIndex>(mVU, ask, entry, walkPos);
+	}
 
 	mVU.prog.isSame = -1;
 	mVU.prog.cur = quick.prog;
@@ -1721,7 +1930,7 @@ _mVUt __fi void* mVUlookupProg(u32 startPC, uptr pState)
 	// createProg's slow-path seed keeps observed valid going forward.
 	if (mVUPersist::IsRecordingEnabled())
 		quick.prog->observed.record(startPC);
-	return pBlock->hostEntry;
+	return entry;
 }
 
 //------------------------------------------------------------------
