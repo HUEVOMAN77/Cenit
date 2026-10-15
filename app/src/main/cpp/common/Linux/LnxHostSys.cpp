@@ -153,21 +153,65 @@ size_t HostSys::GetRuntimeCacheLineSize()
 
 	return static_cast<size_t>(max_line_size);
 #else
-	int l1i = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
-	int l1d = sysconf(_SC_LEVEL1_ICACHE_LINESIZE);
-	int res = (l1i > l1d) ? l1i : l1d;
-	for (int index = 0; index < 16; index++)
-	{
-		char buf[128];
-		snprintf(buf, sizeof(buf), "/sys/devices/system/cpu/cpu0/cache/index%d/coherency_line_size", index);
-		std::FILE* fp = std::fopen(buf, "rb");
-		if (!fp)
-			break;
+	// Cenit 0.6.36 — por que cambia este sondeo. El log real de un HUAWEI
+	// NCO-LX3 (God of War, 0.6.34) imprime:
+	//   «Cache line size mismatch. This build was compiled with 128 byte lines,
+	//     but the system has 0 byte lines.»
+	// Una linea de cache de 0 bytes no existe. El 0 es el centinela de «no pude
+	// medir» de esta funcion, y el llamador (VMManager) lo imprimia como si fuera
+	// una medida del telefono: ahi esta el defecto que si puedo afirmar, porque
+	// es una afirmacion falsa en el registro que alguien lee como evidencia.
+	//
+	// Por que este dispositivo no midio nada no lo puedo afirmar desde el log:
+	// o sysconf devolvio 0 (bionic no garantiza esas claves), o el sysfs de
+	// cache no era legible para la app (Android lo restringe para procesos
+	// no privilegiados). Las dos dan el mismo 0, y el codigo de antes no las
+	// distingua. Lo que si se arregla aqui y ahora:
+	//   (1) se barren TODOS los nucleos, no solo cpu0: antes un `break` en el
+	//       primer index que no abria cortaba el sondeo entero, asi que un
+	//       big.LITTLE donde cpu0 no expone su cache perdio tambien lo que los
+	//       otros nucleos si dijeran;
+	//   (2) la lectura deja de depender de un fallo de fread: el codigo original
+	//       pedia UN elemento de 128 bytes a un archivo de 3. Medido aqui: fread
+	//       devuelve 0 —elemento incompleto— y atoi lee el 64 igualmente, porque
+	//       este libc escribio los 3 bytes parciales. El estandar dice que el
+	//       contenido de un elemento parcial es indeterminado, o sea ese 64 era
+	//       un accidente del libc de esta sandbox y no un contrato. Ahora se
+	//       leen elementos de 1 byte en un buffer limpio y se comprueba el
+	//       numero de bytes leidos.
+	//   (3) si nada dice nada, se devuelve 0 y 0 significa UNA sola cosa:
+	//       desconocido. No se inventa 64 para callar el aviso — eso convertiria
+	//       una medida en una suposicion, que es el error que este proyecto
+	//       cometio en 0.6.25 y pago con dos versiones.
+	int res = 0;
+	long v = sysconf(_SC_LEVEL1_ICACHE_LINESIZE);
+	if (v > 0)
+		res = static_cast<int>(v);
+	v = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
+	if (v > res)
+		res = static_cast<int>(v);
 
-		std::fread(buf, sizeof(buf), 1, fp);
-		std::fclose(fp);
-		int val = std::atoi(buf);
-		res = (val > res) ? val : res;
+	// El limite de nucleos no es capricho: es lo que este proyecto esta dispuesto
+	// a esperar de un telefono. El bucle es de lectura, sin asignaciones.
+	for (int cpu = 0; cpu < 16; cpu++)
+	{
+		for (int index = 0; index < 16; index++)
+		{
+			char path[160];
+			snprintf(path, sizeof(path),
+				"/sys/devices/system/cpu/cpu%d/cache/index%d/coherency_line_size", cpu, index);
+			std::FILE* fp = std::fopen(path, "rb");
+			if (!fp)
+				break; // este nucleo no tiene mas niveles: pasa al siguiente nucleo
+			char raw[64] = {};
+			if (std::fread(raw, 1, sizeof(raw) - 1, fp) > 0)
+			{
+				const int val = std::atoi(raw);
+				if (val > res)
+					res = val;
+			}
+			std::fclose(fp);
+		}
 	}
 
 	return (res > 0) ? static_cast<size_t>(res) : 0;
