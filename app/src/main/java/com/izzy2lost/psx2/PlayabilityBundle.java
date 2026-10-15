@@ -407,8 +407,10 @@ public final class PlayabilityBundle {
             + "mismo: el único que toca las cuotas es el sintonizador, solo durante "
             + "su ensayo y devolviéndolas. Al apagarlo vuelve exactamente lo que "
             + "tenías antes, incluida "
-            + "tu escala. Experimental: si un juego va raro con el modo, apágalo y "
-            + "cuéntame cuál es.";
+            + "tu escala. Lo que hace cada pieza en la partida real queda escrito "
+            + "en el reporte (este teléfono: sostuvo 0.5x de escala, turbo 0 "
+            + "segundos, precarga rechazada por tamaño, sintonizador sin benchar). "
+            + "Si un juego va raro con el modo, apágalo y cuéntame cuál es.";
     }
 
     /** Resumen de lo que se activó, para el registro y para FÁBRICA del reporte. */
