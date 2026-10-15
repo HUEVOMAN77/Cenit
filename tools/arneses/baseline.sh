@@ -29,6 +29,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 SRC=$(cd "$HERE/../../app/src/main/java/com/izzy2lost/psx2" && pwd)
 CPP=$(cd "$HERE/../../app/src/main/cpp/pcsx2/arm64" && pwd)
+GCEN=$(cd "$HERE/../../app/src/main/cpp/pcsx2/GS/Renderers/Common" && pwd)
 WORK=${WORK:-/tmp/cenit-arneses}
 RC=0
 
@@ -286,13 +287,57 @@ runh12() { # arnes de LOGICA del fast path VU1 (memo de despacho, 0.6.35).
   echo "$OUT" | grep -q "testigos:" || { echo "h12: falta la linea de testigos"; RC=1; }
 }
 
+runh13() { # arnes de CUENTA del present sub-nativo (CenitPresentStats.h, 0.6.36).
+  #
+  # Por que existe: el log real de un telefono (God of War, 0.6.34) prueba que hubo
+  # cuadros por debajo de 1x —el regidor sostiene 0.5x y el nucleo avisa «below
+  # native»— y NO puede probar si la reconstruccion EASU los cubrio, los dejo
+  # estirados o fallo al intentarlos. Nada los contaba. Este arnes no mira la imagen
+  # (eso solo lo dice el telefono): mira que la cuenta sea EXHAUSTIVA, que cada
+  # cuadro mova UNA sola casilla y que la suma de las cuatro cierre contra los
+  # cuadros contados, porque esa linea va a ser la unica evidencia que se lea despues.
+  #
+  # Incluye dos controles NEGATIVOS escritos a proposito: se rompe la cuenta por
+  # fuera del clasificador (un cuadro sin casilla, una casilla inflada) y se exige
+  # que Closes() diga NO. Un invariante que solo se comprueba sobre codigo bueno es
+  # un adorno, y debilitar la comparacion a <= pasaria verde sin ellos.
+  #
+  # Lo que NO prueba: que el motor llame a Tally en el momento correcto (eso vive en
+  # GSRenderer.cpp, que host no compila: tira de Vulkan/ImGui/GSState) — eso lo fija
+  # el TEXTO de mutacion_h13.sh fase 2, once anclas, con su limitacion escrita.
+  local box=$WORK/h13
+  if [ -z "$CXX" ]; then
+    echo "h13: SIN COMPILAR - no hay g++ de host (CXX='$CXX'); la cuenta del present sub-nativo NO se verifico en esta corrida"
+    RC=1
+    return
+  fi
+  rm -rf "$box"; mkdir -p "$box"
+  cp "$HERE/h13-src/present_test.cpp" "$box/" || { echo "h13: no se pudo traer el arnes"; RC=1; return; }
+  # Regla anti-copia-vieja (heredada de h9/h12): el header se trae DEL REPO en cada
+  # corrida. Un verde contra una copia editada a mano aprueba la version equivocada.
+  if [ ! -f "$GCEN/CenitPresentStats.h" ]; then echo "h13: FALTA CenitPresentStats.h en el repo ($GCEN)"; RC=1; return; fi
+  cp "$GCEN/CenitPresentStats.h" "$box/" || { echo "h13: no se pudo copiar CenitPresentStats.h"; RC=1; return; }
+  if ! "$CXX" -std=c++17 -Wall -Wextra -I"$box" -o "$box/h13" "$box/present_test.cpp" 2>"$box/compile.err"; then
+    echo "h13: FALLO DE COMPILACION"; head -40 "$box/compile.err"; RC=1; return
+  fi
+  if [ -s "$box/compile.err" ]; then
+    echo "h13: avisos del compilador (con -Wall -Wextra no se dejan pasar)"
+    head -20 "$box/compile.err"; RC=1
+  fi
+  OUT=$("$box/h13" 2>/dev/null | grep -E "Comprobaciones|FALLO|testigos")
+  echo "$OUT"
+  echo "$OUT" | grep -qE ", [1-9][0-9]* Fallos" && RC=1
+  echo "$OUT" | grep -q "Comprobaciones" || { echo "h13: el arnes no imprime recuento"; RC=1; }
+  echo "$OUT" | grep -q "testigos:" || { echo "h13: falta la linea de testigos"; RC=1; }
+}
+
 ONLY=${ARNES:-all}
 case "$ONLY" in
-  all|h5|h6|h7|h8|h9|h10|h11|h12) ;;
+  all|h5|h6|h7|h8|h9|h10|h11|h12|h13) ;;
   # Un nombre mal escrito tiene que ruidar: si no, "corrí los arneses" se convierte
   # en "no corrí ninguno y volvi con RC=0", que es exactamente el verde vacio que
   # este script existe para evitar.
-  *) echo "baseline.sh: ARNES='$ONLY' no existe (valores: all h5 h6 h7 h8 h9 h10 h11 h12)"; exit 2 ;;
+  *) echo "baseline.sh: ARNES='$ONLY' no existe (valores: all h5 h6 h7 h8 h9 h10 h11 h12 h13)"; exit 2 ;;
 esac
 [ "$ONLY" = all ] || [ "$ONLY" = h5 ] && run h5 Harness5 GameLoadClassifier CenitLoadSample LoadPolicy LoadTrend CenitTelemetry
 [ "$ONLY" = all ] || [ "$ONLY" = h6 ] && run h6 Harness6 DynamicResolutionGovernor GameLoadClassifier AdaptiveProfile CenitLoadSample LoadPolicy LoadTrend CenitTelemetry GameSerialUtils
@@ -326,6 +371,11 @@ esac
 # con las dos direcciones (nada falso servido, nada vivo negado), antes de cerrar la
 # version.
 [ "$ONLY" = all ] || [ "$ONLY" = h12 ] && runh12
+# h13 (0.6.36): la cuenta del present sub-nativo. Entra a la base por el mismo
+# argumento con el que entro h12: el numero que el telefono va a imprimir es la unica
+# evidencia que se lee despues, y un contador sin arnes es una opinion con formato de
+# dato.
+[ "$ONLY" = all ] || [ "$ONLY" = h13 ] && runh13
 
 # Verificadores que no necesitan javac: las tablas que cruzan la frontera JNI.
 # jnisig: cada `native` de NativeApp.java tiene su Java_...() con el mismo numero de
