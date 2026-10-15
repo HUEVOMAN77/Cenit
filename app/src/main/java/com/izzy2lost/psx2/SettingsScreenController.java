@@ -314,8 +314,8 @@ public final class SettingsScreenController {
         toggle(R.id.set_sw_adaptive, "adaptive_perf", true, null);
         toggle(R.id.set_sw_autoturbo, "auto_turbo", false, null);
 
-        // 0.6.27 (governor v4): sintonizador CPU/VU. EXPERIMENTAL y apagado por
-        // defecto: cuando el juego va atrasado CON la GPU holgada y ya en su
+        // 0.6.27 (governor v4): sintonizador CPU/VU. Nació apagado por defecto:
+        // cuando el juego va atrasado CON la GPU holgada y ya en su
         // resolución más baja, el regidor bencha una vez por juego una escalera
         // conservadora (MTVU invertido, Ciclo EE -1, cuota suave), mide con FPS
         // reales — nunca con el % de velocidad, que con cuotas miente —, y solo
@@ -385,7 +385,9 @@ public final class SettingsScreenController {
         // Cenit 0.6.28: cargar el juego en memoria. Es la casilla EmuCore/
         // CdvdPrecache del núcleo, que en este puerto no servía (arranque con
         // ProgressCallback nulo = cierre brusco; ya desactivado en el core) y no
-        // estaba en ninguna pantalla. Apagado por defecto: experimental.
+        // estaba en ninguna pantalla. Apagado por defecto: en este teléfono la
+        // cuenta no da (4010 MB de disco contra 2858 MB de RAM), y el automático
+        // mide antes de intentar.
         // El interruptor solo GUARDA la voluntad: la capa base se escribe en el
         // hilo del arranque con la decisión MEDIDA (¿cabe este juego en la RAM
         // libre de ahora?), no con un true a ciegas — y así no hay carrera entre
@@ -428,8 +430,10 @@ public final class SettingsScreenController {
         // superbloque pasa una ventana de parejas normal/superbloque con
         // entrada idéntica (hash del estado de salida completo); con cero
         // divergencias se confía en él, y a las 3 divergencias el motor se
-        // auto-apaga por sesión. Default apagado (GATE del documento: experimental
-        // hasta medir). Encenderlo enciende la sonda y pausa la caché de
+        // auto-apaga por sesión. Default apagado (GATE del documento: cero
+        // divergencias y mejora sostenida medida en el dispositivo antes de
+        // habilitar; en el log de este teléfono el motor aún no produjo ningún
+        // superbloque, así que la medición sigue pendiente). Encenderlo enciende la sonda y pausa la caché de
         // programas VU en disco; recompila todo al cambiar, así que invalida la
         // caché del recompiler igual que la sonda.
         toggle(R.id.set_sw_vu_superblock, "vu_superblock", false,
@@ -441,8 +445,11 @@ public final class SettingsScreenController {
         // estrenaba un efecto, y ese bloqueo es el pico de frame time medido.
         // Encendido, el trabajo se va a un hilo de fondo y lo que se paga es un
         // parpadeo de uno o dos frames en el primitivo que aún no tiene
-        // pipeline, en vez de parar todo el cuadro. Default apagado
-        // (experimental). No está entre las opciones que reinician el
+        // pipeline, en vez de parar todo el cuadro. Default apagado: el
+        // intercambio (parpadeo corto vs. tirón largo) es para que lo elija el
+        // usuario, no porque nadie sepa si funciona — en el log de este teléfono
+        // corrió y compiló 191 de 191 con fallback=0. No está entre las opciones
+        // que reinician el
         // dispositivo, así que ApplySettings la aplica con la VM viva.
         toggle(R.id.set_sw_async_shaders, "async_shader_compile", false,
                 checked -> NativeApp.setAsyncShaderCompileAsync(checked));
