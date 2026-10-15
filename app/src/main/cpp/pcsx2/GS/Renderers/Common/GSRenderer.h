@@ -4,6 +4,7 @@
 #pragma once
 
 #include "GS/GSState.h"
+#include "GS/Renderers/Common/CenitPresentStats.h"
 #include <memory>
 #include <string>
 
@@ -35,6 +36,12 @@ protected:
 	GSVector2i m_present_dst{0, 0};   ///< tamano de destino en pantalla (draw_rect)
 	bool m_easu_active = false;       ///< la cadena EASU -> RCAS corri6 este frame
 	int m_easu_stages = 0;            ///< cuantas pasadas uso la cadena (0 = no corrio)
+
+	// Cenit 0.6.36: el HUD dice el frame ACTUAL; esto dice la SESION, y es lo que
+	// viaja en el registro. Sin esto, un log puede probar "hubo cuadros por debajo
+	// de 1x" (el regidor sostiene 0.5x) y no puede probar si EASU los reconstruyo,
+	// los dejo estirados o fallo al intentarlos. Ver CenitPresentStats.h.
+	cenit_present::Stats m_present_stats;
 
 	virtual GSTexture* GetOutput(int i, float& scale, int& y_offset) = 0;
 	virtual GSTexture* GetFeedbackOutput(float& scale) { return nullptr; }
