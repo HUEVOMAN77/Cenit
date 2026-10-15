@@ -1308,11 +1308,22 @@ void mVUclose(microVU& mVU)
 		// flag de diagnostico no es un acelerador medido, es una esperanza. Las
 		// cuentas son de sesion entera (mVUreset no las borra, por eso existe
 		// Invalidate aparte de Reset).
+		// Cenit 0.6.36 — la linea imprime el INVARIANTE a la vista: lookups tiene
+		// que ser consults + skipExact + skipShort. No se calcula aqui a proposito:
+		// si el log de un telefono muestra los dos numeros mal sumados, el defecto
+		// es de la telemetria y se ve leyendo, no inferiendo. Los tres contadores
+		// nuevos (lookups, skip-exact, skip-short) son los que faltaban para poder
+		// decir CUANTA de esta tabla usa un juego real: consults es un filtro
+		// impuesto por la ley de costo y un filtro no es un denominador.
 		const mVUFastPath::Stats& s = mVUFastPath::g_vu1.stats;
-		Console.WriteLn("Cenit fastpath VU1: consults=%llu served=%llu records=%llu short-skip=%llu | "
+		Console.WriteLn("Cenit fastpath VU1: lookups=%llu (consults=%llu + skip-exact=%llu + skip-short=%llu) | "
+			"served=%llu records=%llu no-record=%llu | "
 			"reject empty=%llu pc=%llu vu=%llu epoch=%llu prog=%llu mgr=%llu key=%llu bounds=%llu exact=%llu | "
 			"live=%u invalidations=%llu",
+			static_cast<unsigned long long>(s.lookups),
 			static_cast<unsigned long long>(s.consults),
+			static_cast<unsigned long long>(s.skipExact),
+			static_cast<unsigned long long>(s.skipShort),
 			static_cast<unsigned long long>(s.serves),
 			static_cast<unsigned long long>(s.records),
 			static_cast<unsigned long long>(s.recordSkipped),
@@ -1814,11 +1825,18 @@ __fi bool MvuFastPathServe(microVU& mVU, microProgramQuick& quick, microBlockMan
 	ask.asked = false;
 	if constexpr (vuIndex == 1 && !doConstProp)
 	{
-		// Las dos guardas son estaticas de la tabla (MvuFastPath.h) y no prosa aqui:
+		// Las dos guardas son metodos de la tabla (MvuFastPath.h) y no prosa aqui:
 		// Harness12 y mutacion_h12.sh solo ven el encabezado, asi que todo lo que el
 		// arnes debe poder romper tiene que vivir en el encabezado. Una guarda escrita
 		// a mano en este archivo es una guarda que nadie prueba.
-		if (mVUFastPath::Table::ShouldAsk(key->needExactMatch, block->getLookupCount()))
+		//
+		// 0.6.36 — se llama a la version CONTADA (AskCounted), no a la pura: la
+		// ausencia de un denominador de despachos es lo que dejó a esta sección sin
+		// poder dejar de ser experimental con el log de God of War. AskCounted es la
+		// misma decision (un unico DecideAsk en el header; ShouldAsk es ahora una
+		// proyeccion de el, no una segunda copia de la ley de costo), y suma
+		// lookups/skipExact/skipShort antes de salir por la razon que sea.
+		if (mVUFastPath::g_vu1.AskCounted(key->needExactMatch, block->getLookupCount()))
 		{
 			const u64 epochBefore = mVU.codeCacheEpoch;
 
