@@ -96,6 +96,7 @@
 
 #include "MvuSbLife.h"
 #include "MvuSbIndex.h"
+#include "MvuSbEligibility.h"
 
 #include "common/Pcsx2Defs.h"
 
@@ -222,6 +223,22 @@ namespace mVUSuperblock
 	// no puede mandar.
 	static constexpr u32 kSbIndexAuditPeriod = 512;
 
+	// Cenit 0.6.37 — LOS SIETE NUMEROS de arriba, una sola vez, en la forma que
+	// lee el header puro de la decision. Por que existe este objeto y no llamar
+	// con los siete sueltos: la decision vive en mVUSbElig (host-verificable) y
+	// el host no ve kSbHotEntries — el header puro no puede incluir esta
+	// cabecera, porque ahi dejo de ser puro. Entonces el motor EMPAQUETA su
+	// politica y la pasa; y el empaquetado se hace aqui, en el unico sitio donde
+	// los siete nombres existen a la vez, a partir de las constantes de siempre.
+	// Cambiar kSbMaxOps sin cambiar nada mas cambia la decision del motor Y la
+	// del arnes a la vez (el arnes construye su propia politica a mano y fijan
+	// los numeros las dos cabeceras: h10 con static_assert sobre este objeto,
+	// h14 sobre los valores literales del header puro). No hay un segundo juego
+	// de umbrales que pueda divergir del primero.
+	static constexpr mVUSbElig::Policy kSbPolicy{
+		kSbHotEntries, kSbTargetMinEntries, kSbMinRatioPct, kSbMaxRatioPct,
+		kSbMaxJunctions, kSbMaxOps, kSbMaxCycles};
+
 	// Bits de rasguño de identidad de variante — byte 6 de microRegInfo
 	// (blockType; los bits 0-1 son los blockType originales 0/1/2). Viven
 	// SOLO en la clave de registro del gestor.
@@ -290,9 +307,20 @@ namespace mVUSuperblock
 	// SbAskJunction lo prohíbe (branchStructClean/kickSeen del llamador).
 	// ------------------------------------------------------------------
 
-	// Arma la compilacion variante para este PC de despacho (llamado desde
-	// mVUexecute<1> con la resolucion normal ya en curso, pState96 =
-	// &mVU.prog.lpState ANTES de que la variante la pise). Verifica la
+	// Cenit 0.6.37 — UNICO llamador de SbArmCompile. Llamado desde los DOS caminos
+	// de despacho de VU1 (mVUexecute<1>, con `from_stub=false`, y el stub emitido
+	// mVUlookupProg_VU1 en sus dos ramas, con `from_stub=true`), SIEMPRE despues de
+	// que la resolucion normal tuvo exito y con la cuenta por origen ya sumada.
+	// Aplica la puerta de re-evaluacion (mVUSbElig::ArmGate) y, si se abre, pregunta
+	// la politica. Devuelve el id del hueco (>=0) o -1. `from_stub` es TELEMETRIA, no
+	// semantica: el veredicto no depende de el, y si alguien lo usa para decidir,
+	// mutacion_h14.sh lo canta por su nombre.
+	int SbConsiderArm(u32 startPC_bytes, const void* pState96, bool from_stub);
+
+	// Arma la compilacion variante para este PC de despacho (llamado SOLO
+	// desde SbConsiderArm, que es el unico que cuenta por causa; 0.6.37 retiro la
+	// llamada directa desde mVUexecute<1>. pState96 = &mVU.prog.lpState ANTES de que
+	// la variante la pise). Verifica la
 	// politica de elegibilidad (hotness A y B, arista kind=1, ratio, sin
 	// candidato vivo por este PC, tabla con hueco), copia la clave a la
 	// sombra del slot y devuelve el id (>=0) — el llamador lo deposita en
@@ -409,10 +437,67 @@ namespace mVUSuperblock
 		std::atomic<u64> built{0};         // superbloques adoptados
 		std::atomic<u64> junctions{0};     // uniones fundidas (barreras eliminadas)
 		std::atomic<u64> fused_ops{0};     // instrucciones dentro de superbloques
-		std::atomic<u64> rejected_struct{0};   // rama no fundible (bits/kick/cond/evil/wrap)
-		std::atomic<u64> rejected_cold{0};     // sin hotness / flujo inestable
-		std::atomic<u64> rejected_budget{0};   // techo de ops/ciclos/uniones o región sin presupuesto
-		std::atomic<u64> rejected_identity{0}; // clave de unión sucia o tabla llena
+		// Cenit 0.6.37 — UNA CASILLA POR CAUSA, en lugar de los cuatro cubos.
+		//
+		// Los cuatro contadores viejos (rejected_struct/cold/budget/identity)
+		// desaparecen como CUENTA y quedan como DERIVADO: el informe los suma de
+		// estas casillas al imprimir. La razon esta medida en el log de God of War
+		// que mando este telefono:
+		//   intentos=120542 construidos=0 rechazos{struct=47460 cold=21128 budget=1
+		//   ident=51953}
+		// Cuatro cubos tapaban doce comprobaciones. `ident=51953` podia ser "no
+		// habia hueco", "ya habia un candidato en ese PC", "el PC estaba quemado" o
+		// "el indice se desincronizo": cuatro diagnosticos que piden cuatro arreglos
+		// distintos, y el log no los separaba. `struct=47460` mezclaba "este bloque
+		// no cae incondicionalmente sobre nadie" (microcodigo tal cual, no un
+		// defecto) con "el destino jamas se analizo" (cobertura, si lo es). Con esa
+		// granularidad era IMPOSIBLE explicar un build=0, y un numero que no puede
+		// explicar nada no es evidencia: es decoracion con forma de evidencia. Es la
+		// misma leccion de `lookups` (0.6.35) y del nombre `con-buffer` (0.6.36),
+		// aplicada ahora a los rechazos.
+		//
+		// Cada casilla es UNA salida terminal de UNA cadena, con el indice del enum
+		// de mVUSbElig correspondiente. Las cadenas cierran, y el informe firma cada
+		// cierre (ok / DESAJUSTE) porque un desajuste es un defecto de la telemetria
+		// visible, no una inferencia meses despues:
+		//   arm_from[0] + arm_from[1] == attempts + gate_closed
+		//   intentos     == Σ arm_cause(causa terminal, sin politica-ok)
+		//   pedidos      == Σ jun_cause(toda causa, unida incluida)
+		//   cierres      == Σ close_cause(toda causa, adoptado incluida)
+		// El NOMBRE que se imprime sale de la misma tabla que clasifica el cubo, así
+		// que no existe un segundo vocabulario que pueda divergir de la decision.
+		std::atomic<u64> arm_cause[mVUSbElig::kArmCauseCount]{};
+		std::atomic<u64> jun_cause[mVUSbElig::kJunctionCauseCount]{};
+		std::atomic<u64> close_cause[mVUSbElig::kCloseCauseCount]{};
+
+		// Denominadores de las cadenas 2 y 3 (la 1 ya tenia `attempts`). Sin ellos
+		// las sumas de causas no tienen con que cerrar, y un total sin denominador
+		// es justo lo que se viene corrigiendo desde 0.6.35.
+		std::atomic<u64> junction_requests{0}; // SbAskJunction llamado
+		std::atomic<u64> close_calls{0};       // SbCloseCompile llamado
+
+		// Puerta de re-evaluacion (mVUSbElig::ArmGate). `gate_closed` cuenta las
+		// veces que la puerta no dejo pasar un despacho. El total de consideraciones
+		// NO tiene contador propio a proposito: es la suma de `arm_from`, así que no
+		// puede contradecirla. El cierre que firma el informe es
+		//     arm_from[0] + arm_from[1] == attempts + gate_closed
+		// y `attempts` sigue significando lo mismo que en 0.6.36: veces que la
+		// politica juzgo un PC.
+		// `arm_from[0]` = consideraciones llegadas por el camino LENTO (el hook de
+		// mVUexecute, el unico que habia antes), `arm_from[1]` = las llegadas por el
+		// STUB emitido (mVUlookupProg_VU1), que es la cobertura nueva de 0.6.37. Se
+		// cuenta por origen —no solo el total— porque la pregunta que este cambio
+		// necesita contestar con un log es CUAL de los dos hooks produce intentos;
+		// con un total suelto no se puede saber si el hook nuevo sirvio o no.
+		std::atomic<u64> arm_from[2]{};
+		std::atomic<u64> gate_closed{0};
+
+		// Rechazo de presupuesto en el DESPACHO (SbResolve). Su denominador es el
+		// contador de despachos de la sonda, que vive en otro modulo, así que no
+		// cierra con ninguna de las tres cadenas y se imprime solo, con su nombre.
+		// Antes estaba sumado en `budget` junto con rechazos de tamano de area: dos
+		// cosas que se leen distinto contando juntas.
+		std::atomic<u64> dispatch_budget{0};
 		std::atomic<u64> verify_normal{0};   // despachos de la ventana por la cadena normal
 		std::atomic<u64> verify_sb{0};       // despachos de la ventana por el superbloque
 		std::atomic<u64> unmatched{0};       // episodios verificados sin par de entrada idéntica
