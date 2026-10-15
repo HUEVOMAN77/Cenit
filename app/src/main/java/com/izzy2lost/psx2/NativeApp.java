@@ -577,7 +577,7 @@ public class NativeApp {
     // incondicionalmente uno sobre otro, y los valida por replay diferencial
     // (parejas normal/superbloque con entrada idéntica: MATCH cuenta,
     // DIVERGENCE invalida la variante y, a las 3, apaga el motor por sesión).
-    // EXPERIMENTAL y APAGADA por defecto: el GATE del documento de arquitectura
+    // APAGADA por defecto: el GATE del documento de arquitectura
     // exige cero divergencias y mejora sostenida medida en el dispositivo antes
     // de habilitarla. Encenderla enciende la sonda y pausa la caché de programas
     // VU en disco; el toggle recompila todo (invalida las cachés del
@@ -606,7 +606,10 @@ public class NativeApp {
         try { return getVUSuperblockEffective(); } catch (Throwable t) { return false; }
     }
     // --- Cenit 0.6.24: compilación asíncrona de pipelines TFX (Vulkan) --------
-    // EXPERIMENTAL y APAGADA por defecto. Sin esta bandera, cada pipeline nuevo
+    // APAGADA por defecto: el costo es un intercambio que elige el usuario
+    // (parpadeo de uno o dos frames vs. el tirón de compilar en el hilo de
+    // dibujo); en el log de este teléfono corrió y compiló todo lo encolado.
+    // Sin esta bandera, cada pipeline nuevo
     // se compila en el hilo de dibujo (vkCreateGraphicsPipelines) y eso es el
     // pico de frame time al aparecer efectos/shaders inéditos. Con ON, el
     // trabajo se manda a un hilo de fondo y el primitivo afectado se omite uno
