@@ -271,12 +271,12 @@
                                 android:id="@+id/set_sw_max_playability"
                                 style="@style/Cenit.Settings.Switch"
                                 android:layout_marginTop="0dp"
-                                android:text="Máxima jugabilidad (experimental)" />
+                                android:text="Máxima jugabilidad" />
 
                             <TextView
                                 android:id="@+id/set_tv_max_playability_note"
                                 style="@style/Cenit.Settings.Caption"
-                                android:text="Enciende a la vez todo lo que da cuadros, con su costo dicho abajo. Al apagarlo vuelve exactamente tu configuración anterior." />
+                                android:text="Enciende a la vez todo lo que puede dar cuadros, con su costo dicho abajo. Al apagarlo vuelve exactamente tu configuración anterior. No fuerza nada: en la partida real de este teléfono dejó el turbo en 0 segundos y la precarga rechazada porque el disco no cabía, o sea enciende la voluntad, no la acción a ciegas." />
 
                             <View style="@style/Cenit.Settings.Divider" />
 
@@ -329,7 +329,7 @@
                                  es un boton, no un modo. -->
                             <TextView
                                 style="@style/Cenit.Settings.FieldLabel"
-                                android:text="Sintonizador CPU/VU por juego (experimental)" />
+                                android:text="Sintonizador CPU/VU por juego" />
 
                             <Spinner
                                 android:id="@+id/set_sp_cpu_tuner_mode"
@@ -338,7 +338,7 @@
                             <TextView
                                 android:id="@+id/set_tv_cpu_tuner_note"
                                 style="@style/Cenit.Settings.Caption"
-                                android:text="Cuando un juego va atrasado con la GPU holgada y ya en su resolución más baja, Cenit prueba una vez —solo para ese juego y este teléfono— una escalera conservadora: MTVU, Ciclo EE -1 o cuota suave, nunca mezcladas. Compara alternando tu estado y la prueba (A-B-A-B) durante unos segundos cada uno y se queda solo con lo que gana de verdad: más cuadros sin P95 peor, sin mínimos peores, sin cortes de audio, sin más temperatura y sin subidas raras. Después lo verifica 45 s en la partida real y, si la ganancia desaparece, lo revierte él solo. Los ensayos usan los ajustes globales y siempre los devuelven; lo adoptado queda guardado en los ajustes POR JUEGO, tus valores globales no se tocan. Encendido por defecto en modo automático seguro: no cambia nada al arrancar y solo actúa si el juego realmente se atrasa. Es experimental." />
+                                android:text="Cuando un juego va atrasado con la GPU holgada y ya en su resolución más baja, Cenit prueba una vez —solo para ese juego y este teléfono— una escalera conservadora: MTVU, Ciclo EE -1 o cuota suave, nunca mezcladas. Compara alternando tu estado y la prueba (A-B-A-B) durante unos segundos cada uno y se queda solo con lo que gana de verdad: más cuadros sin P95 peor, sin mínimos peores, sin cortes de audio, sin más temperatura y sin subidas raras. Después lo verifica 45 s en la partida real y, si la ganancia desaparece, lo revierte él solo. Los ensayos usan los ajustes globales y siempre los devuelven; lo adoptado queda guardado en los ajustes POR JUEGO, tus valores globales no se tocan. Encendido por defecto en modo automático seguro: no cambia nada al arrancar y solo actúa si el juego realmente se atrasa. La máquina está probada sobre el código real; lo que falta es tu ganancia, y esa sale escrita: la línea «veredicto=» y «adoptado=» del bloque FÁBRICA del reporte dicen si este juego ya ganó algo en este teléfono." />
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/set_btn_forget_tuner"
@@ -368,17 +368,17 @@
                             <com.google.android.material.materialswitch.MaterialSwitch
                                 android:id="@+id/set_sw_precache"
                                 style="@style/Cenit.Settings.Switch"
-                                android:text="Cargar el juego en memoria (experimental)" />
+                                android:text="Cargar el juego en memoria" />
 
                             <TextView
                                 android:id="@+id/set_tv_precache_note"
                                 style="@style/Cenit.Settings.Caption"
-                                android:text="Apagado: ningún juego se carga entero en memoria. Cenit lo mediría y lo cargaría solo si cabe en la RAM libre de este teléfono. Se aplica al reiniciar cada juego; en Ajustes del juego puedes ordenarlo a mano para uno solo. Apagado por defecto: es experimental." />
+                                android:text="Apagado: ningún juego se carga entero en memoria. Encendido, Cenit mide el disco y solo lo carga si cabe en la RAM disponible de este teléfono; si no cabe, no lo intenta. Medido en la partida de este reporte: 4010 MB de disco contra 2858 MB disponibles, y la cuenta dijo que no. Se aplica al reiniciar cada juego; en Ajustes del juego puedes ordenarlo a mano para uno solo. Apagado por defecto." />
 
                             <TextView
                                 android:id="@+id/set_tv_iso_buffer_label"
                                 style="@style/Cenit.Settings.FieldLabel"
-                                android:text="Ventana de streaming del disco (experimental)" />
+                                android:text="Ventana de streaming del disco" />
 
                             <TextView
                                 android:id="@+id/set_tv_iso_buffer_note"
@@ -410,20 +410,20 @@
                             <com.google.android.material.materialswitch.MaterialSwitch
                                 android:id="@+id/set_sw_vu_superblock"
                                 style="@style/Cenit.Settings.Switch"
-                                android:text="Motor de superbloques VU (experimental)" />
+                                android:text="Motor de superbloques VU (sin usar todavía)" />
 
                             <TextView
                                 style="@style/Cenit.Settings.Caption"
-                                android:text="Fusiona bloques VU1 calientes para saltarse la barrera de bloque. Apagado por defecto: puede cambiar el resultado gráfico en juegos concretos y se revierte solo si diverge." />
+                                android:text="Fusiona bloques VU1 calientes para saltarse la barrera de bloque. Puede cambiar el resultado gráfico en juegos concretos y se revierte solo si diverge. Apagado por defecto y con una razón medida, no de fe: en la partida de God of War con el motor encendido hizo 120542 intentos y construyó 0 superbloques — todos los rechazos fueron de forma o de identidad, ningún hueco quedó siquiera candidato — así que en ese juego no acelera nada y lo que queda por demostrar es que sirva en algún juego antes de que prometa cuadros." />
 
                             <com.google.android.material.materialswitch.MaterialSwitch
                                 android:id="@+id/set_sw_async_shaders"
                                 style="@style/Cenit.Settings.Switch"
-                                android:text="Compilar shaders en segundo plano (experimental)" />
+                                android:text="Compilar shaders en segundo plano" />
 
                             <TextView
                                 style="@style/Cenit.Settings.Caption"
-                                android:text="Cuando el juego estrena un efecto nuevo, el gráfico se detiene un instante a construirlo y se nota como un tirón. Encendido, esa construcción pasa a un hilo de fondo y lo único que se ve es un parpadeo breve en el detalle que estaba apareciendo. Apagado por defecto: es una función experimental, solo se nota en Vulkan, y se activa o desactiva sin reiniciar el emulador." />
+                                android:text="Cuando el juego estrena un efecto nuevo, el gráfico se detiene un instante a construirlo y se nota como un tirón. Encendido, esa construcción pasa a un hilo de fondo y lo único que se ve es un parpadeo breve en el detalle que estaba apareciendo. Solo se nota en Vulkan y se activa o desactiva sin reiniciar. Queda apagada por defecto porque su costo es visible: un parpadeo en lugar de un tirón es tu elección, no un progreso. En el teléfono de este reporte estuvo encendida toda una partida y cerró limpia (enqueued=191, compiled=191, fallback=0), y esa misma línea del registro es la que lo dice en el tuyo." />
 
                             <TextView
                                 style="@style/Cenit.Settings.FieldLabel"
@@ -605,11 +605,11 @@
                             <com.google.android.material.materialswitch.MaterialSwitch
                                 android:id="@+id/set_sw_easu"
                                 style="@style/Cenit.Settings.Switch"
-                                android:text="Reconstruir imagen por debajo de 1x (EASU, experimental, encendida por defecto)" />
+                                android:text="Reconstruir imagen por debajo de 1x (EASU, encendida por defecto)" />
 
                             <TextView
                                 style="@style/Cenit.Settings.Caption"
-                                android:text="Cuando la resolución interna baja de 1x (escalones 0.5x y 0.75x del ajuste dinámico), reconstruye la imagen a la resolución de salida con FidelityFX FSR1 en lugar de simplemente estirarla: encadena pasadas EASU de hasta 2x cada una (el rango para el que AMD escribió el filtro) y aplica un enfoque RCAS después, todo dentro de la propia función — ya no necesita activar la nitidez CAS. Sale bastante más nítida que el estirado, pero no inventa detalle que nunca se renderizó: no se confunde con 1x nativo. Solo funciona en Vulkan y se nota únicamente por debajo de 1x. Con el HUD de resolución activo, la línea PRESENT muestra con números si la reconstrucción está corriendo (EASU ON, en verde) o no (EASU OFF). Encendida por defecto desde 0.6.26; experimental, se aplica sin reiniciar." />
+                                android:text="Cuando la resolución interna baja de 1x (escalones 0.5x y 0.75x del ajuste dinámico), reconstruye la imagen a la resolución de salida con FidelityFX FSR1 en lugar de simplemente estirarla: encadena pasadas EASU de hasta 2x cada una (el rango para el que AMD escribió el filtro) y aplica un enfoque RCAS después, todo dentro de la propia función — ya no necesita activar la nitidez CAS. Sale bastante más nítida que el estirado, pero no inventa detalle que nunca se renderizó: no se confunde con 1x nativo. Solo funciona en Vulkan y se nota únicamente por debajo de 1x. Con el HUD de resolución activo, la línea PRESENT muestra con números si la reconstrucción está corriendo (EASU ON, en verde) o no (EASU OFF). Encendida por defecto desde 0.6.26 y se aplica sin reiniciar. Si en tu teléfono estuvo reconstruyendo de verdad o solo estirando lo dice ahora una línea del registro al parar el juego: «Cenit present: con-buffer=… hecho=… fallado=…»." />
                         </LinearLayout>
                     </com.google.android.material.card.MaterialCardView>
                 </LinearLayout>
