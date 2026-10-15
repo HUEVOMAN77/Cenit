@@ -737,8 +737,9 @@ Pcsx2Config::GSOptions::GSOptions()
 	UseDebugDevice = false;
 	UseBlitSwapChain = false;
 	DisableShaderCache = false;
-	// Cenit 0.6.24: compilación asíncrona de pipelines TFX. EXPERIMENTAL y APAGADA
-	// por defecto (ver el gate de cualquier feature nueva: primero medir).
+	// Cenit 0.6.24: compilación asíncrona de pipelines TFX. APAGADA
+	// por defecto (ver el gate de cualquier feature nueva: primero medir; y el
+	// costo es un intercambio que elige el usuario, no una duda de funcionamiento).
 	AsyncTFXPipelineCompile = false;
 	// Cenit 0.6.25: reconstrucción EASU para escalas internas sub-nativas.
 	// Cenit 0.6.26: ENCENDIDA por defecto. En 0.6.25 el default apagado, sumado al
