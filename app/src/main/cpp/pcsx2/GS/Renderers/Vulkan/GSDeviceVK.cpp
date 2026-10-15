@@ -5830,7 +5830,8 @@ VkPipeline GSDeviceVK::GetTFXPipeline(const PipelineSelector& p)
 			return it->second;
 	}
 
-	// Cenit 0.6.24 — compilación asíncrona (experimental, OFF por defecto).
+	// Cenit 0.6.24 — compilación asíncrona (OFF por defecto, ver el comentario de
+	// StartAsyncPipelineCompiler: apagada por su costo visible, no por dudosa).
 	// Con la bandera apagada el comportamiento es EXACTAMENTE el de siempre:
 	// compilar aquí, en el hilo de dibujo.
 	if (!GSConfig.AsyncTFXPipelineCompile)
@@ -6069,7 +6070,14 @@ bool GSDeviceVK::StartAsyncPipelineCompiler()
 
 	m_async_stop_requested = false;
 	m_async_active = true;
-	Console.WriteLn("VK async pipeline compiler: worker iniciado (experimental)");
+	// Cenit 0.6.36: se le quita "(experimental)" a la linea. La funcion no es
+	// experimental en el sentido de "nadie sabe si funciona": el log real de un
+	// HUAWEI NCO-LX3 la tuvo encendida toda una partida de God of War y cerro
+	// enqueued=191 compiled=191 fallback=0. Lo que sigue siendo una ELECCION del
+	// usuario es su costo (un parpadeo en lugar de un tiron), y por eso el default
+	// sigue apagado. La palabra "experimental" no describe ese intercambio; lo
+	// describe la linea de paro, que ya lleva los numeros.
+	Console.WriteLn("VK async pipeline compiler: worker iniciado");
 	return true;
 }
 
