@@ -584,6 +584,7 @@ set(pcsx2GSHeaders
 	GS/Renderers/Common/GSDirtyRect.h
 	GS/Renderers/Common/GSFastList.h
 	GS/Renderers/Common/GSFunctionMap.h
+	GS/Renderers/Common/CenitPresentStats.h
 	GS/Renderers/Common/GSRenderer.h
 	GS/Renderers/Common/GSShaderEnums.h
 	GS/Renderers/Common/GSTexture.h
