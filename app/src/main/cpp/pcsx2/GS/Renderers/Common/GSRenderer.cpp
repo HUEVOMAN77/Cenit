@@ -79,6 +79,39 @@ void GSRenderer::Reset(bool hardware_reset)
 
 void GSRenderer::Destroy()
 {
+	// Cenit 0.6.36 — el cierre viaja en el emulog, que es lo que el botón
+	// "Enviar registro" manda. Se imprime SIEMPRE, sin flag de diagnóstico: una
+	// tasa de uso que solo se ve con la sonda encendida no es una medición, es
+	// una esperanza (la lección de 0.6.35, escrita en MvuFastPath.h).
+	//
+	// La suma se comprueba aquí y el resultado se imprime, no se calcula en
+	// silencio: si el código dejara de ser exhaustivo, el desajuste tiene que
+	// verse en el log del teléfono y no solo en el arnés de host.
+	//
+	// Coste: una línea por cierre de GS. Nada en el camino caliente.
+	//
+	// El denominador se llama "con-buffer" y no "cuadros" a proposito: aquí solo
+	// se tallan los cuadros que llegaron a presentar una textura válida (el
+	// camino de frame-skip y el de blank_frame no pasan por el portón). No es lo
+	// mismo que la línea de PerfLog, y decir "cuadros=14138" cuando son menos
+	// sería exactamente el error que esta versión corrige: un número que no es lo que
+	// dice ser.
+	const cenit_present::Stats& ps = m_present_stats;
+	// %llu con casteos explícitos, el mismo estilo de la línea de cierre del
+	// fast path VU1: PRIu64 dependería de un <cinttypes> que este archivo no
+	// incluye, y un aviso por un formato es la manera fácil de que el CI deje de
+	// ser legible.
+	Console.WriteLn("Cenit present: con-buffer=%llu | nativo=%llu"
+	               " sub-nativo=%llu (apagado=%llu hecho=%llu fallado=%llu) | "
+	               "opcion=%s soporte-driver=%s | cierre=%s",
+		(unsigned long long)ps.frames, (unsigned long long)ps.by_reason[cenit_present::kNativo],
+		(unsigned long long)ps.SubNative(),
+		(unsigned long long)ps.by_reason[cenit_present::kSubApagado],
+		(unsigned long long)ps.by_reason[cenit_present::kSubHecho],
+		(unsigned long long)ps.by_reason[cenit_present::kSubFallado],
+		GSConfig.EASUReconstruct ? "ON" : "OFF",
+		(g_gs_device && g_gs_device->Features().easu_reconstruct) ? "si" : "NO",
+		ps.Closes() ? "ok" : "DESAJUSTE");
 	GSCapture::EndCapture();
 }
 
@@ -708,18 +741,24 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
 			// Cenit 0.6.26: la evidencia se captura ANTES de que EASU reasigne
 			// `current`, porque lo que interesa mostrar es de cuanto venia el juego.
 			// Se reporta el buffer interno completo, no src_rect: src_rect puede venir
-			// recortado y lo que el usuario quiere leer es "cuantos pixeles estoy
+			// recortado y lo que el usuario quiere leer es "cuántos píxeles estoy
 			// mandando de verdad a reconstruir".
 			m_present_src = current->GetSize();
 			m_present_dst = GSVector2i(static_cast<int>(std::ceil(draw_rect.z - draw_rect.x)),
 			                           static_cast<int>(std::ceil(draw_rect.w - draw_rect.y)));
-			if (GSConfig.EASUReconstruct && g_gs_device->Features().easu_reconstruct)
-			{
-				const int out_w = m_present_dst.x;
-				const int out_h = m_present_dst.y;
-				if (current->GetWidth() < out_w && current->GetHeight() < out_h)
-					easu_ran = g_gs_device->EASUChain(current, src_rect, src_uv, draw_rect, &easu_stages);
-			}
+			// Cenit 0.6.36 — dos hechos separados, porque el log no podía decir cuál.
+			// Hasta aquí la única contabilidad era si la cadena CORRIÓ. Un cuadro
+			// sub-nativo con la opción encendida y EASUChain devolviendo false se ve
+			// igual que un estirado y no deja rastro: "experimental" significaba
+			// literalmente "no sé qué pasó en tu teléfono". sub_native y gate_open se
+			// calculan con las mismas comparaciones que ya decidían, sin añadir ni
+			// quitar un solo camino: esto es contabilidad del if que ya existía.
+			const bool easu_gate_open = GSConfig.EASUReconstruct && g_gs_device->Features().easu_reconstruct;
+			const bool easu_sub_native =
+				current->GetWidth() < m_present_dst.x && current->GetHeight() < m_present_dst.y;
+			if (easu_gate_open && easu_sub_native)
+				easu_ran = g_gs_device->EASUChain(current, src_rect, src_uv, draw_rect, &easu_stages);
+			m_present_stats.Tally(easu_sub_native, easu_gate_open, easu_ran);
 			m_easu_active = easu_ran;
 			m_easu_stages = easu_stages;
 
