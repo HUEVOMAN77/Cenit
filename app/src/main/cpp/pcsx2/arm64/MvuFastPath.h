@@ -168,12 +168,35 @@ namespace mVUFastPath
 	// Contadores de la estructura. No son simulacion: no entran en ninguna
 	// decision de servicio. Sirven para que el telefono pueda decir cuanta de
 	// esta tabla se usa, que es justo lo que host no puede saber.
+	//
+	// Cenit 0.6.36 — los tres nuevos (`lookups`, `skipExact`, `skipShort`) no
+	// estaban, y su ausencia es la razon por la que esta seccion no podia dejar
+	// de ser experimental con el log que mandaste: `consults` cuenta los
+	// despachos que PREGUNTARON, y preguntar esta filtrado por la ley de costo,
+	// asi que de `served/consults` no se puede deducir nada sobre el juego
+	// completo. Sin total no hay denominador: 30 000 aciertos pueden ser el 90 %
+	// de los despachos o el 0.5 %, y el log no lo distingue. Con `lookups` la
+	// cuenta se cierra sola y vale el INVARIANTE:
+	//     lookups == consults + skipExact + skipShort
+	// que el arnes comprueba casilla por casilla y que el telefono imprime. Si
+	// ese invariante se rompe en un aparato, el defecto es de la telemetria y se
+	// ve, no se infiere meses despues.
+	//
+	// Y `rejectExact` queda dicho de una vez, porque su nombre mentia: en
+	// produccion tiene que valer SIEMPRE 0 — los despachos exactos se cuentan en
+	// skipExact, antes de llegar aqui. Su comprobacion dentro de Serve sigue
+	// puesta (es la defensa contra un llamador que deje de filtrar), asi que un
+	// rejectExact > 0 en el log de un telefono no es una medida: es la senal de
+	// que la guarda del llamador se rompio.
 	struct Stats
 	{
-		uint64_t consults;      // despachos que preguntaron
-		uint64_t serves;        // aciertos servidos (barrido evitado)
-		uint64_t records;       // entradas escritas
-		uint64_t recordSkipped; // barridos cortos / fuera de dominio: no se memoriza
+		uint64_t lookups;         // despachos de VU1 que llegaron a la decision
+		uint64_t skipExact;       // decision: no preguntar, needExactMatch != 0
+		uint64_t skipShort;       // decision: no preguntar, lista por debajo del umbral
+		uint64_t consults;        // despachos que preguntaron
+		uint64_t serves;          // aciertos servidos (barrido evitado)
+		uint64_t records;         // entradas escritas
+		uint64_t recordSkipped;   // barridos cortos / fuera de dominio: no se memoriza
 		uint64_t rejectEmpty;   // casilla libre
 		uint64_t rejectPc;      // casilla ocupada por OTRO PC (indice no biyectivo)
 		uint64_t rejectVu;      // casilla de otro VU
@@ -222,20 +245,74 @@ namespace mVUFastPath
 			return flagHack ? ~kFlagMask : ~0ull;
 		}
 
-		// La guarda del llamador, AQUI y no escrita en el TU del motor, por una razon
-		// verificable: Harness12 muta este archivo entero (mutacion_h12.sh) y cada
-		// rotura tiene que poner rojo el arnes. Si la guarda vive dentro de
-		// microVU-arm64.cpp, el arnes no la ve y su mutante escapa verde — que es
-		// exactamente la definicion de comprobacion decorativa. Dos condiciones, y
-		// ninguna es negociable:
+		// Cenit 0.6.36 — LA decision vive aqui y en ningun otro sitio, en forma de
+		// motivo. Antes era un bool (ShouldAsk) y anadir contadores pedia repetir
+		// las dos condiciones en otra funcion: dos copias de la ley de costo que
+		// pueden divergir en el proximo retoque, y una divergencia entre lo que se
+		// ejecuta y lo que se mide es peor que no medir — es medir otra cosa. Con
+		// un unico DecideAsk, ShouldAsk es una proyeccion y AskCounted otra;
+		// romper el nucleo pone rojas las dos, que es lo que quiere el ejecutor de
+		// mutacion. Dos condiciones, ninguna negociable:
 		//   - needExactMatch == 0: el dominio memoizado es la rama rapida de search().
 		//   - lookupCount >= kMinRecordPos: con la lista corta el barrido cuesta menos
 		//     lecturas que el memo; preguntar seria pagar por no ahorrar (ley de
-		//     costo). `lookupCount` es quickLookup.size() leido del gestor VIVO, no
-		//     contado a mano por nadie.
+		//     costo, medida en tools/medicion/dispatch_cost_bench.cpp). `lookupCount`
+		//     es quickLookup.size() leido del gestor VIVO, no contado a mano.
+		enum AskReason
+		{
+			kAsk = 0,        // preguntar
+			kSkipExact,      // no preguntar: dominio exacto (efectos que la copia no tiene)
+			kSkipShort       // no preguntar: la lista es corta, preguntar perderia
+		};
+
+		static AskReason DecideAsk(uint32_t needExactMatch, int lookupCount)
+		{
+			if (needExactMatch != 0u)
+				return kSkipExact;
+			if (lookupCount < static_cast<int>(kMinRecordPos))
+				return kSkipShort;
+			return kAsk;
+		}
+
 		static bool ShouldAsk(uint32_t needExactMatch, int lookupCount)
 		{
-			return needExactMatch == 0u && lookupCount >= static_cast<int>(kMinRecordPos);
+			return DecideAsk(needExactMatch, lookupCount) == kAsk;
+		}
+
+		// La decision, contada: la que llama el motor. `lookups` se suma PRIMERO y
+		// se sale por el motivo que sea; `consults` NO se suma aqui — lo suma
+		// Serve — porque si no cada pregunta valdria dos y el invariante
+		//     lookups == consults + skipExact + skipShort
+		// se romperia justo en el caso que mas importa medir. Los dos no-preguntar
+		// se cuentan SEPARADOS porque se leen distinto: skipShort alto dice "los
+		// PCs calientes de este juego nunca llegan al umbral de 8" — el memo no
+		// aplica, y eso hay que decirlo en vez de callarlo; skipExact alto dice
+		// "el juego despacha con match exacto", otro dominio. La ausencia de estos
+		// dos contadores es lo que dejo a esta seccion sin poder salir de
+		// experimental con el log de God of War que mandaste: consults es un filtro
+		// y un filtro no es un denominador.
+		bool AskCounted(uint32_t needExactMatch, int lookupCount)
+		{
+			stats.lookups++;
+			// switch sobre el motivo, con break y un unico return false al final:
+			// sin default el compilador exige salida de la funcion de todos modos
+			// (-Wreturn-type) y un default silenciaria la advertencia util si
+			// alguien anade un AskReason nuevo. Con esta forma, anadir un motivo sin
+			// contarlo deja de ser un error de compilacion pero lo pilla el arnes,
+			// que comprueba el invariante lookups == consults + skipExact + skipShort
+			// en cada despacho.
+			switch (DecideAsk(needExactMatch, lookupCount))
+			{
+				case kAsk:
+					return true;
+				case kSkipExact:
+					stats.skipExact++;
+					break;
+				case kSkipShort:
+					stats.skipShort++;
+					break;
+			}
+			return false;
 		}
 
 		// Seqlock, en una linea y por el mismo motivo: un acierto del memo es acierto
