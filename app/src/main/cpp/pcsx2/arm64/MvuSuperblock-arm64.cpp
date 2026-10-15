@@ -34,6 +34,7 @@
 
 #include <cinttypes>
 #include <cstdarg>
+#include <mutex>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -187,6 +188,12 @@ namespace mVUSuperblock
 		// lineal en host; lo que aqui se conecta es la disciplina de los enlaces.
 		// ------------------------------------------------------------------
 		mVUSbIndex::Index s_idx;
+
+		// Cenit 0.6.37 — la puerta de re-evaluacion del armado. Un estado de sesion
+		// mas, mismo dueno y mismo hilo que s_idx (el dispatcher de VU1), y se vuelve
+		// a cero con la tabla (ResetTableForEnable). Ver SbConsiderArm y el bloque
+		// ArmGate de MvuSbEligibility.h por que existe.
+		mVUSbElig::ArmGate s_arm_gate;
 
 		// Los dos acotes que MvuSbIndex.h PROMETE en su encabezado y que solo se
 		// pueden comprobar aqui, donde el motor ve la sonda y la tabla a la vez. Sin
@@ -437,6 +444,15 @@ namespace mVUSuperblock
 			// abajo — para que el informe de este encendido no arrastre la sospecha
 			// del anterior.
 			s_idx.ClearAll();
+			// 0.6.37 — la puerta se limpia CON la tabla. Si no, un re-encendido del
+			// motor heredaria las ventanas de los PCs ya juzgados y los primeros
+			// cientos de miles de despachos de la sesion nueva no podrian armar nada,
+			// en silencio y sin ninguna casilla que lo diga (las consideraciones
+			// nuevas se contarían, pero el informe no tendria forma de saber que la
+			// puerta venia cerrada de antes). Es el mismo criterio que ya se aplica
+			// al indice y a los quemados: con la tabla limpia, todo estado derivado
+			// de la sesion anterior tiene que morir en el mismo vuelco.
+			s_arm_gate.Clear();
 			s_indexTrusted = true;
 			s_indexDispatches = 0;
 			std::memset(s_burned, 0, sizeof(s_burned));
@@ -448,8 +464,22 @@ namespace mVUSuperblock
 			{
 				Stats& s = g_stats[vu];
 				s.attempts.store(0); s.built.store(0); s.junctions.store(0); s.fused_ops.store(0);
-				s.rejected_struct.store(0); s.rejected_cold.store(0);
-				s.rejected_budget.store(0); s.rejected_identity.store(0);
+				// 0.6.37 — la lista de cero se hace por TAMANO de arreglo, no a mano:
+				// anadir una causa al enum sin anadir su vuelco dejaria un contador de
+				// la sesion anterior en el informe, que es exactamente un numero que
+				// miente. Con el bucle por `kArmCauseCount` es imposible.
+				for (u32 k = 0; k < mVUSbElig::kArmCauseCount; k++)
+					s.arm_cause[k].store(0);
+				for (u32 k = 0; k < mVUSbElig::kJunctionCauseCount; k++)
+					s.jun_cause[k].store(0);
+				for (u32 k = 0; k < mVUSbElig::kCloseCauseCount; k++)
+					s.close_cause[k].store(0);
+				s.junction_requests.store(0);
+				s.close_calls.store(0);
+				s.arm_from[0].store(0);
+				s.arm_from[1].store(0);
+				s.gate_closed.store(0);
+				s.dispatch_budget.store(0);
 				s.verify_normal.store(0); s.verify_sb.store(0); s.unmatched.store(0);
 				s.matched.store(0); s.diverged.store(0); s.promoted.store(0);
 				s.unproven.store(0); s.killed.store(0);
@@ -485,10 +515,104 @@ namespace mVUSuperblock
 				" fused_ops=%" PRIu64 "\n",
 				tag, s.attempts.load(std::memory_order::relaxed), s.built.load(std::memory_order::relaxed),
 				s.junctions.load(std::memory_order::relaxed), s.fused_ops.load(std::memory_order::relaxed));
-			SbPrintf(f, "%s rejected struct=%" PRIu64 " cold=%" PRIu64 " budget=%" PRIu64
-				" identity=%" PRIu64 "\n",
-				tag, s.rejected_struct.load(std::memory_order::relaxed), s.rejected_cold.load(std::memory_order::relaxed),
-				s.rejected_budget.load(std::memory_order::relaxed), s.rejected_identity.load(std::memory_order::relaxed));
+			// Cenit 0.6.37 — UNA LINEA DE CAUSAS POR CADENA, y el cierre firmado.
+			//
+			// Las cuatro palabras del log viejo (struct/cold/budget/identity) siguen
+			// saliendo, pero DERIVADAS de las casillas: son el resumen para quien
+			// compara dos versiones, no la fuente de verdad. La fuente son las
+			// causas, que es lo que permite decir por que un telefono no construyo
+			// superbloques — o, si no lo dice, saber que el que miente es el motor.
+			{
+				u64 arm_sum = 0, arm_rej = 0;
+				u64 cubo[mVUSbElig::kBucketCount] = {};
+				for (u32 k = 0; k < mVUSbElig::kArmCauseCount; k++)
+				{
+					const u64 v = s.arm_cause[k].load(std::memory_order::relaxed);
+					arm_sum += v;
+					const mVUSbElig::ArmCause c = static_cast<mVUSbElig::ArmCause>(k);
+					if (mVUSbElig::IsArmRejection(c))
+					{
+						arm_rej += v;
+						cubo[static_cast<u32>(mVUSbElig::ArmBucketOf(c))] += v;
+					}
+				}
+				u64 jun_sum = 0;
+				for (u32 k = 0; k < mVUSbElig::kJunctionCauseCount; k++)
+				{
+					const u64 v = s.jun_cause[k].load(std::memory_order::relaxed);
+					jun_sum += v;
+					const mVUSbElig::JunctionCause c = static_cast<mVUSbElig::JunctionCause>(k);
+					if (mVUSbElig::IsJunctionRejection(c))
+						cubo[static_cast<u32>(mVUSbElig::JunctionBucketOf(c))] += v;
+				}
+				u64 close_sum = 0;
+				for (u32 k = 0; k < mVUSbElig::kCloseCauseCount; k++)
+				{
+					const u64 v = s.close_cause[k].load(std::memory_order::relaxed);
+					close_sum += v;
+					const mVUSbElig::CloseCause c = static_cast<mVUSbElig::CloseCause>(k);
+					if (mVUSbElig::IsCloseRejection(c))
+						cubo[static_cast<u32>(mVUSbElig::CloseBucketOf(c))] += v;
+				}
+				cubo[static_cast<u32>(mVUSbElig::Bucket::kDispatch)] =
+					s.dispatch_budget.load(std::memory_order::relaxed);
+
+				const u64 intentos = s.attempts.load(std::memory_order::relaxed);
+				const u64 lenta = s.arm_from[0].load(std::memory_order::relaxed);
+				const u64 stub = s.arm_from[1].load(std::memory_order::relaxed);
+				const u64 cerrada = s.gate_closed.load(std::memory_order::relaxed);
+
+				SbPrintf(f, "%s causas arm(%" PRIu64 "):", tag, intentos);
+				for (u32 k = 0; k < mVUSbElig::kArmCauseCount; k++)
+				{
+					const u64 v = s.arm_cause[k].load(std::memory_order::relaxed);
+					if (v == 0)
+						continue; // causas de cero no se listan: el silencio dice "no paso"
+					SbPrintf(f, " %s=%" PRIu64,
+						mVUSbElig::ArmCauseName(static_cast<mVUSbElig::ArmCause>(k)), v);
+				}
+				SbPrintf(f, "  [cierre=%s]\n", (arm_sum == intentos) ? "ok" : "DESAJUSTE");
+
+				SbPrintf(f, "%s causas union(%" PRIu64 "):", tag,
+					s.junction_requests.load(std::memory_order::relaxed));
+				for (u32 k = 0; k < mVUSbElig::kJunctionCauseCount; k++)
+				{
+					const u64 v = s.jun_cause[k].load(std::memory_order::relaxed);
+					if (v == 0)
+						continue;
+					SbPrintf(f, " %s=%" PRIu64,
+						mVUSbElig::JunctionCauseName(static_cast<mVUSbElig::JunctionCause>(k)), v);
+				}
+				SbPrintf(f, "  [cierre=%s]\n",
+					(jun_sum == s.junction_requests.load(std::memory_order::relaxed)) ? "ok" : "DESAJUSTE");
+
+				SbPrintf(f, "%s causas cierre(%" PRIu64 "):", tag,
+					s.close_calls.load(std::memory_order::relaxed));
+				for (u32 k = 0; k < mVUSbElig::kCloseCauseCount; k++)
+				{
+					const u64 v = s.close_cause[k].load(std::memory_order::relaxed);
+					if (v == 0)
+						continue;
+					SbPrintf(f, " %s=%" PRIu64,
+						mVUSbElig::CloseCauseName(static_cast<mVUSbElig::CloseCause>(k)), v);
+				}
+				SbPrintf(f, "  [cierre=%s]\n",
+					(close_sum == s.close_calls.load(std::memory_order::relaxed)) ? "ok" : "DESAJUSTE");
+
+				// Cubos derivados: los cuatro nombres de 0.6.36, ahora SUMADOS de las
+				// causas. Vivan o mueran, no pueden contradecir la linea de arriba.
+				SbPrintf(f, "%s cubos(derivados) estructura=%" PRIu64 " frio=%" PRIu64
+					" presupuesto=%" PRIu64 " estado-tabla=%" PRIu64 " despacho=%" PRIu64 "\n",
+					tag, cubo[0], cubo[1], cubo[2], cubo[3], cubo[4]);
+
+				// La cobertura del armado, que es la pregunta que 0.6.37 viene a
+				// contestar con un log: cuantos despachos llegaron a la puerta por cada
+				// camino, cuantos dejo pasar, y si la cuenta cierra.
+				SbPrintf(f, "%s puerta consideradas=%" PRIu64 " (lento=%" PRIu64
+					" stub=%" PRIu64 ") dejo-pasar=%" PRIu64 "  [cierre=%s]\n",
+					tag, lenta + stub, lenta, stub, cerrada,
+					(lenta + stub == intentos + cerrada) ? "ok" : "DESAJUSTE");
+			}
 			SbPrintf(f, "%s replay normal=%" PRIu64 " sb=%" PRIu64 " unmatched=%" PRIu64
 				" matched=%" PRIu64 " diverged=%" PRIu64 "\n",
 				tag, s.verify_normal.load(std::memory_order::relaxed), s.verify_sb.load(std::memory_order::relaxed),
@@ -1013,6 +1137,14 @@ namespace mVUSuperblock
 
 	// ------------------------------------------------------------------
 	// Política de elegibilidad — Fase 2
+	//
+	// Cenit 0.6.37 — el VEREDICTO vive en mVUSbElig::DecideArm (header puro,
+	// Harness14 lo prueba en host) y aqui quedan solo los EFECTOS: leer los datos
+	// vivos, preguntar, contar la causa que devolvio y —si toca armar— enlazar el
+	// hueco. Antes las doce comprobaciones estaban escritas a mano con cuatro
+	// contadores, y con esa granularidad un build=0 en el log de un telefono no
+	// se puede explicar (ver el bloque de Stats en la cabecera: es la leccion de
+	// `lookups` y de `con-buffer` aplicada a los rechazos).
 	// ------------------------------------------------------------------
 	int SbArmCompile(u32 startPC_bytes, const void* pState96)
 	{
@@ -1026,73 +1158,60 @@ namespace mVUSuperblock
 		// compilación variante está en vuelo — mismo hilo, pero el hook puede
 		// dispararse otra vez antes de SbCloseCompile si el dispatcher entra
 		// dos veces seguidas a este PC).
-		if (FindForPc(startPC_bytes))
-		{
-			st.rejected_identity.fetch_add(1, std::memory_order_relaxed);
-			return -1;
-		}
-
+		const bool live = (FindForPc(startPC_bytes) != nullptr);
 		const u32 idx = PcIdx(startPC_bytes);
-		if (IsBurned(idx))
-		{
-			st.rejected_identity.fetch_add(1, std::memory_order_relaxed);
-			return -1;
-		}
+		const bool burned = IsBurned(idx);
 
 		// La arista incondicional A->B tiene que existir y B tiene que estar
 		// compilado (forma registrada): sin ambos datos medidos no hay nada
 		// que fusionar, solo conjetura.
 		const mVUTraceProbe::BlockEdge& e = mVUTraceProbe::g_edges[1][idx];
-		if (e.kind != 1)
-		{
-			st.rejected_struct.fetch_add(1, std::memory_order_relaxed);
-			return -1;
-		}
 		const mVUTraceProbe::BlockShape& shapeA = mVUTraceProbe::g_shape[1][idx];
 		const mVUTraceProbe::BlockShape& shapeB = mVUTraceProbe::g_shape[1][e.succIdx];
-		if (shapeA.reason == 0 || shapeB.reason == 0)
-		{
-			st.rejected_struct.fetch_add(1, std::memory_order_relaxed);
-			return -1;
-		}
 
 		// Hotness: A tiene que ser un bloque caliente medido, B tiene que
 		// haber corrido solo un montón de veces, y el ratio tiene que decir
 		// que A cae de forma estable sobre B (no que B tenga otro predecesor
 		// dominante).
 		const u64* slots = mVUTraceProbe::SlotArray(1);
-		if (!slots)
-		{
-			st.rejected_cold.fetch_add(1, std::memory_order_relaxed);
-			return -1;
-		}
-		const u64 execA = slots[idx];
-		const u64 execB = slots[e.succIdx];
-		if (execA < kSbHotEntries || execB < kSbTargetMinEntries)
-		{
-			st.rejected_cold.fetch_add(1, std::memory_order_relaxed);
-			return -1;
-		}
-		const u64 ratioPct = execB * 100ull / (execA ? execA : 1ull);
-		if (ratioPct < kSbMinRatioPct || ratioPct > kSbMaxRatioPct)
-		{
-			st.rejected_cold.fetch_add(1, std::memory_order_relaxed);
-			return -1;
-		}
 
-		// Tamaño del par: si A+B ya pasa los techos del área, la primera
-		// unión sería la última y no paga la compilación extra.
-		if (static_cast<u64>(shapeA.ops) + shapeB.ops > kSbMaxOps ||
-			static_cast<u64>(shapeA.cycles) + shapeB.cycles > kSbMaxCycles)
+		// Los datos se leen TODOS antes de preguntar, incluso los de una casilla
+		// que la politica probablemente ni mira (shapeB con edge.kind==0, por
+		// ejemplo). Es deliberado y barato: la cadena corta en cuanto el veredicto
+		// es una causa, así que no hay coste de division ni de suma cuando no hace
+		// falta, y a cambio no existe una segunda copia del orden de comprobaciones
+		// en este archivo. g_edges/g_shape son tablas estaticas del tamano del
+		// dominio de PCs y `idx`/`succIdx` ya vienen enmascarados por PcIdx y por
+		// la sonda, o sea ninguna lectura puede salirse.
+		mVUSbElig::ArmInput in;
+		in.already_live = live;
+		in.burned = burned;
+		in.edge_kind = e.kind;
+		in.shape_a_reason = shapeA.reason;
+		in.shape_b_reason = shapeB.reason;
+		in.slots_present = (slots != nullptr);
+		in.exec_a = slots ? slots[idx] : 0ull;
+		in.exec_b = slots ? slots[e.succIdx] : 0ull;
+		in.ops_a = shapeA.ops;
+		in.ops_b = shapeB.ops;
+		in.cycles_a = shapeA.cycles;
+		in.cycles_b = shapeB.cycles;
+
+		const mVUSbElig::ArmCause cause = mVUSbElig::DecideArm(in, kSbPolicy);
+		if (cause != mVUSbElig::ArmCause::kPolicyPass)
 		{
-			st.rejected_budget.fetch_add(1, std::memory_order_relaxed);
+			// Salida terminal: se cuenta SU casilla. kArmed lo hace abajo, al
+			// enlazar; kFull y kDesync tambien, en sus efectos. Con eso
+			// `intentos == Σ casillas terminales` cierra sin dobles cuentas.
+			st.arm_cause[static_cast<u32>(cause)].fetch_add(1, std::memory_order_relaxed);
 			return -1;
 		}
 
 		Candidate* c = AllocSlot();
 		if (!c)
 		{
-			st.rejected_identity.fetch_add(1, std::memory_order_relaxed);
+			st.arm_cause[static_cast<u32>(mVUSbElig::ArmCause::kFull)]
+				.fetch_add(1, std::memory_order_relaxed);
 			return -1;
 		}
 
@@ -1109,7 +1228,8 @@ namespace mVUSuperblock
 			c->inUse = false;
 			if (s_live)
 				s_live--;
-			st.rejected_identity.fetch_add(1, std::memory_order_relaxed);
+			st.arm_cause[static_cast<u32>(mVUSbElig::ArmCause::kDesync)]
+				.fetch_add(1, std::memory_order_relaxed);
 			return -1;
 		}
 
@@ -1131,65 +1251,88 @@ namespace mVUSuperblock
 		c->timedPairs = 0;
 		c->ringPos = 0;
 		c->ringFill = 0;
+		// kArmed es la UNICA salida positiva de la cadena y tiene su casilla: sin
+		// ella el cierre `intentos == aceptados + Σ rechaces` no podria escribirse.
+		st.arm_cause[static_cast<u32>(mVUSbElig::ArmCause::kArmed)]
+			.fetch_add(1, std::memory_order_relaxed);
 		return static_cast<int>(c - s_tab);
+	}
+
+	// ------------------------------------------------------------------
+	// Puerta de re-evaluacion (0.6.37) — el UNICO llamador de SbArmCompile.
+	//
+	// Cierra el defecto de cubrimiento que el log del telefono deja dicho con
+	// aritmetica: intentos=120542 contra stub=13110338 — el armado, colgado solo
+	// del camino lento, podia considerar el 0.9 % de los despachos de VU1. Los
+	// bloques que la sonda reporta como calientes (0x0378 con 44 486 376
+	// ejecuciones, 0x0cd8 con 123 013 572) se resuelven por el stub emitido y por
+	// ahi NUNCA pasaba el hook, asi que el motor podia SERVIR superbloques pero
+	// casi no podia CONSTRUIRLOS: ese es build=0, y es un defecto, no una
+	// caracteristica del juego.
+	//
+	// Ahora llaman los DOS caminos (microVU-arm64.cpp: el hook de mVUexecute y el
+	// del stub mVUlookupProg_VU1) y la puerta de mVUSbElig baja el ruido de
+	// preguntar en cada despacho a preguntar como mucho cada
+	// kGatePeriodConsideraciones por PC. La puerta es mecanica: no cambia ni un
+	// veredicto, cambia cuantas veces se pregunta.
+	//
+	// La cuenta va por ORIGEN del despacho y NO hay un total aparte: el informe
+	// imprime la suma, así que no puede contradecirla. Con las dos separadas, el proximo log puede decir cual de los dos hooks produce los
+	// intentos — exactamente la pregunta que esta version necesita que conteste un
+	// telefono, porque host no tiene dispatcher.
+	// ------------------------------------------------------------------
+	int SbConsiderArm(u32 startPC_bytes, const void* pState96, bool from_stub)
+	{
+		if (!IsEnabled() || s_killed)
+			return -1;
+
+		Stats& st = g_stats[1];
+		st.arm_from[from_stub ? 1u : 0u].fetch_add(1, std::memory_order_relaxed);
+
+		if (!s_arm_gate.Open(startPC_bytes))
+		{
+			st.gate_closed.fetch_add(1, std::memory_order_relaxed);
+			return -1;
+		}
+
+		return SbArmCompile(startPC_bytes, pState96);
 	}
 
 	int SbAskJunction(int slot, u32 targetPC_bytes, bool branchStructClean,
 		u32 regionOps, u32 regionCycles)
 	{
-		if (slot < 0 || slot >= static_cast<int>(kSbMaxVariants))
-			return -1;
-
-		Candidate& c = s_tab[slot];
-		if (c.life.state != State::Building)
-			return -1;
-
+		// Cenit 0.6.37 — el veredicto es mVUSbElig::DecideJunction; aqui solo se
+		// leen los datos, se cuenta la causa y se aplica el efecto (sumar la union
+		// concedida). Antes siete comprobaciones con dos cubos (`struct` juntaba
+		// rama sucia, destino desalineado, destino sin analizar y destino==entrada:
+		// cuatro cosas que un log no podia distinguir).
 		Stats& st = g_stats[1];
+		st.junction_requests.fetch_add(1, std::memory_order_relaxed);
 
-		if (!branchStructClean)
-		{
-			st.rejected_struct.fetch_add(1, std::memory_order_relaxed);
-			return -1;
-		}
+		const bool in_range = (slot >= 0 && slot < static_cast<int>(kSbMaxVariants));
+		Candidate& c = in_range ? s_tab[slot] : s_tab[0];
 
-		if (c.junctions >= kSbMaxJunctions)
-		{
-			st.rejected_budget.fetch_add(1, std::memory_order_relaxed);
-			return -1;
-		}
+		mVUSbElig::JunctionInput in;
+		in.slot_in_range = in_range;
+		in.is_building = (c.life.state == State::Building);
+		in.struct_clean = branchStructClean;
+		in.junctions_so_far = c.junctions;
+		in.region_ops = regionOps;
+		in.region_cycles = regionCycles;
+		in.target_aligned = ((targetPC_bytes & 7u) == 0);
+		// La lectura de la forma del destino se protege del indice: PcIdx enmascara,
+		// así que esta tabla nunca se sale, pero un PC desalineado NUNCA es un PC de
+		// entrada y su shape no significa nada. Se pide solo si esta alineado, para
+		// que el veredicto kMisalign no dependa de un dato leido de un indice que no
+		// corresponde a ese PC.
+		in.target_has_shape = in.target_aligned &&
+			(mVUTraceProbe::g_shape[1][PcIdx(targetPC_bytes)].reason != 0);
+		in.target_is_self = (targetPC_bytes == c.startPC);
 
-		// Techos del área: regionOps/regionCycles son los contadores del
-		// análisis en el punto de la unión. La unión mete además el tramo
-		// destino, así que se exige que el área ACTUAL deje hueco para él.
-		if (regionOps >= kSbMaxOps || regionCycles >= kSbMaxCycles)
-		{
-			st.rejected_budget.fetch_add(1, std::memory_order_relaxed);
+		const mVUSbElig::JunctionCause cause = mVUSbElig::DecideJunction(in, kSbPolicy);
+		st.jun_cause[static_cast<u32>(cause)].fetch_add(1, std::memory_order_relaxed);
+		if (cause != mVUSbElig::JunctionCause::kJoined)
 			return -1;
-		}
-
-		// El destino tiene que ser un PC de entrada real (8-byte alineado,
-		// dentro de la imagen) y tiene que haber sido compilado: fusionar
-		// hacia código que nadie analizó no es una fusión, es una conjetura.
-		const u32 tidx = PcIdx(targetPC_bytes);
-		if ((targetPC_bytes & 7u) != 0)
-		{
-			st.rejected_struct.fetch_add(1, std::memory_order_relaxed);
-			return -1;
-		}
-		if (mVUTraceProbe::g_shape[1][tidx].reason == 0)
-		{
-			st.rejected_struct.fetch_add(1, std::memory_order_relaxed);
-			return -1;
-		}
-
-		// No se fusiona hacia el propio PC de entrada (bucle de un solo
-		// tramo): el superbloque no elimina la barrera, se elimina a sí
-		// mismo y el area no termina nunca en el paso 1.
-		if (targetPC_bytes == c.startPC)
-		{
-			st.rejected_struct.fetch_add(1, std::memory_order_relaxed);
-			return -1;
-		}
 
 		const u32 j = c.junctions;
 		c.junctions = j + 1;
@@ -1200,14 +1343,22 @@ namespace mVUSuperblock
 	void SbCloseCompile(int slot, u32 startPC_bytes, void* hostEntry,
 		u32 junctions, bool areaBad, u32 nOps, u32 nCycles)
 	{
-		if (slot < 0 || slot >= static_cast<int>(kSbMaxVariants))
-			return;
-
-		Candidate& c = s_tab[slot];
-		if (c.life.state != State::Building)
-			return;
-
+		// Cenit 0.6.37 — el veredicto es mVUSbElig::DecideClose. Los siete motivos
+		// que habia detras de un unico `if (!shapeOk)` (con dos cubos y sin
+		// denominador) ahora son casillas propias, y `close_calls` es el
+		// denominador que permite cerrar la cadena.
 		Stats& st = g_stats[1];
+		st.close_calls.fetch_add(1, std::memory_order_relaxed);
+
+		const bool in_range = (slot >= 0 && slot < static_cast<int>(kSbMaxVariants));
+		Candidate& c = in_range ? s_tab[slot] : s_tab[0];
+
+		const mVUSbElig::CloseInput cin{in_range, c.life.state == State::Building,
+			areaBad, junctions, hostEntry != nullptr, nOps, nCycles};
+		const mVUSbElig::CloseCause ccause = mVUSbElig::DecideClose(cin, kSbPolicy);
+		st.close_cause[static_cast<u32>(ccause)].fetch_add(1, std::memory_order_relaxed);
+		if (!in_range || c.life.state != State::Building)
+			return;
 
 		// Barrido de los bits de rasguño en la clave de pareo (obligatorio en
 		// AMBOS caminos, antes de cualquier decisión). La variante se registró
@@ -1235,14 +1386,12 @@ namespace mVUSuperblock
 		// por encima de los techos: el área creció tras la última unión (un
 		// tramo largo hasta el corte natural) y ya no es un superbloque
 		// medido contra presupuesto — fuera de política.
-		const bool shapeOk = !areaBad && junctions >= 1 && hostEntry && nOps != 0 &&
-			nOps <= kSbMaxOps && nCycles <= kSbMaxCycles;
+		const bool shapeOk = (ccause == mVUSbElig::CloseCause::kAdopted);
 		if (!shapeOk)
 		{
-			if (areaBad)
-				st.rejected_struct.fetch_add(1, std::memory_order_relaxed);
-			else
-				st.rejected_budget.fetch_add(1, std::memory_order_relaxed);
+			// La causa YA esta contada arriba, y aqui no se vuelve a contar: es la
+			// razon por la que `ccause` se calcula una sola vez al entrar. Quemar el
+			// PC sigue siendo el efecto comun de los rechaces deterministas.
 			// Quema el PC: este rechazo es DETERMINISTA (la forma del area es
 			// la que es — mismo PC, mismo microcodigo, mismo veredicto). Sin
 			// quemar, cada despacho al PC re-armaria una compilacion variante
@@ -1346,7 +1495,14 @@ namespace mVUSuperblock
 			// ambas, o no se empareja: cero cortes a media fusion.
 			if (budget < static_cast<s32>(c.regionCycles) + 1)
 			{
-				g_stats[1].rejected_budget.fetch_add(1, std::memory_order_relaxed);
+				// 0.6.37 — casilla propia. Antes se sumaba en `budget` junto con los
+				// rechazos de tamano de area de las cadenas de armado/union/cierre,
+				// y las dos cosas se leen distinto: esta es "el episodio de este
+				// cuadro no alcanza para correr el area entera" (ritmo del juego),
+				// aquellas son "esta fusion no cabe en politica" (forma del
+				// microcodigo). Su denominador no es ninguna de las tres cadenas,
+				// sino los despachos de la sonda, así que se imprime aparte.
+				g_stats[1].dispatch_budget.fetch_add(1, std::memory_order_relaxed);
 				return nullptr;
 			}
 
@@ -1643,6 +1799,111 @@ namespace mVUSuperblock
 	// Informe — igual que la sonda: detalle a logs/vu_superblock.txt +
 	// resumen por Console (viaja en emulog.txt).
 	// ------------------------------------------------------------------
+	// ------------------------------------------------------------------
+	// 0.6.37 — Linea de emulog: cierres + causas dominantes de cada cadena.
+	//
+	// Vive aqui, junto al informe, y NO en MvuSbEligibility.h: elegir "que tres
+	// numeros llegan a la pantalla" es una decision de REPRESENTACION; la decision
+	// de elegibilidad es la que el header puro guarda para que host la pueda
+	// probar. Mezclarlas obligaria al arnes a verificar formato de texto en lugar
+	// de ley.
+	//
+	// Los cuatro cierres se imprimen SIEMPRE, tambien cuando valen ok: una
+	// ausencia no es un ok. Las causas en cero se omiten del cuerpo pero entran en
+	// la suma del cierre, que es lo unico que hace el cierre comprobable.
+	//
+	// Los valores se leen una vez a un arreglo local y se eligen de ahi. No se
+	// toca el atomic para "marcar" una casilla ya listada: el informe puede
+	// volcarse con el dispatcher corriendo (cambio de config, auto-apagado), y un
+	// read-modify-write de ida y vuelta sobre un contador vivo podria perderle un
+	// incremento — o sea, el acto de informar romperia lo que informa.
+	// ------------------------------------------------------------------
+	void FormatChainCauses(const Stats& s, char* out, size_t cap)
+	{
+		if (!out || cap == 0)
+			return;
+
+		u64 arm[mVUSbElig::kArmCauseCount], jun[mVUSbElig::kJunctionCauseCount];
+		u64 cls[mVUSbElig::kCloseCauseCount];
+		for (u32 k = 0; k < mVUSbElig::kArmCauseCount; k++)
+			arm[k] = s.arm_cause[k].load(std::memory_order_relaxed);
+		for (u32 k = 0; k < mVUSbElig::kJunctionCauseCount; k++)
+			jun[k] = s.jun_cause[k].load(std::memory_order_relaxed);
+		for (u32 k = 0; k < mVUSbElig::kCloseCauseCount; k++)
+			cls[k] = s.close_cause[k].load(std::memory_order_relaxed);
+
+		// kPolicyPass no es un resultado: es "la politica dijo que si, falta la
+		// asignacion". Se excluye de la suma que cierra contra `intentos` porque su
+		// casilla SIEMPRE vale 0 (el motor no la cuenta: SbArmCompile la traduce en
+		// kFull o kArmed al ejecutar el efecto), y el cierre lo comprueba.
+		const u64 intentos = s.attempts.load(std::memory_order_relaxed);
+		u64 arm_sum = 0;
+		for (u32 k = 0; k < mVUSbElig::kArmCauseCount; k++)
+			arm_sum += arm[k];
+		const u64 pedidos = s.junction_requests.load(std::memory_order_relaxed);
+		u64 jun_sum = 0;
+		for (u32 k = 0; k < mVUSbElig::kJunctionCauseCount; k++)
+			jun_sum += jun[k];
+		const u64 cierres = s.close_calls.load(std::memory_order_relaxed);
+		u64 cls_sum = 0;
+		for (u32 k = 0; k < mVUSbElig::kCloseCauseCount; k++)
+			cls_sum += cls[k];
+
+		const u64 lenta = s.arm_from[0].load(std::memory_order_relaxed);
+		const u64 stub = s.arm_from[1].load(std::memory_order_relaxed);
+		const u64 dejo = s.gate_closed.load(std::memory_order_relaxed);
+
+		std::snprintf(out, cap,
+			"vuSB: cierre{arm=%s(%" PRIu64 "/%" PRIu64 ") union=%s(%" PRIu64 "/%" PRIu64
+			") cierre=%s(%" PRIu64 "/%" PRIu64 ") puerta=%s}",
+			(arm_sum == intentos) ? "ok" : "DESAJUSTE", arm_sum, intentos,
+			(jun_sum == pedidos) ? "ok" : "DESAJUSTE", jun_sum, pedidos,
+			(cls_sum == cierres) ? "ok" : "DESAJUSTE", cls_sum, cierres,
+			(lenta + stub == intentos + dejo) ? "ok" : "DESAJUSTE");
+
+		// Causas no nulas, por cadena, en el ORDEN del enum. Ordenarlas por valor
+		// seria mas bonito y menos util: dos partidas con los mismos numeros las
+		// mostrarian en distinto orden y comparar dos logs a mano pasa a ser una
+		// loteria. El orden del enum es el orden de las comprobaciones, así que
+		// ademas dice donde corta la cadena.
+		//
+		// `n` se topa tras cada escritura y NO se deja que pase de cap-1: snprintf
+		// devuelve la longitud que HABRIA escrito, así que con una linea larga el
+		// desplazamiento se pasaria del buffer y `out + n` seria puntero fuera de
+		// rango en la siguiente llamada. Un desborde aqui se cometeria en el momento
+		// del vuelco del informe, o sea al apagar el juego — el peor sitio para
+		// enterarse. Con el tope, lo peor que pasa es que la linea se corte y el
+		// cierre ya este impreso arriba, que es lo que importa.
+		size_t n = std::strlen(out);
+		if (n + 1 > cap)
+			n = cap - 1;
+		auto app = [&](const char* pre, const char* name, u64 v) {
+			if (n + 1 >= cap)
+				return;
+			const int w = std::snprintf(out + n, cap - n, " %s%s=%" PRIu64, pre, name, v);
+			if (w < 0)
+				return;
+			n += static_cast<size_t>(w);
+			if (n + 1 > cap)
+				n = cap - 1;
+		};
+		for (u32 k = 0; k < mVUSbElig::kArmCauseCount; k++)
+		{
+			if (arm[k])
+				app("a:", mVUSbElig::ArmCauseName(static_cast<mVUSbElig::ArmCause>(k)), arm[k]);
+		}
+		for (u32 k = 0; k < mVUSbElig::kJunctionCauseCount; k++)
+		{
+			if (jun[k])
+				app("u:", mVUSbElig::JunctionCauseName(static_cast<mVUSbElig::JunctionCause>(k)), jun[k]);
+		}
+		for (u32 k = 0; k < mVUSbElig::kCloseCauseCount; k++)
+		{
+			if (cls[k])
+				app("c:", mVUSbElig::CloseCauseName(static_cast<mVUSbElig::CloseCause>(k)), cls[k]);
+		}
+	}
+
 	void DumpReport(const char* reason)
 	{
 		// Orden de locks: el serial ANTES de s_dumpMutex (inversión ABBA
@@ -1807,13 +2068,26 @@ namespace mVUSuperblock
 			g_rollbackSurface.load(std::memory_order_relaxed) ? "si" : "NO",
 			(unsigned)maskRejected);
 		Console.WriteLn("vuSB: intentos=%" PRIu64 " construidos=%" PRIu64 " uniones=%" PRIu64
-			" ops=%" PRIu64 " rechazos{struct=%" PRIu64 " cold=%" PRIu64 " budget=%" PRIu64
-			" ident=%" PRIu64 "}",
+			" ops=%" PRIu64 " puerta{lento=%" PRIu64 " stub=%" PRIu64 " dejo=%" PRIu64 "}",
 			s.attempts.load(std::memory_order_relaxed), s.built.load(std::memory_order_relaxed),
 			s.junctions.load(std::memory_order_relaxed), s.fused_ops.load(std::memory_order_relaxed),
-			s.rejected_struct.load(std::memory_order_relaxed),
-			s.rejected_cold.load(std::memory_order_relaxed),
-			s.rejected_budget.load(std::memory_order_relaxed), s.rejected_identity.load(std::memory_order_relaxed));
+			s.arm_from[0].load(std::memory_order_relaxed),
+			s.arm_from[1].load(std::memory_order_relaxed),
+			s.gate_closed.load(std::memory_order_relaxed));
+		// 0.6.37 — la linea que el log de 0.6.36 no podia escribir. `intentos`,
+		// `construidos` y los cuatro cubos ya estaban, y con eso un build=0 NO se
+		// podia explicar: habia que adivinar cual de doce comprobaciones fell. Aqui
+		// van las causas dominantes de cada cadena y los CUATRO cierres, en la
+		// emulog —que es la que viaja con el boton "Enviar registro"— para que una
+		// sola linea de tu telefono decida si el motor no construye por la forma del
+		// microcodigo, por la hotness, por la tabla o por un deficit de cobertura.
+		// Un DESAJUSTE en cualquiera de los cuatro no es una medida: es la senal de
+		// que la telemetria esta rota, y se ve.
+		{
+			char causas[1024];
+			FormatChainCauses(s, causas, sizeof(causas));
+			Console.WriteLn("%s", causas);
+		}
 		Console.WriteLn("vuSB: replay normal=%" PRIu64 " sb=%" PRIu64 " matched=%" PRIu64
 			" diverged=%" PRIu64 " promoted=%" PRIu64 " unproven=%" PRIu64 " killed=%" PRIu64
 			" ventanas=%" PRIu64 " spot=%" PRIu64 " sinGanancia=%" PRIu64,
