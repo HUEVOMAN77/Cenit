@@ -377,7 +377,18 @@ struct Dispatch
 static unsigned g_wServed = 0, g_wWalkHit = 0, g_wWalkMiss = 0, g_wRecorded = 0;
 static unsigned g_wSkippedShort = 0, g_wNoAsk = 0, g_wEpochMoved = 0;
 
-static Dispatch DispatchLikeTheCaller(unsigned pc, const MState& st, Table& tab)
+// Cuentas del INVARIANTE por despacho (0.6.36). Se comparan como DELTAS de UN
+// despacho y no como totales de final de sesion porque el arnes tambien llama a
+// Serve/Record directamente (testServeFields, la auditoria del diferencial): esas
+// llamadas suman consults sin decision previa, asi que un total absoluto de una tabla
+// de pruebas no tiene por que cuadrar. Lo que SI tiene que cuadrar siempre es lo que
+// movio UN despacho compuesto — que es exactamente la forma en que el telefono tiene
+// que leer su linea de cierre. Cada rota se emite con CHECK, asi que ya suma en el
+// recuento general; g_invChecks es solo el testigo de que el invariante se ejercito.
+static unsigned g_invChecks = 0;
+static unsigned g_wAskCounted = 0, g_wSkipShortCounted = 0, g_wSkipExactCounted = 0;
+
+static Dispatch DispatchInner(unsigned pc, const MState& st, Table& tab)
 {
 	Dispatch d;
 	d.memoIdx = -1;
@@ -388,11 +399,23 @@ static Dispatch DispatchLikeTheCaller(unsigned pc, const MState& st, Table& tab)
 	d.path = 0;
 	uint64_t served = 0;
 
-	// Las dos guardas del llamador real son Table::ShouldAsk (aqui, en el arnes, y en
-	// microVU-arm64.cpp): el despacho NO escribe su propia condicion a mano. Si la
-	// condicion viviera solo en el cpp, mutacion_h12.sh no podria romperla — y una
-	// guarda que nadie puede romper es una guarda que nadie prueba.
-	if (Table::ShouldAsk(st.needExact, (int)g_model.lookup.size()) && g_world.vuId == kVU1)
+	// El llamador real llama a Table::AskCounted — la decision CONTADA — y no a
+	// ShouldAsk (microVU-arm64.cpp:1839). El arnes replica eso, no la proyeccion, para
+	// que los contadores se comprueben en el mismo camino que el telefono usa. Las
+	// guardas siguen siendo metodos del encabezado: si la condicion viviera solo en el
+	// cpp, mutacion_h12.sh no podria romperla — y una guarda que nadie puede romper es
+	// una guarda que nadie prueba.
+	//
+	// El orden importa y por eso el VU se comprueba ANTES de llamar: en el motor la
+	// condicion de VU vive en el `if constexpr (vuIndex == 1 && !doConstProp)` de la
+	// plantilla MvuFastPathServe<vuIndex>, o sea para VU0 la tabla ni se llama y NI
+	// UNA cuenta se suma. Poner el && despues de AskCounted contaria despachos de VU0
+	// que la produccion no cuenta, y la linea del telefono dejaria de describir el
+	// codigo que corre.
+	const bool vu1 = (g_world.vuId == kVU1);
+	const bool ask = vu1 && tab.AskCounted(st.needExact, (int)g_model.lookup.size());
+
+	if (ask)
 	{
 		Query q = MakeQuery(pc, st);
 		const u64h epochBefore = g_world.cacheEpoch;
@@ -442,6 +465,94 @@ static Dispatch DispatchLikeTheCaller(unsigned pc, const MState& st, Table& tab)
 	return d;
 }
 
+// El despacho completo, con el INVARIANTE comprobado SOBRE EL PASO ENTERO. Va aqui y no
+// dentro de DispatchInner porque `consults` lo mueve Serve, que ocurre despues de la
+// decision: medir entre las dos es medir la decision a medio cerrar. El contrato que el
+// telefono imprime es
+//     lookups == consults + skipExact + skipShort
+// y por UN despacho eso significa: lookups +1, y exactamente uno de los otros tres +1 —
+// el que corresponda al motivo, ninguno si pregunto y el memo no tuvo nada que ver... lo
+// cual no existe: si pregunto, Serve suma consults. O sea la suma de los tres siempre
+// vale 1.
+static Dispatch DispatchLikeTheCaller(unsigned pc, const MState& st, Table& tab)
+{
+	const u64h l0 = tab.stats.lookups;
+	const u64h c0 = tab.stats.consults;
+	const u64h e0 = tab.stats.skipExact;
+	const u64h s0 = tab.stats.skipShort;
+	const u64h x0 = tab.stats.rejectExact;
+
+	const Dispatch d = DispatchInner(pc, st, tab);
+
+	const u64h dl = tab.stats.lookups - l0;
+	const u64h dc = tab.stats.consults - c0;
+	const u64h de = tab.stats.skipExact - e0;
+	const u64h ds = tab.stats.skipShort - s0;
+	const u64h dx = tab.stats.rejectExact - x0;
+
+	// Fuera de VU1 no hay nada que cuadre: AskCounted no se llamo (el && corta antes),
+	// o sea las cuatro cuentas valen 0 y exigir lookups==1 seria pedirle al arnes una
+	// cuenta que la produccion tampoco hace. Queda el tripwire, que si vale para
+	// cualquier VU: un exacto jamas tiene que llegar a Serve.
+	if (g_world.vuId != kVU1)
+	{
+		CHECK(dx == 0ull, "pc=%04x en VU0: rejectExact subio %" PRIu64 " sin que nadie "
+			"preguntara", pc, dx);
+		return d;
+	}
+
+	g_invChecks++;
+	// Todo por CHECK, no por printf suelto: el ejecutor de mutacion busca la linea
+	// "^FALLO:" y el recuento de baseline busca ", N Fallos". Un rojo que no use esas
+	// dos formas existe pero no se ve, y eso es peor que no comprobarlo.
+	//
+	// lookups tiene que haber subido justo 1: es el denominador, y un despacho que
+	// llega a la decision y no se cuenta es el mismo defecto que no tener denominador.
+	CHECK(dl == 1ull, "invariante del cierre: pc=%04x sumo %" PRIu64 " a lookups, queria 1",
+		pc, dl);
+	CHECK(dc + de + ds == 1ull, "invariante del cierre: pc=%04x dio consults=%" PRIu64
+		" skip-exact=%" PRIu64 " skip-short=%" PRIu64 " (suman %" PRIu64 ", queria 1)",
+		pc, dc, de, ds, dc + de + ds);
+	// El motivo tiene que ser el que DecideAsk anuncia para este estado, no otro: los
+	// tres se imprimen separados en el telefono, cambiarse entre si miente sobre POR QUE
+	// el memo no se uso.
+	if (d.asked)
+	{
+		CHECK(dc == 1ull && de == 0ull && ds == 0ull,
+			"invariante del cierre: pc=%04x PREGUNTO y aun asi se sumo un salto "
+			"(consults=%" PRIu64 " exact=%" PRIu64 " short=%" PRIu64 ")", pc, dc, de, ds);
+		g_wAskCounted++;
+	}
+	else if (st.needExact != 0u)
+	{
+		CHECK(de == 1ull && dc == 0ull && ds == 0ull,
+			"invariante del cierre: pc=%04x era EXACTO y no se conto como skip-exact "
+			"(consults=%" PRIu64 " exact=%" PRIu64 " short=%" PRIu64 ")", pc, dc, de, ds);
+		g_wSkipExactCounted++;
+	}
+	else if ((int)g_model.lookup.size() < (int)kMinRecordPos)
+	{
+		CHECK(ds == 1ull && dc == 0ull && de == 0ull,
+			"invariante del cierre: pc=%04x tenia lista CORTA (%u refs) y no se conto como "
+			"skip-short (consults=%" PRIu64 " exact=%" PRIu64 " short=%" PRIu64 ")",
+			pc, (unsigned)g_model.lookup.size(), dc, de, ds);
+		g_wSkipShortCounted++;
+	}
+	else
+	{
+		// No pregunto, no es exacto, y la lista es larga: no hay motivo que explique
+		// el salto, o sea la decision del arnes y la del header ya no son la misma.
+		CHECK(false, "invariante del cierre: pc=%04x salto sin motivo (exact=%u, %u refs, "
+			"umbral %u): el arnes y DecideAsk ya no deciden lo mismo", pc,
+			(unsigned)st.needExact, (unsigned)g_model.lookup.size(), (unsigned)kMinRecordPos);
+	}
+	// Tripwire del llamador: un exacto jamas tiene que llegar a Serve. rejectExact
+	// moviendose aqui no es una medida, es la guarda rota (MvuFastPath.h lo dice).
+	CHECK(dx == 0ull, "invariante del cierre: pc=%04x hizo mover rejectExact=%" PRIu64
+		" — en produccion vale 0 y moverlo es la guarda del llamador rota", pc, dx);
+	return d;
+}
+
 // ==================================================================
 // 1) Contrato del dominio y de la mascara
 // ==================================================================
@@ -462,6 +573,28 @@ static void testDomain(void)
 		"search(), los exactos no preguntan", (int)Table::ShouldAsk(1u, 100000));
 	CHECK(Table::ShouldAsk(0u, 0) == false, "ShouldAsk(0, lista vacia)=%d",
 		(int)Table::ShouldAsk(0u, 0));
+	// Cenit 0.6.36 — DecideAsk es LA decision y ShouldAsk una proyeccion de ella, asi
+	// que el borde se prueba dos veces y con el motivo explicito. No es redundancia: si
+	// alguien vuelve a poner la condicion en dos sitios, el día que los dos difieran
+	// este bloque lo dice (los dos motivos de no-preguntar son contadores DISTINTOS del
+	// telefono, y un salto contado con el motivo equivocado se lee como una tasa de uso
+	// que el juego no tuvo).
+	CHECK(Table::DecideAsk(0u, (int)kMinRecordPos) == Table::kAsk,
+		"DecideAsk(0, kMinRecordPos)=%d: queria kAsk", (int)Table::DecideAsk(0u, (int)kMinRecordPos));
+	CHECK(Table::DecideAsk(0u, (int)kMinRecordPos - 1) == Table::kSkipShort,
+		"DecideAsk(0, umbral-1)=%d: queria kSkipShort (ese contador es el que dice que "
+		"los PCs de este juego no llegan al umbral)", (int)Table::DecideAsk(0u, (int)kMinRecordPos - 1));
+	CHECK(Table::DecideAsk(1u, 100000) == Table::kSkipExact,
+		"DecideAsk(exact, lista enorme)=%d: queria kSkipExact", (int)Table::DecideAsk(1u, 100000));
+	CHECK(Table::DecideAsk(1u, 0) == Table::kSkipExact,
+		"DecideAsk(exact, lista vacia)=%d: el motivo exacto tiene prioridad, o un juego "
+		"que despacha con match exacto contaria como 'lista corta' y el log diria que el "
+		"memo no aplica por tamano cuando no aplica por dominio",
+		(int)Table::DecideAsk(1u, 0));
+	CHECK(Table::ShouldAsk(1u, 100000) == (Table::DecideAsk(1u, 100000) == Table::kAsk) &&
+			Table::ShouldAsk(0u, 3) == (Table::DecideAsk(0u, 3) == Table::kAsk),
+		"ShouldAsk y DecideAsk ya no son la misma decision: hay dos copias de la ley de "
+		"costo y estan divergiendo");
 	CHECK(Table::EpochStable(5ull, 5ull) == true, "EpochStable con la misma epoca nego");
 	CHECK(Table::EpochStable(5ull, 6ull) == false,
 		"EpochStable dejo pasar una epoca movida: el seqlock del despacho ya no descarta "
@@ -986,6 +1119,18 @@ static void testCostLaw(void)
 		}
 		CHECK(g_tab.stats.consults == 0ull, "el memo fue consultado con la lista corta: "
 			"consults=%" PRIu64, g_tab.stats.consults);
+		// Cenit 0.6.36 — y aqui esta la cuenta que antes no existia: los siete
+		// despachos se contaron como skipShort, no desaparecieron. Sin estos tres
+		// CHECK el log del telefono podria decir skip-short=0 con una lista corta y
+		// nadie lo veria; con ellos, el denominador es una medida y no una esperanza.
+		CHECK(g_tab.stats.lookups == 7ull, "lookups=%" PRIu64 " con 7 despachos de lista "
+			"corta: el denominador no se sumo", g_tab.stats.lookups);
+		CHECK(g_tab.stats.skipShort == 7ull, "skip-short=%" PRIu64 " queria 7",
+			g_tab.stats.skipShort);
+		CHECK(g_tab.stats.lookups == g_tab.stats.consults + g_tab.stats.skipExact +
+			g_tab.stats.skipShort, "INVARIANTE roto en la lista corta: lookups=%" PRIu64
+			" != consults+skip-exact+skip-short=%" PRIu64, g_tab.stats.lookups,
+			g_tab.stats.consults + g_tab.stats.skipExact + g_tab.stats.skipShort);
 	}
 
 	// -- lista EN el umbral: se pregunta, y el acierto en posicion 7 (0-based) sigue
@@ -1010,6 +1155,36 @@ static void testCostLaw(void)
 		// La segunda vez tampoco sirve: nunca se memorizo.
 		const Dispatch d2 = DispatchLikeTheCaller(kPcs[7], MkState(KeyFor(kPcs[7]), 0, 7u), g_tab);
 		CHECK(d2.path != 1, "el memo sirvio algo que nunca registro");
+	}
+
+	// -- despacho EXACTO por el llamador compuesto: se cuenta en skipExact y ni se
+	//    mira la tabla. Va por aqui y no solo por expectReject (que llama a Serve a
+	//    mano) porque lo que el telefono imprime es la decision del llamador; un
+	//    skipExact=0 con un juego que despacha exacto seria un informe mintiendo por
+	//    omision. --
+	{
+		Snapshot();
+		const unsigned nLookups = 3u;
+		for (unsigned i = 0; i < nLookups; i++)
+		{
+			const Dispatch d = DispatchLikeTheCaller(kPcs[i], MkState(KeyFor(kPcs[i]), 1, i), g_tab);
+			CHECK(!d.asked, "exacto %u pregunto al memo: la guarda de dominio no esta actuando", i);
+			CHECK(d.path != 1, "exacto %u se sirvio del memo", i);
+		}
+		CHECK(Delta(&Stats::skipExact) == nLookups, "skip-exact=%" PRIu64 " queria %u",
+			Delta(&Stats::skipExact), nLookups);
+		CHECK(Delta(&Stats::skipShort) == 0ull, "skip-short=%" PRIu64 " con exactos: el "
+			"motivo se eligo mal (un exacto con lista larga es kSkipExact, no kSkipShort)",
+			Delta(&Stats::skipShort));
+		CHECK(Delta(&Stats::consults) == 0ull, "consults subio con despachos exactos");
+		CHECK(Delta(&Stats::rejectExact) == 0ull, "rejectExact subio %" PRIu64 " en el "
+			"camino normal: en produccion vale 0 y moverlo es la guarda del llamador rota, "
+			"no una medida", Delta(&Stats::rejectExact));
+		CHECK(g_tab.stats.lookups ==
+			g_tab.stats.consults + g_tab.stats.skipExact + g_tab.stats.skipShort,
+			"INVARIANTE roto tras los exactos: lookups=%" PRIu64 " vs suma=%" PRIu64,
+			g_tab.stats.lookups,
+			g_tab.stats.consults + g_tab.stats.skipExact + g_tab.stats.skipShort);
 	}
 
 	// -- y con un bloque en posicion 8 (lista de 9) si se registra y si se sirve --
@@ -1756,7 +1931,28 @@ int main(void)
 		"miss=%u registrados=%u cortos=%u sin-preguntar=%u", g_wServed, g_wWalkHit,
 		g_wWalkMiss, g_wRecorded, g_wSkippedShort, g_wNoAsk);
 
+	// Cenit 0.6.36 — el INVARIANTE tiene que haberse COMPROBADO y tiene que haber visto
+	// los TRES motivos. Las rotas ya sumaron en g_fails por su propio CHECK; lo que va
+	// aqui es que el verde no pueda venir de un arnes que nunca despacho, o que despacho
+	// siempre por el mismo motivo. Sin los tres testigos, un log con skip-short=0 y
+	// skip-exact=0 no se puede distinguir de un contador que nadie llama.
+	CHECK(g_invChecks > 0u, "el invariante no se compruebo en NINGUN despacho "
+		"(checks=%u): la telemetria nueva no esta ejercida", g_invChecks);
+	CHECK(g_wAskCounted > 0u && g_wSkipShortCounted > 0u && g_wSkipExactCounted > 0u,
+		"motivos de AskCounted sin ejercitar: pregunto=%u salto-corto=%u salto-exacto=%u "
+		"— los tres se imprimen en el cierre, los tres tienen que haberse contado aqui",
+		g_wAskCounted, g_wSkipShortCounted, g_wSkipExactCounted);
+
 	std::printf("Harness12: %d Comprobaciones, %d Fallos\n", g_checks, g_fails);
+	// Se imprime con la palabra "Comprobaciones" para que baseline.sh (que filtra por
+	// "Comprobaciones|FALLO") muestre la cuenta del denominador en la linea base y no la
+	// deje enterrada. Y deliberadamente NO lleva ", N Fallos": mutacion_h12.sh busca esa
+	// cadena para su control, y una segunda linea con el mismo patron podria dar verde
+	// mientras la primera esta roja. Las rotas del invariante ya estan contadas arriba,
+	// en g_fails, porque se emiten con CHECK.
+	std::printf("  invariante del cierre: %d Comprobaciones de despacho | AskCounted: "
+		"pregunto=%u salto-corto=%u salto-exacto=%u\n",
+		g_invChecks, g_wAskCounted, g_wSkipShortCounted, g_wSkipExactCounted);
 	std::printf("  testigos: servidos=%u aciertos-barrido=%u miss=%u registrados=%u "
 		"cortos=%u no-pregunto=%u | dif: aciertos=%u rechazos=%u adds=%u exact=%u "
 		"mascaras=%u micro=%u resets=%u programas=%u ventanas=%u gestores=%u cortos=%u\n",

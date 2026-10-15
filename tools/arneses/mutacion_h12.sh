@@ -3,11 +3,13 @@
 #
 # Que es: dos fases.
 #
-# FASE 1 — el encabezado memoizado (MvuFastPath.h). Veintiseis roturas PROPOSITAS, una
+# FASE 1 — el encabezado memoizado (MvuFastPath.h). Treinta roturas PROPOSITAS, una
 # por cada decision de la clase: cada comprobacion de Serve, cada guarda de Record, el
 # indice, la mascara, el umbral, el marcador de vacio, el orden de Invalidate/Reset y
-# las dos guardas del llamador (ShouldAsk/EpochStable, que subieron al header
-# exactamente para poder romperse aqui). Se muta el encabezado ORIGINAL del repo, se
+# las dos guardas del llamador (DecideAsk/EpochStable, que subieron al header
+# exactamente para poder romperse aqui) y, desde 0.6.36, los contadores del denominador
+# (m27..m30 rompen LA CUENTA sin tocar la decision: es el unico modo de probar que el
+# numero que el telefono imprime significa lo que dice). Se muta el encabezado ORIGINAL del repo, se
 # compila el arnes contra el MUTANTE y se exige que se ponga rojo. Cada mutante tiene
 # escrita al lado la comprobacion que se espera que reviente; si revienta otra, el
 # arnes tiene un verde por accidente y hay que mirar por que.
@@ -15,8 +17,9 @@
 # FASE 2 — el TU del motor (microVU-arm64.cpp). El arnes de host NO puede analizar
 # ese archivo: tira de <arm_neon.h>, y el host no tiene NEON (intentarlo da "fatal
 # error: arm_neon.h: No such file"). Lo que si se puede fijar aqui, y se fija, es que
-# el cable del motor siga exactamente como lo pinó Harness12: la llamada a ShouldAsk
-# con el getLookupCount() vivo, la relectura EpochStable del seqlock, los dos bumps de
+# el cable del motor siga exactamente como lo pinó Harness12: la llamada CONTADA
+# (AskCounted) con el getLookupCount() vivo, y que la linea de cierre lleve el
+# denominador impreso a la vista, la relectura EpochStable del seqlock, los dos bumps de
 # epoca (mVUreset con Invalidate, mVUclose antes de mVUdeleteProg), la microMemWriteGen
 # como primera linea de mVUclear, la ventana cacheEnd = x86end + safe zone, que el
 # bookkeeping (prog.isSame / prog.cur / quick.block / observed) sigue DESPUES de la
@@ -26,7 +29,7 @@
 # que el CI cubre.
 #
 # Un arnes que queda verde con el codigo saboteado no verifica nada, asi que esto es
-# parte de la evidencia y no un extra: sin esta lista, los "734 comprobaciones, 0
+# parte de la evidencia y no un extra: sin esta lista, los "756 comprobaciones, 0
 # fallos" de Harness12 son solo un numero.
 #
 # Que NO es: no prueba rendimiento (eso lo mide tools/medicion), no prueba nada en el
@@ -34,7 +37,7 @@
 # arnes tiene un hueco de cobertura; se arregla el arnes antes de cerrar la version, no
 # se "documenta" el escape como aceptable.
 #
-# Uso: bash tools/arneses/mutacion_h12.sh  (RC=0 solo si los VEINTISEIS mutantes de
+# Uso: bash tools/arneses/mutacion_h12.sh  (RC=0 solo si los TREINTA mutantes de
 # fase 1 fueron detectados, las DIECIOCHO anclas de fase 2 aparecieron, y ambos controles
 # dieron verde/rojo lo que tienen que dar). Requiere g++ en el host.
 #
@@ -159,17 +162,24 @@ mut 'return flagHack ? ~kFlagMask : ~0ull;' 'return ~kFlagMask;' \
 mut 'static constexpr uint32_t kMinRecordPos = 8u;' 'static constexpr uint32_t kMinRecordPos = 1u;' \
 	&& run_mut m4 "kMinRecordPos 8 -> 1" "umbral" || escaped=$((escaped+1))
 
-# m5: umbral 8 -> 0 con el borde roto (>= pasa a >). Falla en el borde exacto, que es
-# donde una guarda mal escrita no se nota en el resto.
-mut 'return needExactMatch == 0u && lookupCount >= static_cast<int>(kMinRecordPos);' \
-	'return needExactMatch == 0u && lookupCount > static_cast<int>(kMinRecordPos);' \
-	&& run_mut m5 "ShouldAsk: >= por >" "ShouldAsk" || escaped=$((escaped+1))
+# m5: borde del umbral roto dentro de DecideAsk (la "<" pasa a "<="). La condicion ya
+# no vive en un bool de una linea: desde 0.6.36 DecideAsk es LA decision y ShouldAsk es
+# su proyeccion, asi que el ancla es la linea del umbral. El rojo esperado sigue siendo
+# ShouldAsk, y esto es una mejora real del arnes: al romper el nucleo se rompen las dos
+# proyecciones a la vez, o sea una guarda no se puede romper "solo para la telemetria".
+mut '			if (lookupCount < static_cast<int>(kMinRecordPos))' \
+	'			if (lookupCount <= static_cast<int>(kMinRecordPos))' \
+	&& run_mut m5 "DecideAsk: borde del umbral < por <=" "ShouldAsk" || escaped=$((escaped+1))
 
-# m6: ShouldAsk deja de excluir los despachos exactos. La rama exacta compara 96 bytes
+# m6: DecideAsk deja de excluir los despachos exactos. La rama exacta compara 96 bytes
 # y promociona MRU en fBlockList: memoizarla sin replicar esos efectos es otra semantica.
-mut 'return needExactMatch == 0u && lookupCount >= static_cast<int>(kMinRecordPos);' \
-	'return lookupCount >= static_cast<int>(kMinRecordPos);' \
-	&& run_mut m6 "ShouldAsk acepta exactos" "ShouldAsk" || escaped=$((escaped+1))
+# Se anula la guarda, no se borca el case: borrar el case dejaria el switch sin cubrir
+# kSkipExact y el compiler avisaria, o sea el mutante se detectaria por compile y no por
+# comprobacion — que es un verde falso sobre lo que se quiere probar aqui.
+mut '			if (needExactMatch != 0u)
+				return kSkipExact;' '			if (false)
+				return kSkipExact;' \
+	&& run_mut m6 "DecideAsk acepta exactos" "ShouldAsk" || escaped=$((escaped+1))
 
 # m7: EpochStable siempre verdadero: el seqlock del llamador deja de descartar un
 # acierto leido a mitad de mVUreset.
@@ -330,6 +340,47 @@ mut '			for (uint32_t i = 0; i < kSlots; i++)
 		static uint32_t IdxOf' \
 	&& run_mut m26 "Reset no limpia stats" "consults" || escaped=$((escaped+1))
 
+# ---- Los cuatro de abajo son de Cenit 0.6.36 y rompen LA CUENTA, no la decision.
+# ---- Valen la pena porque el producto de esta fase es un numero que el telefono
+# ---- imprime: un denominador mal sumado no tira nada, solo miente, y un arnes que
+# ---- solo mira "que se sirvio" no lo ve. Cada uno apunta a un CHECK distinto del
+# ---- despacho compuesto (h12-src/fastpath_test.cpp, DispatchLikeTheCaller).
+
+# m27: el denominador no se suma. Es exactamente el defecto que esta version viene a
+# cerrar, hecho codigo: la tabla funciona, la decision funciona, y el log dice
+# lookups=0 para siempre — o sea "nadie uso el memo" sin ser verdad.
+mut '			stats.lookups++;
+' '' \
+	&& run_mut m27 "AskCounted no suma lookups" "sumo" || escaped=$((escaped+1))
+
+# m28: el salto corto se decide pero no se cuenta. skip-short=0 en un juego cuyos PCs
+# nunca llegan al umbral se lee como "el filtro esta roto" cuando lo que esta roto es la
+# guarda que lo cuenta.
+mut '				case kSkipShort:
+					stats.skipShort++;
+					break;' '				case kSkipShort:
+					break;' \
+	&& run_mut m28 "no-preguntar corto no se cuenta" "invariante del cierre" || escaped=$((escaped+1))
+
+# m29: el motivo se cuenta en el contador EQUIVOCADO (un exacto suma a skip-short). La
+# suma total sigue cuadrada — o sea este defecto es invisible para un invariante de
+# sesion y solo lo ve la comprobacion por despacho que mira CUAL se movio.
+mut '				case kSkipExact:
+					stats.skipExact++;
+					break;' '				case kSkipExact:
+					stats.skipShort++;
+					break;' \
+	&& run_mut m29 "exacto contado como salto corto" "era EXACTO" || escaped=$((escaped+1))
+
+# m30: AskCounted pregunta SIN haberlo decidido (el case kAsk cae al break). Aqui no hay
+# suma que valga: es la guarda de dominio rota por la via del switch, y se ve en el
+# borde de ShouldAsk de testDomain, que corre antes que cualquier despacho.
+mut '				case kAsk:
+					return true;' '				case kAsk:
+					stats.skipShort++;
+					break;' \
+	&& run_mut m30 "AskCounted dice no-preguntar y pregunta igual" "salto sin motivo" || escaped=$((escaped+1))
+
 echo
 echo "== fase 2: anclas del TU del motor (microVU-arm64.cpp / CMakeLists) =="
 # El TU no se puede analizar en host: microVU-arm64.h incluye <arm_neon.h>, que no esta
@@ -377,8 +428,8 @@ print('ok' if (i>=0 and j>=0) else 'mal(%d,%d)'%(i,j))
 	fi
 }
 
-anchor f1 "la guarda del llamador usa el getLookupCount() vivo" "$CPP" \
-	"mVUFastPath::Table::ShouldAsk(key->needExactMatch, block->getLookupCount())"
+anchor f1 "la guarda del llamador usa la version CONTADA con el getLookupCount() vivo" "$CPP" \
+	"mVUFastPath::g_vu1.AskCounted(key->needExactMatch, block->getLookupCount())"
 anchor f2 "el seqlock re-lee la epoca despues del acierto" "$CPP" \
 	"mVUFastPath::Table::EpochStable(epochBefore, mVU.codeCacheEpoch)"
 anchor f3 "el memo se apaga con doConstProp (guarda de plantilla)" "$CPP" \
@@ -396,8 +447,8 @@ anchor f10 "Record solo con epoca estable de principio a fin" "$CPP" \
 	"if (ask.asked && mVU.codeCacheEpoch == ask.epochAtAsk)"
 anchor f11 "search pide la posicion solo cuando se pregunto" "$CPP" \
 	"block->search(mVU, (microRegInfo*)pState, ask.asked ? &walkPos : nullptr)"
-anchor f12 "la telemetria de sesion se vuelca en el cierre" "$CPP" \
-	"Console.WriteLn(\"Cenit fastpath VU1: consults=%llu"
+anchor f12 "la telemetria de sesion se vuelca en el cierre CON el denominador" "$CPP" \
+	"Console.WriteLn(\"Cenit fastpath VU1: lookups=%llu (consults=%llu + skip-exact=%llu + skip-short=%llu)"
 anchor f13 "el header esta dado de alta en el build" "$CML" "arm64/MvuFastPath.h"
 anchor f14 "la generacion micro sube en mVUclear" "$CPP" "mVU.microMemWriteGen++;"
 
@@ -413,7 +464,7 @@ order f18 "el bump de mVUclose va ANTES de los unicos free() de programa/gestor"
 	"mVU.codeCacheEpoch++;" "mVUdeleteProg(mVU, prog);"
 
 echo
-echo "mutacion h12: no detectados=$undetected anclas-fallidas=$((escaped)) sobre $total casos (esperados 26 mutantes + 18 anclas)"
-[ "$total" -eq 44 ] || { echo "mutacion h12: la cuenta de casos no cuadra"; exit 1; }
+echo "mutacion h12: no detectados=$undetected anclas-fallidas=$((escaped)) sobre $total casos (esperados 30 mutantes + 18 anclas)"
+[ "$total" -eq 48 ] || { echo "mutacion h12: la cuenta de casos no cuadra"; exit 1; }
 [ $undetected -eq 0 ] && [ "$escaped" -eq 0 ] || exit 1
-echo "mutacion h12: los 26 mutantes fueron detectados y las 18 anclas fijadas."
+echo "mutacion h12: los 30 mutantes fueron detectados y las 18 anclas fijadas."
