@@ -804,12 +804,16 @@ struct Pcsx2Config
 					UseBlitSwapChain : 1,
 					DisableShaderCache : 1,
 					// Cenit 0.6.24: compilación asíncrona de pipelines TFX en
-					// Vulkan (experimental, apagada por defecto).
+					// Vulkan. Apagada por defecto por su costo (un parpadeo en el
+					// primitivo que aún no tiene pipeline), no por duda de
+					// funcionamiento: en el registro real cerro 191/191 con
+					// fallback=0. Ver la linea "VK async pipeline compiler:".
 					AsyncTFXPipelineCompile : 1,
 					// Cenit 0.6.25: reconstrucción EASU (FidelityFX FSR1) cuando la
 					// escala interna baja de 1x. Desde 0.6.26 es autocontenida
 					// (cadena EASU en pasadas <=2x + RCAS propio) y ENCENDIDA por
-					// defecto; sigue siendo experimental y solo afecta a Vulkan.
+					// defecto; sigue siendo solo Vulkan, y desde 0.6.36 la linea
+					// "Cenit present:" del registro dice si reconstruyó o estiró.
 					// No va en RestartOptionsAreEqual: se aplica en caliente.
 					EASUReconstruct : 1,
 					DisableFramebufferFetch : 1,
