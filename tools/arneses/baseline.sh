@@ -144,7 +144,7 @@ runh10() { # arnes de SINTAXIS del area arm64: tres patas, y cada una cuenta.
   # includea desde microVU-arm64.h, y h12 la prueba en host con g++ -std=c++17. Esta pata
   # la prueba AISLADA y con el standard del CI (gnu++20), que es lo que ni h12 ni el CI
   # comprueban por si solos.
-  local headers="MvuSbLife.h MvuSbIndex.h MvuSuperblock-arm64.h MvuTraceProbe-arm64.h MvuFastPath.h"
+  local headers="MvuSbLife.h MvuSbIndex.h MvuSuperblock-arm64.h MvuTraceProbe-arm64.h MvuFastPath.h MvuSbEligibility.h"
   for c in $headers; do
     if [ ! -f "$CPP/$c" ]; then echo "h10: FALTA $c en el repo ($CPP)"; RC=1; return 1; fi
     cp "$CPP/$c" "$box/" || { echo "h10: no se pudo copiar $c"; RC=1; return 1; }
@@ -331,13 +331,62 @@ runh13() { # arnes de CUENTA del present sub-nativo (CenitPresentStats.h, 0.6.36
   echo "$OUT" | grep -q "testigos:" || { echo "h13: falta la linea de testigos"; RC=1; }
 }
 
+runh14() { # arnes de LOGICA de la decision de elegibilidad del superbloque (0.6.37).
+  #
+  # Por que existe, en una linea: el log de God of War de 0.6.36 decia
+  # «construidos=0» y cuatro cubos (struct/cold/budget/identity) que cada uno
+  # mezclaban de 2 a 4 causas distintas. Ningun lector podia decir POR QUE no se
+  # armaba nada — ni siquiera si el motor estaba mirando. Este arnes prueba la ley
+  # nueva (MvuSbEligibility.h, C++ puro) y, sobre todo, la PARIDAD con la cadena
+  # literal de 0.6.36, casilla por casilla del espacio de entradas: el mismo
+  # rechazo tiene que caer en el mismo cubo viejo (si no, una partida de hoy no es
+  # comparable con la de anteayer) y donde el viejo NO movia nada el nuevo SI tiene
+  # que tener casilla (eso es la ganancia, y se cuenta como testigo).
+  #
+  # Que NO prueba, dicho para que nadie lea de mas en su verde:
+  #   - que el motor llame a SbConsiderArm desde el camino del stub (eso vive en
+  #     microVU-arm64.cpp, que host no analiza: <arm_neon.h> + vixl), ni que los
+  #     datos que pasa sean los vivos. Son anclas de mutacion_h14.sh fase 2.
+  #   - que un telefono construya superbloques. Solo lo dice el log.
+  local box=$WORK/h14
+  if [ -z "$CXX" ]; then
+    echo "h14: SIN COMPILAR - no hay g++ de host (CXX='$CXX'); la decision de elegibilidad del superbloque NO se verifico en esta corrida"
+    RC=1
+    return
+  fi
+  rm -rf "$box"; mkdir -p "$box"
+  cp "$HERE/h14-src/elig_test.cpp" "$box/" || { echo "h14: no se pudo traer el arnes"; RC=1; return; }
+  # Regla anti-copia-vieja (heredada de h9/h12/h13): el header se trae DEL REPO en
+  # cada corrida. Un verde contra una copia editada a mano aprueba la version
+  # equivocada — y aqui eso es peor, porque el header ES la decision.
+  if [ ! -f "$CPP/MvuSbEligibility.h" ]; then echo "h14: FALTA MvuSbEligibility.h en el repo ($CPP)"; RC=1; return; fi
+  cp "$CPP/MvuSbEligibility.h" "$box/" || { echo "h14: no se pudo copiar MvuSbEligibility.h"; RC=1; return; }
+  if ! "$CXX" -std=c++17 -Wall -Wextra -O1 -I"$box" -o "$box/h14" "$box/elig_test.cpp" 2>"$box/compile.err"; then
+    echo "h14: FALLO DE COMPILACION"; head -40 "$box/compile.err"; RC=1; return
+  fi
+  if [ -s "$box/compile.err" ]; then
+    echo "h14: avisos del compilador (con -Wall -Wextra no se dejan pasar)"
+    head -20 "$box/compile.err"; RC=1
+  fi
+  OUT=$("$box/h14" 2>/dev/null | grep -E "Comprobaciones|FALLO|testigos")
+  echo "$OUT"
+  echo "$OUT" | grep -qE ", [1-9][0-9]* Fallos" && RC=1
+  echo "$OUT" | grep -q "Comprobaciones" || { echo "h14: el arnes no imprime recuento"; RC=1; }
+  # Los tres testigos tienen que salir: sin «huecos» el diferencial no encontro el
+  # defecto que dice cerrar (y eso significa que el modelo viejo esta mal copiado),
+  # y sin «el-viejo-llegaba-al-final» el espacio no cubria el caso de exito.
+  echo "$OUT" | grep -q "testigos:" || { echo "h14: falta la linea de testigos"; RC=1; }
+  echo "$OUT" | grep -qE "hueco\)=[1-9]" || { echo "h14: el diferencial no encontro huecos de 0.6.36 (modelo viejo sospechoso)"; RC=1; }
+  echo "$OUT" | grep -qE "el-viejo-llegaba-al-final=[1-9]" || { echo "h14: ningun caso llegaba al final de la cadena vieja"; RC=1; }
+}
+
 ONLY=${ARNES:-all}
 case "$ONLY" in
-  all|h5|h6|h7|h8|h9|h10|h11|h12|h13) ;;
+  all|h5|h6|h7|h8|h9|h10|h11|h12|h13|h14) ;;
   # Un nombre mal escrito tiene que ruidar: si no, "corrí los arneses" se convierte
   # en "no corrí ninguno y volvi con RC=0", que es exactamente el verde vacio que
   # este script existe para evitar.
-  *) echo "baseline.sh: ARNES='$ONLY' no existe (valores: all h5 h6 h7 h8 h9 h10 h11 h12 h13)"; exit 2 ;;
+  *) echo "baseline.sh: ARNES='$ONLY' no existe (valores: all h5 h6 h7 h8 h9 h10 h11 h12 h13 h14)"; exit 2 ;;
 esac
 [ "$ONLY" = all ] || [ "$ONLY" = h5 ] && run h5 Harness5 GameLoadClassifier CenitLoadSample LoadPolicy LoadTrend CenitTelemetry
 [ "$ONLY" = all ] || [ "$ONLY" = h6 ] && run h6 Harness6 DynamicResolutionGovernor GameLoadClassifier AdaptiveProfile CenitLoadSample LoadPolicy LoadTrend CenitTelemetry GameSerialUtils
@@ -376,6 +425,12 @@ esac
 # evidencia que se lee despues, y un contador sin arnes es una opinion con formato de
 # dato.
 [ "$ONLY" = all ] || [ "$ONLY" = h13 ] && runh13
+# h14 (0.6.37): la LEY de elegibilidad del superbloque y su PARIDAD con la cadena
+# de 0.6.36. Entra por el mismo argumento que h12/h13 y por uno propio: la
+# telemetria que este cambio añade es la unica forma que va a existir de explicar
+# un «construidos=0» futuro, y un contador por causas sin arnes es justo lo que
+# tuvimos — cuatro contadores sin arnes.
+[ "$ONLY" = all ] || [ "$ONLY" = h14 ] && runh14
 
 # Verificadores que no necesitan javac: las tablas que cruzan la frontera JNI.
 # jnisig: cada `native` de NativeApp.java tiene su Java_...() con el mismo numero de

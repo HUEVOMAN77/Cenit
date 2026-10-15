@@ -28,6 +28,7 @@
 #include "MvuSbLife.h"
 #include "MvuSuperblock-arm64.h"
 #include "MvuTraceProbe-arm64.h"
+#include "MvuSbEligibility.h"
 
 #include <type_traits>
 
@@ -63,6 +64,44 @@ static_assert(mVUSbLife::kRequiredRegions ==
 		 mVUSbLife::Regions::DataMem | mVUSbLife::Regions::EpisodeCycles),
 	"la maquina exige TODAS las regiones que el digest declara (jnidict lo cruza "
 	"contra g_exitMask en microVU-arm64.cpp; aqui se fija el valor de la exigencia)");
+
+// --- Contrato de la DECISION de elegibilidad (0.6.37) --------------------------
+// El header puro guarda la ley y el motor guarda los numeros. Si los dos dejan de
+// decir lo mismo, el verde del arnes de logica (h14) taparia un motor que aplica
+// otros umbrales. Aqui se fija el PUENTE: que kSbPolicy sea literalmente las siete
+// constantes de siempre, en el orden que el struct declara.
+static_assert(mVUSuperblock::kSbPolicy.hot_entries == mVUSuperblock::kSbHotEntries,
+	"policy: hot_entries tiene que ser kSbHotEntries");
+static_assert(mVUSuperblock::kSbPolicy.target_min == mVUSuperblock::kSbTargetMinEntries,
+	"policy: target_min tiene que ser kSbTargetMinEntries");
+static_assert(mVUSuperblock::kSbPolicy.min_ratio_pct == mVUSuperblock::kSbMinRatioPct,
+	"policy: min_ratio_pct tiene que ser kSbMinRatioPct");
+static_assert(mVUSuperblock::kSbPolicy.max_ratio_pct == mVUSuperblock::kSbMaxRatioPct,
+	"policy: max_ratio_pct tiene que ser kSbMaxRatioPct");
+static_assert(mVUSuperblock::kSbPolicy.max_junctions == mVUSuperblock::kSbMaxJunctions,
+	"policy: max_junctions tiene que ser kSbMaxJunctions");
+static_assert(mVUSuperblock::kSbPolicy.max_ops == mVUSuperblock::kSbMaxOps,
+	"policy: max_ops tiene que ser kSbMaxOps");
+static_assert(mVUSuperblock::kSbPolicy.max_cycles == mVUSuperblock::kSbMaxCycles,
+	"policy: max_cycles tiene que ser kSbMaxCycles");
+// Y los NUMEROS que el log de este telefono ya dejo ver. Si alguien mueve un umbral,
+// esto ruidA aca (no en un telefono): la politica de 0.6.31..0.6.36 es la linea base
+// contra la que se lee cualquier log viejo, y cambiarla en silencio invalida la
+// evidencia acumulada.
+static_assert(mVUSbElig::kGateSlots == 2048u, "puerta: mismo dominio de PCs que el indice");
+static_assert(mVUSbElig::kGatePeriodConsiderations == 1024u, "puerta: periodo firmado");
+
+// El indice de las casillas de causa es el enum del header puro; el motor indexa con
+// el. Si el conteo de causas cambia, el arreglo de Stats cambia de tamano con el
+// (usa kArmCauseCount), pero el INFORME recorre hasta kCount: se fija que kCount sea
+// el ultimo y que ningun hueco quede sin nombre.
+static_assert(static_cast<unsigned>(mVUSbElig::ArmCause::kCount) == 12u,
+	"arm: doce casillas (once resultados terminales + politica-ok, que no lo es) — "
+	"anadir una causa sin nombre deja un hueco del enum sin cuenta en el informe");
+static_assert(static_cast<unsigned>(mVUSbElig::JunctionCause::kCount) == 9u,
+	"union: nueve salidas");
+static_assert(static_cast<unsigned>(mVUSbElig::CloseCause::kCount) == 8u,
+	"cierre: ocho salidas");
 
 // --- Contrato del motor (lo que microVU-arm64.cpp registra) ---------------------
 namespace mVUSuperblock
