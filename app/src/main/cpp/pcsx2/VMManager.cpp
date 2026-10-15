@@ -18,6 +18,7 @@
 #include "Elfheader.h"
 #include "FW.h"
 #include "GS.h"
+#include "GS/GSUtil.h" // Cenit 0.6.36: GetPreferredRenderer(), para el aviso de below-native
 #include "GS/Renderers/HW/GSTextureReplacements.h"
 #include "GSDumpReplayer.h"
 #include "GameDatabase.h"
@@ -3098,14 +3099,26 @@ void VMManager::LogCPUCapabilities()
 #endif
 
 #ifdef ARCH_ARM64
+	// Cenit 0.6.36: este aviso imprimia el 0 de «no pude medir» como si el
+	// telefono tuviera lineas de cache de 0 bytes. En el log real de un
+	// HUAWEI NCO-LX3 salio «the system has 0 byte lines», y ese numero viaja
+	// despues en el reporte como si fuera una caracteristica del aparato. 0 no
+	// es una medida: es la ausencia de ella, y ahora se dice aparte. No se
+	// calla el caso desconocido — ocultarlo seria perder la unica pista de que
+	// el sondeo fallo — pero deja de afirmar un tamano que nadie midio.
 	const size_t runtime_cache_line_size = HostSys::GetRuntimeCacheLineSize();
-	if (__cachelinesize != runtime_cache_line_size)
+	if (runtime_cache_line_size == 0)
+		Console.WriteLnFmt("Cache line size: not reported by this system (sysconf and "
+			"/sys/.../cache are silent); the build assumes {} byte lines.", __cachelinesize);
+	else if (__cachelinesize != runtime_cache_line_size)
 	{
 		// Not fatal, but does have performance implications.
 		WARNING_LOG(
 			"Cache line size mismatch. This build was compiled with {} byte lines, but the system has {} byte lines.",
 			__cachelinesize, runtime_cache_line_size);
 	}
+	else
+		Console.WriteLnFmt("Cache line size: {} bytes (matches build).", runtime_cache_line_size);
 #endif
 
 #if defined(_WIN32)
@@ -3692,8 +3705,41 @@ void VMManager::WarnAboutUnsafeSettings()
 		// HW renderer settings.
 		if (EmuConfig.GS.UpscaleMultiplier < 1.0f)
 		{
-			append(ICON_FA_TV,
-				TRANSLATE_SV("VMManager", "Upscale multiplier is below native, this will break rendering."));
+			// Cenit 0.6.36: el aviso de arriba es literal y esta version lo hace
+			// falso en el unico caso que Cenit usa por debajo de 1x. El regidor de
+			// resolucion dinamica RECORTA a 0.5x/0.75x deliberadamente, y con
+			// reconstruccion EASU ENCENDIDA (el default desde 0.6.26) esos cuadros no
+			// se estiran: se pide reconstruirlos. Imprimir "this will break rendering"
+			// en cada apply del recorte —el log real de un HUAWEI NCO-LX3 lo imprime
+			// dos veces, en los dos momentos en que el regidor bajo la escala— le dice
+			// al usuario que su propio emulador rompio la imagen, sin darle ni una
+			// palabra de lo que la app esta pidiendo.
+			//
+			// Lo que NO se afirma aqui: que la cadena HAYA corrido en cada cuadro. Con
+			// la opcion encendida y el porton del driver abierto, EASUChain puede
+			// devolver false y el cuadro se estira igual. Eso lo mide la linea
+			// "Cenit present:" de GSRenderer (hecho vs fallado), no esta frase, y el
+			// texto se redacta en terminos de lo PEDIDO para no prometer el resultado.
+			//
+			// El backend se resuelve como lo resuelve el core: Auto vale Vulkan cuando
+			// la preferencia de plataforma es Vulkan (GSUtil::GetPreferredRenderer es
+			// la misma funcion que GSopen usa para resolver Auto, y esta memoizada).
+			// EASU solo existe en Vulkan, asi que con OGL elegido a mano el aviso
+			// viejo es el correcto y queda intacto.
+			const bool easu_pedida = EmuConfig.GS.EASUReconstruct &&
+			                         (EmuConfig.GS.Renderer == GSRendererType::VK ||
+			                             (EmuConfig.GS.Renderer == GSRendererType::Auto &&
+			                                 GSUtil::GetPreferredRenderer() == GSRendererType::VK));
+			if (easu_pedida)
+			{
+				append(ICON_FA_TV,
+					TRANSLATE_SV("VMManager", "Resolution is below native and EASU reconstruction is on: expect a softer image than native (the log line 'Cenit present' says whether it ran)."));
+			}
+			else
+			{
+				append(ICON_FA_TV,
+					TRANSLATE_SV("VMManager", "Upscale multiplier is below native, this will break rendering."));
+			}
 		}
 		if (EmuConfig.GS.TriFilter != TriFiltering::Automatic)
 		{
