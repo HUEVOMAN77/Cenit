@@ -17,8 +17,9 @@ import android.util.Log;
  * escribe en la capa base.
  *
  * Dos niveles, en el orden de prioridad que ya usa el núcleo:
- *   - Preferencia "cdvd_precache" (apagada por defecto: es experimental): modo
- *     automático de Cenit. En cada arranque se mide y se carga SOLO si cabe.
+ *   - Preferencia "cdvd_precache" (apagada por defecto: en teléfonos chicos la
+ *     cuenta casi siempre dice que no): modo automático de Cenit. En cada
+ *     arranque se mide y se carga SOLO si cabe.
  *   - Clave EmuCore/CdvdPrecache del INI por-juego: manda por encima (la capa
  *     de juego va sobre la base), así que un Sí o un No fijado a mano gana
  *     siempre, y la primera escritura del arranque nunca pisa una orden
@@ -56,7 +57,8 @@ public final class PrecachePolicy {
 
     private PrecachePolicy() {}
 
-    /** Modo automático global: apagado por defecto (experimental). */
+    /** Modo automático global: apagado por defecto (en 384 MB por app la cuenta
+     *  casi siempre dice que no; ver la línea de decisión en el registro). */
     public static boolean autoEnabled(SharedPreferences prefs) {
         return prefs.getBoolean(PREF_AUTO, false);
     }
@@ -222,14 +224,19 @@ public final class PrecachePolicy {
                 + "mediría y lo cargaría solo si cabe en la RAM libre de este "
                 + "teléfono (la reserva de seguridad del motor son 2 GB). Se "
                 + "aplica al reiniciar cada juego; en Ajustes del juego puedes "
-                + "ordenarlo a mano para uno solo. Encendido por defecto: NO — "
-                + "es experimental.";
+                + "ordenarlo a mano para uno solo. Apagado por defecto, y no por "
+                + "cautela: medido en la partida de este reporte, el disco de "
+                + "delante eran 4010 MB contra 2858 MB disponibles — la cuenta "
+                + "dice que no cabe y el automático ni lo intenta.";
         }
         return "Automático: en cada arranque Cenit mide el juego y lo carga "
             + "entero en memoria SOLO si cabe en la RAM libre de este teléfono "
             + "(la reserva de seguridad del motor son 2 GB; en un teléfono de "
             + "4 GB casi nada cabe, en uno de 12 GB entran hasta unos 5 GB). "
-            + "Se aplica al reiniciar cada juego. Experimental.";
+            + "Se aplica al reiniciar cada juego. La decisión sale escrita en el "
+            + "registro («Precache: base layer CdvdPrecache=0/1») y en el bloque "
+            + "FÁBRICA del reporte con el tamaño medido, así que se puede "
+            + "verificar qué hizo con tu disco en vez de confiar.";
     }
 
     /** Texto para la nota del diálogo por-juego, con la medida real delante. */
