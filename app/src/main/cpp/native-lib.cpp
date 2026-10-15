@@ -952,9 +952,10 @@ Java_com_izzy2lost_psx2_NativeApp_dumpVUTraceReport(JNIEnv* env, jclass, jstring
 
 // Cenit 0.6.21 — Fases 2-5 del motor de superbloques VU (PDF de arquitectura).
 // Encendido por defecto NO: el GATE del documento exige cero divergencias y
-// mejora sostenida medida antes de habilitar; hasta que el usuario valide en su
-// dispositivo, la bandera es experimental. Encender el motor enciende la sonda
-// (la elegibilidad vive de sus contadores) y pausa la caché de programas en
+// mejora sostenida medida antes de habilitar; en el log de este teléfono el
+// motor aún no produjo superbloques (build=0), así que falta esa medición.
+// Encender el motor enciende la sonda (la elegibilidad vive de sus
+// contadores) y pausa la caché de programas en
 // disco; apagarlo vuelca el informe (logs/vu_superblock.txt + resumen en
 // emulog). El toggle cae en RecompilerOptions: CheckForCPUConfigChanges limpia
 // las cachés del recompiler en ambos flancos, así que ninguna variante
@@ -1030,8 +1031,10 @@ Java_com_izzy2lost_psx2_NativeApp_dumpVUSuperblockReport(JNIEnv* env, jclass, js
 }
 
 // Cenit 0.6.24 — compilación asíncrona de pipelines TFX en Vulkan.
-// EXPERIMENTAL y APAGADA por defecto: hoy vkCreateGraphicsPipelines corre en el
-// hilo GS y cada pipeline nuevo es un pico de frame time (medido en God of War).
+// APAGADA por defecto (el intercambio parpadeo-vs-tirón lo elige el usuario;
+// el log de este teléfono la vio correr: 191 encolados, 191 compilados,
+// fallback=0). Hoy vkCreateGraphicsPipelines corre en el hilo GS y cada
+// pipeline nuevo es un pico de frame time (medido en God of War).
 // Con la bandera ON, el selector desconocido se encola a un hilo de trabajo y el
 // primitivo se omite uno o dos frames (mismo camino que un fallo de compilación),
 // en vez de congelar el dibujo. No está en RestartOptionsAreEqual (Pcsx2Config.cpp:
