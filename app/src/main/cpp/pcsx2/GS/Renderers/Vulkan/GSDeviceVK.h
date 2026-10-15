@@ -482,7 +482,7 @@ private:
 		m_tfx_fragment_shaders;
 	std::unordered_map<PipelineSelector, VkPipeline, PipelineSelectorHash> m_tfx_pipelines;
 
-	// --- Cenit 0.6.24: compilación asíncrona de pipelines TFX (experimental) -----
+	// --- Cenit 0.6.24: compilación asíncrona de pipelines TFX (apagada por defecto) ---
 	// El camino de siempre compila el pipeline EN el hilo de dibujo
 	// (CreateTFXPipeline -> GraphicsPipelineBuilder::Create ->
 	// vkCreateGraphicsPipelines, VKBuilders.cpp:286), y eso es
