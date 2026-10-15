@@ -2173,9 +2173,14 @@ _mVUt void* mVUexecute(u32 startPC, u32 cycles)
 	// PROXIMO despacho toma el superbloque. sbSlot >= 0
 	// aqui seria un frame variante en vuelo (imposible en el dispatcher —
 	// lo cubre la comprobacion); nunca se re-arma encima de uno activo.
+	//
+	// 0.6.37 — SbConsiderArm y no SbArmCompile: este es el camino LENTO, y el
+	// contador de intentos tiene que saber de donde vino cada llegada (lento vs
+	// stub), porque la cuenta de cobertura del armado es justamente la evidencia
+	// que faltaba para explicar un «construidos=0».
 	if (vuIndex == 1 && result && mVUSuperblock::IsEnabled() && mVU.sbSlot < 0)
 	{
-		const int sbSlotArm = mVUSuperblock::SbArmCompile(maskedPC, (const void*)pState);
+		const int sbSlotArm = mVUSuperblock::SbConsiderArm(maskedPC, (const void*)pState, false);
 		if (sbSlotArm >= 0)
 		{
 			// Preservar lpState alrededor de la compilacion variante. El
@@ -2301,6 +2306,58 @@ void mVUcleanUpVU1() { mVUcleanUp<1>(); }
 // only fires when the slow-path mVUsearchProg returns an
 // out-of-cache pointer; that path still runs through mVUexecute
 // here unchanged.
+// Cenit 0.6.37 — armado del superbloque desde el STUB emitido (los dos caminos:
+// con sonda y sin sonda), en un helper para que los dos queden identicos por
+// construccion y no por atencion.
+//
+// Que arregla: el hook de mVUexecute solo corre cuando mVUlookupProg FALLA, y por
+// el stub resuelve el 99.1 % de los despachos de VU1 del log de este telefono
+// (stub=13110338 contra lento=120542, intentos=120542 — o sea la politica de
+// elegibilidad podia considerar exactamente los despachos del camino lento y
+// ninguno mas). Los bloques que la sonda reporta como calientes — 0x0378 con
+// 44 486 376 ejecuciones, 0x0cd8 con 123 013 572 — jamas pasaron por ella: el
+// motor podia SERVIR superbloques pero casi no CONSTRUIRLOS. Ese es build=0, y es
+// un defecto de cobertura, no una caracteristica del juego.
+//
+// Que exige `resolved_normal`: la condicion del hook original era `result &&`
+// (mVUexecute arma solo con la resolucion normal ya en curso). Aqui es lo mismo y
+// por la misma razon: mVUcompile necesita que mVU.prog.cur valga (el gestor del
+// programa donde se registra la variante) y que lpState sea la clave con la que
+// ESE despacho resolvio. Con la resolucion normal fallida, prog.cur puede ser el
+// de otro programa o estar vacio, y reentrar el compile desde ahi no es "armar
+// barato": es compilar sobre un estado que no describe este despacho. La caida se
+// arma igual, una vuelta despues, por el hook de mVUexecute — o sea NINGUN PC
+// pierde su oportunidad, y el cubrimiento nuevo es estrictamente mayor.
+//
+// Que NO hace: no llama a SbResolve (el unico punto de resolucion del motor sigue
+// siendo el de arriba; llamarlo dos veces por despacho duplicaria la ventana de
+// replay y dejaria colgados los contadores *_Pending cruzados — ver el comentario
+// junto al hook del dispatcher), y no toca la entrada que este stub devuelve: la
+// variante se registra para el PROXIMO despacho, y este corre la cadena normal con
+// `r` intacto. Igual que en el camino lento.
+static void MvuSbArmFromStub(u32 maskedPC, bool resolved_normal)
+{
+	if (!resolved_normal || !mVUSuperblock::IsEnabled() || microVU1.sbSlot >= 0)
+		return;
+
+	const int sbArm = mVUSuperblock::SbConsiderArm(maskedPC,
+		(const void*)&microVU1.prog.lpState, true);
+	if (sbArm < 0)
+		return;
+
+	// Preservar lpState alrededor de la compilacion variante, exactamente como en
+	// el hook de mVUexecute: el compile pisa lpState en mVUinitFirstPass y en el
+	// horneado de las continuaciones M-bit dentro del area, y este despacho aun va
+	// a resolver y correr por la cadena normal — lpState es SU clave de pareo.
+	microRegInfo sbSaved = microVU1.prog.lpState;
+	microVU1.sbSlot = sbArm;
+	mVUopenCodeCache(microVU1);
+	mVUcompile(microVU1, maskedPC, (uptr)&microVU1.prog.lpState);
+	mVUcloseCodeCache(microVU1);
+	microVU1.prog.lpState = sbSaved;
+	microVU1.sbSlot = -1;
+}
+
 void* mVUlookupProg_VU0(u32 startPC, u32 cycles)
 {
 	microVU0.cycles      = cycles;
@@ -2332,6 +2389,11 @@ void* mVUlookupProg_VU1(u32 startPC, u32 cycles)
 	{
 		mVUTraceProbe::g_flow[1].stubCalls.fetch_add(1, std::memory_order_relaxed);
 		void* r = mVUlookupProg<1>(maskedPC, (uptr)&microVU1.prog.lpState);
+		// 0.6.37 — el hecho de "resolvio la cadena normal" se captura ANTES de
+		// SbResolve, que puede pisar `r` con la variante. Sin este separador, un
+		// despacho servido por superbloque se contaria como resolucion normal y el
+		// armado se apoyaria en un prog.cur que este despacho no resolvio.
+		const bool resolved_normal = (r != nullptr);
 		if (r)
 			mVUTraceProbe::g_flow[1].stubHits.fetch_add(1, std::memory_order_relaxed);
 		// Cenit VU Superblock Engine — el control del superbloque tiene que
@@ -2348,9 +2410,13 @@ void* mVUlookupProg_VU1(u32 startPC, u32 cycles)
 			if (sb)
 				r = sb;
 		}
+		MvuSbArmFromStub(maskedPC, resolved_normal);
 		return r;
 	}
 	void* r = mVUlookupProg<1>(maskedPC, (uptr)&microVU1.prog.lpState);
+	// 0.6.37 — mismo separador que en la rama con sonda: se registra el exito de la
+	// resolucion NORMAL antes de que SbReplace pueda pisar `r`.
+	const bool resolved_normal = (r != nullptr);
 	// Cenit VU Superblock Engine — misma cobertura sobre la resolucion rapida
 	// del stub (ruta sin sonda). Barato desde 0.6.33 y dicho con la unidad
 	// correcta: SbResolve sale de inmediato si no hay motor, y con el motor ON
@@ -2364,6 +2430,12 @@ void* mVUlookupProg_VU1(u32 startPC, u32 cycles)
 		if (sb)
 			r = sb;
 	}
+	// Cenit 0.6.37 — la MISMA cobertura en la ruta sin sonda. El porque esta arriba,
+	// y alli esta tambien que la sonda no es requisito: si el armado del stub solo
+	// viviera en el camino con sonda ON, el motor construira superbloques unicamente
+	// cuando el usuario encienda una medicion, que es una forma muy cara de decir
+	// que no construye.
+	MvuSbArmFromStub(maskedPC, resolved_normal);
 	return r;
 }
 
