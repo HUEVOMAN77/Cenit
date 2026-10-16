@@ -4,9 +4,13 @@
 #ifdef __ANDROID__
 
 #include "AndroidDeviceDetection.h"
+#include "CenitDeviceClass.h"
 #include "common/Console.h"
+#include "common/HostSys.h"
+#include <cpuinfo.h>
 #include <sys/system_properties.h>
 #include <cctype>
+#include <cstdio>
 #include <cstring>
 #include <iterator>
 
@@ -181,6 +185,219 @@ namespace AndroidDeviceDetection
 
 	namespace
 	{
+		using namespace CenitDeviceClass;
+
+		// ------------------------------------------------------------------
+		// Recolector. Su unica tarea es llenar Measurement con numeros que el
+		// sistema efectivamente dijo, y apagar el flag de cada campo que NO pudo
+		// leer. No clasifica nada: la clasificacion vive entera en CenitDeviceClass.h,
+		// que es la unica pieza de este cambio que host puede romper con Harness15.
+		//
+		// De donde sale cada numero, y por que no se saca de otro lado:
+		//  * MIDR del cluster: cpuinfo_cluster::midr, que cpuinfo lleno a partir de
+		//    /sys/devices/system/cpu/cpuN/regs/identification/midr_el1 (o de
+		//    /proc/cpuinfo cuando el kernel no deja leer el registro; en ambos casos es
+		//    un registro del chip, no un nombre).
+		//  * Frecuencia: leida A MANO de cpuinfo_max_freq. No de
+		//    cpuinfo_cluster::frequency: en este arbol vendorizado ese campo queda SIN
+		//    LLENAR en la ruta de Linux/ARM64 — el literal que construye el cluster en
+		//    3rdparty/cpuinfo/src/arm/linux/init.c (linea ~713) inicializa
+		//    processor_start, core_count, cluster_id, package, vendor, uarch y midr, y NO
+		//    incluye .frequency; el unico `cluster->frequency =` del arbol esta en
+		//    src/arm/windows/init-by-logical-sys-info.c. Confiar en el daria 0 kHz en
+		//    todos los telefonos, y "0 kHz" con el flag encendido es exactamente el
+		//    centinela-vuelto-dato que esta version viene persiguiendo.
+		//  * RAM: GetPhysicalMemory()/GetAvailablePhysicalMemory() del common, que en
+		//    Linux leen sysconf(_SC_PHYS_PAGES)*pagesize y MemAvailable. El telefono de
+		//    referencia reporta por esa via 7349 MB fisicos y 2858 disponibles, o sea la
+		//    unidad ya esta probada contra su propio log.
+		// ------------------------------------------------------------------
+
+		// kHz del procesador mas rapido del cluster. `-1` = no se pudo leer NINGUNO, lo
+		// cual es distinto de `0` y el llamador lo trata como campo sin medir. Todo el
+		// archivo esta bajo __ANDROID__, y android es linux, asi que cpuinfo_processor::
+		// linux_id existe sin necesidad de otro guardado.
+		long ReadClusterMaxFreqKhz(const cpuinfo_cluster* cluster)
+		{
+			long best = -1;
+			const uint32_t end = cluster->processor_start + cluster->processor_count;
+			for (uint32_t i = cluster->processor_start; i < end; i++)
+			{
+				const cpuinfo_processor* proc = cpuinfo_get_processor(i);
+				if (!proc || proc->linux_id < 0)
+					continue;
+
+				// El indice va como %d de un entero ya validado arriba: no hay cadena
+				// del usuario en el path, asi que no hay nada que escapar.
+				char path[128];
+				snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq",
+					static_cast<int>(proc->linux_id));
+
+				FILE* f = fopen(path, "r");
+				if (!f)
+					continue;
+
+				unsigned long long khz = 0;
+				const int got = fscanf(f, "%llu", &khz);
+				fclose(f);
+
+				if (got != 1 || khz == 0)
+					continue;
+
+				const long v = (khz > 0x7ffffffeULL) ? 0x7ffffffeL : static_cast<long>(khz);
+				if (v > best)
+					best = v;
+			}
+			return best;
+		}
+
+		Measurement CollectMeasurement(ClusterView* views, uint32_t cap, uint32_t* out_used, uint32_t* out_real)
+		{
+			Measurement m;
+			*out_used = 0;
+			*out_real = 0;
+
+			if (!cpuinfo_initialize())
+			{
+				// pthread_once dentro de cpuinfo: es idempotente y no pisa la
+				// inicializacion que VMManager ya hace. Si AUN asi fallo, no hay ningun
+				// numero y la ley lo va a imprimir como "nada-medido", no como
+				// "dos nucleos".
+				Console.Error("Cenit equipo: cpuinfo_initialize() fallo, clasificacion sin medir");
+				return m;
+			}
+
+			const uint32_t real_clusters = cpuinfo_get_clusters_count();
+			*out_real = real_clusters;
+			uint32_t used = 0;
+			for (uint32_t i = 0; i < real_clusters; i++)
+			{
+				const cpuinfo_cluster* c = cpuinfo_get_cluster(i);
+				if (!c)
+					continue;
+
+				if (used >= cap)
+				{
+					// Pasar el techo cambia el perfil, asi que se dice en el log en vez
+					// de quedarse en un agregado silenciosamente recortado.
+					Console.WriteLn("Cenit equipo: TECHO de clusters alcanzado (%u agregados de %u reales)",
+						used, real_clusters);
+					break;
+				}
+
+				ClusterView& v = views[used++];
+				v.midr = c->midr;
+				v.core_count = c->core_count;
+
+				const long khz = ReadClusterMaxFreqKhz(c);
+				if (khz > 0)
+					v.frequency_khz = static_cast<uint32_t>(khz);
+			}
+
+			*out_used = used;
+
+			const ClusterAggregate agg = Aggregate(views, used);
+			m.big_class = agg.big_class;
+			m.big_class_measured = agg.class_measured;
+			m.big_freq_khz = agg.big_freq_khz;
+			m.big_freq_measured = agg.freq_measured;
+			m.big_cores = agg.big_cores;
+			m.total_cores = agg.total_cores;
+			m.clusters = agg.clusters;
+			m.cores_measured = agg.cores_measured;
+
+			// RAM. GetPhysicalMemory() documenta 0 como "no soportado", o sea el 0 aqui
+			// SI es un centinela conocido: se apaga el flag en lugar de promediarlo.
+			const u64 phys = GetPhysicalMemory();
+			if (phys > 0)
+			{
+				m.total_ram_mb = static_cast<uint32_t>(phys / _1mb);
+				m.ram_measured = true;
+			}
+			const u64 avail = GetAvailablePhysicalMemory();
+			if (avail > 0)
+			{
+				m.avail_ram_mb = static_cast<uint32_t>(avail / _1mb);
+				m.avail_ram_measured = true;
+			}
+
+			return m;
+		}
+
+		struct Measured
+		{
+			Measurement m;
+			Reason r;
+			bool coherent;
+			uint32_t missing;
+
+			// Los clusters crudos se conservan junto a la decision. Sin ellos el registro
+			// podria decir "clase=desconocida" pero no podria decir CUAL part produjo esa
+			// respuesta, y esa es la unica linea que permite extender la tabla con un numero
+			// leido en un telefono en lugar de copiar una ficha comercial de memoria.
+			ClusterView views[kMaxClusters];
+			uint32_t used = 0;  // cuantos se agregaron
+			uint32_t real = 0;  // cuantos reporto cpuinfo (used < real => hubo recorte)
+		};
+
+		Measured BuildMeasured()
+		{
+			Measured v;
+			v.m = CollectMeasurement(v.views, kMaxClusters, &v.used, &v.real);
+			v.r = DecideTier(v.m);
+			v.coherent = Coherent(v.m, v.r);
+			v.missing = MissingFields(v.m);
+			return v;
+		}
+
+		const Measured& GetMeasured()
+		{
+			// Magic static por el mismo motivo que GetCachedDeviceProfile: microVU llama a
+			// GetDeviceTier() al calcular el sentinel de opciones de un programa VU1, o sea
+			// esto se lee en el hilo del VU y tiene que ser una medida, no un sysfs por
+			// programa.
+			static const Measured value = BuildMeasured();
+			return value;
+		}
+
+		DeviceMeasure BuildDeviceMeasure()
+		{
+			const Measured& v = GetMeasured();
+			DeviceMeasure d;
+			d.tier = static_cast<int>(TierOf(v.r));
+			d.tier_name = TierName(TierOf(v.r));
+			d.reason = ReasonName(v.r);
+			d.big_class_name = BigClassName(v.m.big_class);
+			d.big_freq_khz = v.m.big_freq_khz;
+			d.total_ram_mb = v.m.total_ram_mb;
+			d.avail_ram_mb = v.m.avail_ram_mb;
+			d.big_cores = v.m.big_cores;
+			d.total_cores = v.m.total_cores;
+			d.clusters = v.m.clusters;
+			d.missing_fields = v.missing;
+			d.cores_measured = v.m.cores_measured;
+			d.ram_measured = v.m.ram_measured;
+			d.class_measured = v.m.big_class_measured;
+			d.freq_measured = v.m.big_freq_measured;
+			d.coherent = v.coherent;
+
+			// Los MIDR crudos, formateados por la ley del header (no por una cadena
+			// inventada aqui). Si el buffer no dio para los `used` clusters, se marca: un
+			// registro recortado tiene que decir que esta recortado.
+			char dump[kMaxClusters * 64];
+			const uint32_t written = FormatClusters(v.views, v.used, dump, sizeof(dump));
+			d.clusters_dump = dump;
+			d.clusters_printed = written;
+			d.clusters_dump_truncated = (written < v.used);
+			d.clusters_real = v.real;
+			return d;
+		}
+
+		const char* YesNo(bool b)
+		{
+			return b ? "si" : "NO";
+		}
+
 		const char* VendorName(GPUVendor v)
 		{
 			switch (v)
@@ -203,9 +420,10 @@ namespace AndroidDeviceDetection
 			p.product_board = GetSystemProperty("ro.product.board");
 			p.resolved_model = GetQualcommSocModelTraced(&p.resolved_source);
 			p.gpu_vendor = VendorName(DetectGPUVendor());
-			// GetDeviceTier() vuelve a leer propiedades por dentro. Es una sola vez
-			// en la vida del proceso (ver GetCachedDeviceProfile), así que el coste
-			// no importa y se evita duplicar aquí su lógica de clasificación.
+			// GetDeviceTier() no vuelve a leer propiedades: el perfil sale de la medida
+			// ya guardada (GetMeasured, magic static). Se pide aqui y no en otro lado
+			// para que el numero que ve el registro del perfil sea el mismo que aplican
+			// los ajustes.
 			p.profile = GetDeviceTier();
 
 			Console.WriteLn("Cenit hardware: soc.model='%s' hardware='%s' platform='%s' board='%s'",
@@ -214,6 +432,12 @@ namespace AndroidDeviceDetection
 			Console.WriteLn("Cenit hardware: resuelto=%u fuente='%s' vendor='%s' perfil=%d",
 				p.resolved_model, p.resolved_source.empty() ? "n/d" : p.resolved_source.c_str(),
 				p.gpu_vendor.c_str(), p.profile);
+
+			// Las dos lineas de arriba dicen cual chip dice el OEM y de donde salio ese
+			// numero. Estas dicen que se midio del chip y por que salio ese perfil; sin
+			// ellas, un "perfil=0" en el log es indistinguible de "el kernel no me dejo
+			// leer", y esa confusion es justo lo que este ciclo vino a cerrar.
+			PrintDeviceMeasure();
 			return p;
 		}
 	} // namespace
@@ -329,86 +553,106 @@ namespace AndroidDeviceDetection
 		return 0;
 	}
 
-	bool IsHighEndSnapdragon()
-	{
-		if (DetectGPUVendor() != GPUVendor::Qualcomm)
-			return false;
-
-		const unsigned soc = GetQualcommSocModel();
-		if (soc == 0)
-			return false;
-
-		// 8-series is always fine. For 7-series the hundreds digit tracks the
-		// generation: SM7250 (765G) -> 250, SM7325 (778G) -> 325, SM7450 (7 Gen 1)
-		// -> 450, SM7475 (7+ Gen 2) -> 475, SM7550 (7+ Gen 3) -> 550. Kryo 670 /
-		// Adreno 642L and newer (the 778G upward) handle hardware GS at 2x on most
-		// of the catalogue; older 7-series (710/720/765) are kept on the conservative
-		// mid profile so they don't drop frames trying.
-		const unsigned series = soc / 1000u;
-		const unsigned rest = soc % 1000u;
-		if (series >= 8)
-			return true;
-		if (series == 7 && rest >= 300)
-			return true;
-		return false;
-	}
-
-	// Cenit 0.6.4 (plan del inge §3.1): el tier anterior era casi binario para
-	// Snapdragon y mandaba TODO lo demás a gama baja, incluyendo Dimensity que
-	// corren hardware GS a 1.5x sin despeinarse. Ahora MediaTek/Exynos se
-	// clasifican por el codename de plataforma (ro.board.platform), que es lo
-	// que Android expone de forma fiable en esos SoCs.
-	//   2 = gama alta: sostiene 2x de entrada
-	//   1 = gama media: 1.5x de entrada
-	//   0 = gama baja: 1x de entrada, governor y CAS cargan con el resto
+	// Cenit 0.6.37: IsHighEndSnapdragon() SE ELIMINA, no se deja "por si acaso". Era la
+	// unica funcion que convertia el NUMERO DE MODELO comercial (serie >= 8, o 7xx con
+	// rest >= 300) en "aguanta 2x", y era el primer paso de GetDeviceTier(). Dejarla viva
+	// sin llamadores es dejar una segunda copia de una ley que ya no se aplica — el mismo
+	// error que el proyecto viene persiguiendo desde h14: dos copias de una decision
+	// siempre acaban diciendo cosas distintas. Lo que queda aca abajo, GetQualcommSocModel
+	// y las propiedades, son DATOS trazables para el log; la decision es DecideTier.
+	//
+	// Cenit 0.6.37: el tier MEDIDO. Reemplaza dos cosas que estaban mal por separado:
+	//
+	//   if (vendor == GPUVendor::Qualcomm)
+	//           return IsHighEndSnapdragon() ? 2 : 1;
+	//
+	// (cualquier Qualcomm salia >= 1 antes de mirar un numero del chip, y eso forzaba
+	// VsyncQueueSize=0 en un Snapdragon de entrada) y las dos listas de nombres
+	// kCapable[]/kWeak[] para MediaTek/Exynos (un Dimensity 700 = mt6853, 2x Cortex-A76 a
+	// 2.2 GHz, estaba listado como DEBIL, y la cadena suelta "helio" arrastraba a toda la
+	// serie G por el apellido, incluyendo los G99 que tambien llevan A76). Lo demas era
+	// `return 0`: desconocido == gama baja, o sea ningun SoC con un nombre nuevo podia
+	// clasificarse sin editar el archivo.
+	//
+	// Ahora el numero sale de ClusterView/Midr -> ClassOfMidr -> DecideTier, todo en
+	// CenitDeviceClass.h. Las listas de nombres desaparecen: no quedan ni kCapable ni
+	// kWeak, y no hay ninguna cadena de propiedad comparada en este camino.
 	int GetDeviceTier()
 	{
-		const GPUVendor vendor = DetectGPUVendor();
+		return static_cast<int>(TierOf(GetMeasured().r));
+	}
 
-		if (vendor == GPUVendor::Qualcomm)
-			return IsHighEndSnapdragon() ? 2 : 1;
+	const DeviceMeasure& GetCachedDeviceMeasure()
+	{
+		static const DeviceMeasure measure = BuildDeviceMeasure();
+		return measure;
+	}
 
-		auto toLower = [](std::string str) {
-			for (char& c : str) c = std::tolower(c);
-			return str;
-		};
-		std::string hay = toLower(GetSystemProperty("ro.board.platform"));
-		if (hay.empty())
-			hay = toLower(GetSystemProperty("ro.hardware"));
-		if (hay.empty())
-			hay = toLower(GetSystemProperty("ro.product.board"));
+	// Las cuatro proyecciones, rebotadas sobre la MISMA razon que devolvio el tier. Estan
+	// aqui y no en native-lib.cpp para que el sitio de aplicacion no vuelva a tener una
+	// copia de la condicion: en 0.6.36 la copia viva (`GetDeviceTier() == 0` y
+	// `tier >= 1`) es exactamente lo que hacia que un telefono de entrada Qualcomm se
+	// quedara sin las protecciones de entrada y con la cola de cuadro apagada, las dos
+	// cosas al reves de lo que su hardware pedia.
+	bool DeviceWantsFastSavestate()
+	{
+		return WantsFastSavestate(GetMeasured().r);
+	}
 
-		// Big cores Cortex-A78/A7x modernos y GPU de su liga: medio-alto.
-		static const char* const kCapable[] = {
-			"mt6873", "mt6875", "mt6877", "mt6883", "mt6885", "mt6889",
-			"mt6890", "mt6891", "mt6892", "mt6893", "mt6895", "mt6897",
-			"mt6980", "mt6983", "mt6985", "mt6989", "mt6990", "mt6991", "mt6993",
-			"mt8183", "mt8192", "mt8195", // tablets, pero la detección es la misma
-			"exynos9810", "exynos9820", "exynos9825", "exynos980", "exynos9815",
-			"exynos1380", "exynos2100", "exynos2200", "exynos2400",
-		};
-		for (const char* p : kCapable)
+	bool DeviceWantsUnsyncedReadback()
+	{
+		return WantsUnsyncedReadback(GetMeasured().r);
+	}
+
+	bool DeviceWantsPartialTexturePreload()
+	{
+		return WantsPartialTexturePreload(GetMeasured().r);
+	}
+
+	bool DeviceWantsOptimalPacing()
+	{
+		return WantsOptimalPacing(GetMeasured().r);
+	}
+
+	void PrintDeviceMeasure()
+	{
+		const DeviceMeasure& d = GetCachedDeviceMeasure();
+
+		// Dos lineas con los DENOMINADORES: que se midio, que no, y si la razon es
+		// coherente con los datos. `sin-medir=N/4` es la parte que hace que un
+		// "perfil=baja" se pueda leer como opinion sobre el hardware o como limitacion del
+		// lector, que es la diferencia entre un dato y una excusa. Sale en la misma linea
+		// el nombre de la clase y el flag, porque "desconocida" sin el flag se lee igual
+		// cuando el kernel no reporto el MIDR y cuando el nucleo existe pero no esta en la
+		// tabla — y esas dos cosas se arreglan en sitios distintos.
+		Console.WriteLn("Cenit equipo: perfil=%s razon=%s | nucleos=%s(%u) grandes=%u/%u clusters=%u | clase=%s(%s)",
+			d.tier_name.c_str(), d.reason.c_str(),
+			YesNo(d.cores_measured), d.total_cores,
+			d.big_cores, d.total_cores, d.clusters,
+			YesNo(d.class_measured), d.big_class_name.c_str());
+		Console.WriteLn("Cenit equipo: reloj=%s(%llu kHz) ram=%s(%llu MB) disponible=%llu MB sin-medir=%u/4 coherente=%s",
+			YesNo(d.freq_measured), d.big_freq_khz,
+			YesNo(d.ram_measured), d.total_ram_mb,
+			d.avail_ram_mb, d.missing_fields, YesNo(d.coherent));
+
+		if (!d.coherent)
 		{
-			if (hay.find(p) != std::string::npos)
-				return 1;
+			// Ruido, no un valor: si la ley y los datos se contradicen, el perfil que se
+			// esta aplicando no se puede explicar y hay que arreglar el recolector.
+			Console.Error("Cenit equipo: INCOHERENCIA entre la razon y los datos medidos "
+				"— el perfil aplicado no se puede justificar, revisar el recolector");
 		}
 
-		// Gama baja conocida (A53/A55 puros o big cores débiles): 0 explícito.
-		static const char* const kWeak[] = {
-			"mt6739", "mt6761", "mt6762", "mt6763", "mt6765", "mt6768", "mt6771",
-			"mt6779", "mt6785", "mt6832", "mt6833", "mt6853", "mt6855",
-			"exynos7870", "exynos7880", "exynos7884", "exynos7885", "exynos850",
-			"exynos9609", "exynos9610", "exynos9611",
-			"kirin710", "kirin620", "kirin650", "helio",
-		};
-		for (const char* p : kWeak)
-		{
-			if (hay.find(p) != std::string::npos)
-				return 0;
-		}
-
-		// Desconocido: conservador, que el governor suba si da.
-		return 0;
+		// La linea de los MIDR crudos. Va al final porque es la que se lee cuando las
+		// banderas de arriba dicen NO: "clase=NO(desconocida)" sin numeros es una
+		// limitacion del lector sin nombre, y con ellos es una fila concreta de la tabla
+		// de CenitDeviceClass.h que falta. Los tres denominadores van separados porque son
+		// tres recortes distintos: cpuinfo dijo `reales`, de esos se agregaron `usados`
+		// (techo kMaxClusters) y el buffer de texto pudo escribir `impresos`.
+		Console.WriteLn("Cenit equipo: clusters usados=%u/%u impresos=%u recortado=%s",
+			static_cast<unsigned>(d.clusters), d.clusters_real, d.clusters_printed,
+			YesNo(d.clusters_dump_truncated));
+		Console.WriteLn("Cenit equipo: midr %s", d.clusters_dump.c_str());
 	}
 }
 
