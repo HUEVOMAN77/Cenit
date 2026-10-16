@@ -414,7 +414,7 @@
 
                             <TextView
                                 style="@style/Cenit.Settings.Caption"
-                                android:text="Fusiona bloques VU1 calientes para saltarse la barrera de bloque. Puede cambiar el resultado gráfico en juegos concretos y se revierte solo si diverge. Apagado por defecto y con una razón medida, no de fe: en la partida de God of War con el motor encendido hizo 120542 intentos y construyó 0 superbloques — todos los rechazos fueron de forma o de identidad, ningún hueco quedó siquiera candidato — así que en ese juego no acelera nada y lo que queda por demostrar es que sirva en algún juego antes de que prometa cuadros." />
+                                android:text="Fusiona bloques VU1 calientes para saltarse la barrera de bloque. Puede cambiar el resultado gráfico en juegos concretos y se revierte solo si diverge. Sigue apagado por defecto, y ahora con la cuenta que faltaba: en la partida de God of War hizo 120542 intentos y construyó 0 superbloques, pero ese 0 no se podía explicar porque cuatro cubos cubrían doce comprobaciones distintas. Desde esta versión cada comprobación tiene su casilla y las tres cadenas cierran (armado, unión y cierre firmados ok o DESAJUSTE), y el armado dejó de colgar solo del camino lento: con la puerta de re-evaluación los 13 millones de despachos que resuelve el stub emitido también pueden considerar un candidato. Lo que falta sigue siendo lo mismo y ahora es legible en tu registro: qué causa domina cuando construye 0, y si alguna vez construye, cuántos cuadros dura la ventaja." />
 
                             <com.google.android.material.materialswitch.MaterialSwitch
                                 android:id="@+id/set_sw_async_shaders"
