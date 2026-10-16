@@ -402,6 +402,141 @@ static void test_close()
 // (4) El cierre de cuentas: causa -> cubo -> casilla.
 // ------------------------------------------------------------------
 
+// ------------------------------------------------------------------
+// (3b) Cadena 4 — la puerta previa del compilador (0.6.38).
+//
+// Que prueba esto y que NO. La cadena 4 nace de un numero del log de 0.6.37:
+//   vuSB: cierre{... union=ok(0/0) ...}   con   construidos=0
+// Ese (0/0) es un cierre verdadero y una medida falsa al mismo tiempo: la cadena
+// 2 solo ve lo que alguien le pregunta, y entre el corte por rama del analisis
+// variante y SbAskJunction habia tres filtros locales que decidian en silencio.
+// Lo que host PUEDE probar es que la ley nueva dice lo mismo que decia la
+// conjuncion que reemplaza, sobre TODO el dominio (8 entradas: es un espacio
+// exhaustivo, no una muestra). Lo que host NO puede probar, y por eso no lo
+// afirma, es que el compilador le pase los tres hechos bien leidos: eso vive en
+// microVU_Compile-arm64.inl y lo fijan las anclas de la fase 2.
+// ------------------------------------------------------------------
+
+// La conjuncion ORIGINAL, transcrita del codigo que DecidePre reemplaza:
+//   if (clean && !(jTgtUp & _Ebit_) && !reenter && SbAskJunction(...) >= 0)
+// Se escribe aqui a mano, en la forma vieja, a proposito: si la ley y esta
+// expresion discrepan en cualquier punto del dominio, el diferencial ruge. Una
+// paridad declarada ("confio en el orden") no seria evidencia de nada.
+static bool OriginalAsks(bool clean, bool target_ebit, bool reenter)
+{
+	return clean && !target_ebit && !reenter;
+}
+
+static void test_pre()
+{
+	// (1) Cada causa alcanzable con el input minimo que la nombra.
+	{
+		const PreInput in{false, false, false};
+		CK(DecidePre(in) == PreCause::kDirty, "previa: rama sucia sola");
+	}
+	{
+		const PreInput in{true, true, false};
+		CK(DecidePre(in) == PreCause::kTargetEbit, "previa: objetivo con E-bit solo");
+	}
+	{
+		const PreInput in{true, false, true};
+		CK(DecidePre(in) == PreCause::kReenter, "previa: objetivo revisitado solo");
+	}
+	{
+		const PreInput in{true, false, false};
+		CK(DecidePre(in) == PreCause::kAsked, "previa: los tres pasan -> pregunto");
+	}
+
+	// (2) Precedencia = orden de cortocircuito. Con dos razones simultaneas gana
+	// la que el codigo viejo miraba primero. Cambiar el orden cambiaria que se
+	// cuenta, y eso es un cambio de telemetria que no puede ser silencioso.
+	{
+		const PreInput in{false, true, true};
+		CK(DecidePre(in) == PreCause::kDirty, "previa: sucio manda sobre E-bit y revisita");
+	}
+	{
+		const PreInput in{false, false, true};
+		CK(DecidePre(in) == PreCause::kDirty, "previa: sucio manda sobre revisita");
+	}
+	{
+		const PreInput in{true, true, true};
+		CK(DecidePre(in) == PreCause::kTargetEbit, "previa: E-bit manda sobre revisita");
+	}
+
+	// (3) DOMINIO EXHAUSTIVO contra la expresion original. Ocho entradas: no hay
+	// caso sin probar, así que un verde aqui si es cobertura y no muestra.
+	for (int c = 0; c < 2; c++)
+		for (int e = 0; e < 2; e++)
+			for (int r = 0; r < 2; r++)
+			{
+				const PreInput in{c != 0, e != 0, r != 0};
+				const PreCause got = DecidePre(in);
+				const bool want_ask = OriginalAsks(c != 0, e != 0, r != 0);
+				CK((got == PreCause::kAsked) == want_ask,
+					"previa: pregunto coincide con la conjuncion original");
+				// Y la causa negativa tiene que ser la PRIMERA razon que cae en el
+				// mismo orden en que la evaluaba el cortocircuito.
+				if (!want_ask)
+				{
+					const PreCause esperado =
+						(c == 0) ? PreCause::kDirty :
+						(e != 0) ? PreCause::kTargetEbit : PreCause::kReenter;
+					CK(got == esperado, "previa: la causa atribuida es la primera que corto");
+				}
+			}
+
+	// (4) El invariante de cuenta: toda salida es terminal y exactamente una
+	// casilla por entrada, así que Σ causas == cortes. Es lo que el informe firma
+	// como `previa=ok(n/n)`.
+	for (int c = 0; c < 2; c++)
+		for (int e = 0; e < 2; e++)
+			for (int r = 0; r < 2; r++)
+			{
+				const PreCause got = DecidePre(PreInput{c != 0, e != 0, r != 0});
+				u32 suma = 0;
+				for (u32 k = 0; k < kPreCauseCount; k++)
+					suma += (static_cast<u32>(got) == k) ? 1u : 0u;
+				CK(suma == 1u, "previa: cada entrada cae en exactamente una casilla");
+			}
+
+	// (5) kAsked no es rechace y los tres filtros si. De aca sale el cierre
+	// cruzado del informe: pre_cause[pregunto] == junction_requests.
+	CK(!IsPreRejection(PreCause::kAsked), "previa: pregunto no es rechace");
+	CK(IsPreRejection(PreCause::kDirty), "previa: rama-sucia-previa es rechace");
+	CK(IsPreRejection(PreCause::kTargetEbit), "previa: objetivo-con-ebit es rechace");
+	CK(IsPreRejection(PreCause::kReenter), "previa: objetivo-revisita es rechace");
+
+	// (6) Los rechaces de la puerta previa son los tres de FORMA: si alguno se
+	// fuera de cubo, el informe sumaria menos que la linea de causas y el cierre
+	// derivado mentiria sin cantar.
+	CK(PreBucketOf(PreCause::kDirty) == Bucket::kStruct, "previa: rama-sucia -> estructura");
+	CK(PreBucketOf(PreCause::kTargetEbit) == Bucket::kStruct, "previa: E-bit -> estructura");
+	CK(PreBucketOf(PreCause::kReenter) == Bucket::kStruct, "previa: revisita -> estructura");
+
+	// (7) El numero que pidio esta cadena, escrito como comprobacion y no como
+	// esperanza: con los tres filtros activos a la vez, la cadena 2 NUNCA se
+	// entera. Si alguien afloja el orden y deja pasar una entrada sucia, esto cae.
+	CK(DecidePre(PreInput{false, true, true}) != PreCause::kAsked,
+		"previa: una entrada sucia jamas llega a preguntar");
+
+	// (8) Testigo del contrato: por el camino de SbAskJunctionPre, la causa kDirty
+	// de la cadena 2 es inalcanzable (la puerta ya corto). Se comprueba en la ley:
+	// la unica llamada que hace el motor pasa branchStructClean=true, así que
+	// DecideJunction jamas ve struct_clean=false desde ahi.
+	{
+		JunctionInput jin{};
+		jin.slot_in_range = true;
+		jin.is_building = true;
+		jin.struct_clean = false; // lo que la puerta previa hace imposible
+		jin.junctions_so_far = 0u;
+		jin.target_aligned = true;
+		jin.target_has_shape = true;
+		CK(DecideJunction(jin, kMotor) == JunctionCause::kDirty,
+			"testigo: u:rama-sucia sigue existiendo en la ley, y por eso un valor > 0 "
+			"en el log significa que hay un segundo camino que no paso por la puerta");
+	}
+}
+
 static void test_buckets()
 {
 	// Toda causa terminal de armar tiene cubo y nombre; kPolicyPass y kArmed NO
@@ -899,6 +1034,7 @@ int main()
 {
 	test_arm_causes();
 	test_junction();
+	test_pre();
 	test_close();
 	test_buckets();
 	test_gate();
