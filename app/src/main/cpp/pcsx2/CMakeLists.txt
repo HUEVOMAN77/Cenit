@@ -1206,6 +1206,11 @@ if(ANDROID)
 		../AchievementsAndroid.cpp
 		../AchievementsNativeMethods.cpp
 		../AndroidDeviceDetection.cpp
+		# Cenit 0.6.37: la LEY de clasificacion medida del equipo vive en su propio header
+		# y se trae aqui por la misma razon que arm64/MvuSbEligibility.h (0925a5fb): para
+		# que aparezca en HEADERS, lo vea el IDE y se pueda abrir solo. No cambia la
+		# compilacion — AndroidDeviceDetection.cpp ya lo incluye.
+		../CenitDeviceClass.h
 	)
 elseif(LINUX)
 	target_sources(PCSX2 PRIVATE
