@@ -65,6 +65,7 @@ SRC=app/src/main/cpp/CenitDeviceClass.h
 ADD=app/src/main/cpp/AndroidDeviceDetection.cpp
 ADH=app/src/main/cpp/AndroidDeviceDetection.h
 NLB=app/src/main/cpp/native-lib.cpp
+MCAB=app/src/main/java/com/izzy2lost/psx2/MainActivity.java
 HUD=app/src/main/cpp/pcsx2/ImGui/ImGuiOverlays.cpp
 MVO=app/src/main/cpp/pcsx2/arm64/microVU-arm64.cpp
 CML=app/src/main/cpp/pcsx2/CMakeLists.txt
@@ -73,7 +74,7 @@ TEST=tools/arneses/h15-src/dev_test.cpp
 BASE=tools/arneses/baseline.sh
 box=/tmp/h15mut
 
-for f in "$SRC" "$ADD" "$ADH" "$NLB" "$HUD" "$MVO" "$CML" "$JAV" "$TEST" "$BASE"; do
+for f in "$SRC" "$ADD" "$ADH" "$NLB" "$MCAB" "$HUD" "$MVO" "$CML" "$JAV" "$TEST" "$BASE"; do
   [ -f "$f" ] || { echo "mutacion h15: no existe $f (ruta relativa al repo)"; exit 1; }
 done
 command -v g++ >/dev/null 2>&1 || { echo "mutacion h15: hace falta g++ en el host"; exit 1; }
@@ -435,6 +436,25 @@ cuenta() { # <nombre> <archivo> <cadena> <n> <por que importa>
   fi
 }
 
+cuenta_codigo() { # <nombre> <archivo> <subcadena> <n> <por que>  (cuenta SIN comentarios)
+  total=$((total+1))
+  local n
+  n=$(python3 -c "
+import re,sys
+s=open('$2').read()
+s=re.sub(r'/\*.*?\*/',' ',s,flags=re.S)
+s=re.sub(r'//[^\n]*',' ',s)
+print(s.count('$3'))
+")
+  if [ "$n" = "$4" ]; then
+    echo "ANCLA $1: $n apariciones en codigo, exactamente las esperadas"
+    anchors=$((anchors+1))
+  else
+    echo "ANCLA $1: $n apariciones en codigo (esperadas $4) => $5"
+    anclas_fallan=$((anclas_fallan+1))
+  fi
+}
+
 # 1-2: el recolector lee cpuinfo_max_freq y NUNCA el campo del arbol. Este es el punto
 # exacto donde 0.6.37 podia haberse equivocado sin enterarse: en linux/init.c el literal
 # del cluster no inicializa .frequency, asi que fiarse de cpuinfo_cluster::frequency da 0
@@ -493,6 +513,37 @@ ancla f17-la-linea-de-midr-crudos "$ADD" 'Cenit equipo: midr %s' \
   'sin los MIDR crudos, un clase=desconocida no se puede atribuir a un part'
 ancla f18-denominadores-de-clusters "$ADD" 'Cenit equipo: clusters usados=%u/%u impresos=%u recortado=%s' \
   'el recorte de clusters vuelve a ser silencioso'
+
+# 24: "una sola fuente" (0.6.38 paso 2). Cada linea de datos debe formatearse en
+# UN solo lugar — FormatDeviceMeasureLines — porque esa cadena la consumen ahora
+# DOS destinos: el registro (PrintDeviceMeasure) y la cabecera del reporte (native
+# getDeviceMeasureLines). Si alguien re-inlinea una segunda copia de cualquiera de
+# las cuatro dentro de PrintDeviceMeasure, el conteo sube a 2 y esto cae: las dos
+# copias podrian decir cosas distintas del mismo telefono, que es justo el defecto
+# que el paso 2 vino a cerrar (la linea `midr` no llegaba al reporte porque solo
+# vivia en la ventana del log que rota). Se cuenta SIN comentarios para que una
+# prosa que nombre el literal no infle el numero — la trampa contraria ya se pago
+# en 0.6.36 con un ancla que casaba subcadenas.
+cuenta_codigo f24-perfil-en-un-solo-lugar "$ADD" 'Cenit equipo: perfil=' 1 \
+  'hay dos copias del formateo de perfil: registro y reporte pueden divergir'
+cuenta_codigo f24b-midr-en-un-solo-lugar "$ADD" 'Cenit equipo: midr ' 1 \
+  'hay dos copias de la linea midr: la que se perdio en 0.6.37 volveria a poder decir otra cosa'
+# El recolector imprime DOS lineas propias con el prefijo (cpuinfo fallo, TECHO de
+# clusters) mas las cuatro de datos mas la INCOHERENCIA: siete en total, y ese
+# numero es el que fija que no aparecio una octava copia suelta.
+cuenta_codigo f24c-total-de-lineas-de-equipo "$ADD" 'Cenit equipo:' 7 \
+  'el numero de lineas "Cenit equipo:" del recolector cambio sin que se dijera por que'
+# Y del otro lado del puente: Java NO puede reimprimir el texto (eso seria una
+# tercera copia, en otro lenguaje). Solo reenvia lo que el nativo devolvio.
+ancla f24d-java-reenvia-no-reformatea "$MCAB" 'sb.append(measureLines);' \
+  'la cabecera dejo de reenviar el texto del nucleo (volveria a armarlo a mano en Java)'
+# El patron NO ancla la comilla al literal: la primera version de esta ancla
+# buscaba '"Cenit equipo: perfil' y NO cacé un sabotaje que escribia
+# sb.append("  Cenit equipo: perfil=manual\n") — los dos espacios dentro del
+# string la volvian ciega. La propiedad es "Java no contiene ese literal en
+# ninguna forma", así que el patron tampoco debe tener forma.
+ancla_absente f24e-java-no-inventa-lineas-de-equipo "$MCAB" 'Cenit equipo: perfil' \
+  'Java volvio a formatear las lineas de equipo: dos lenguajes describiendo la misma medida'
 
 # 19: el HUD. Con los centinelas -reloj/-ram escritos: el 0 de un campo sin medir nunca
 # tiene que verse como un dato del telefono.
