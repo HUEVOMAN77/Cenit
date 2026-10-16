@@ -614,45 +614,79 @@ namespace AndroidDeviceDetection
 		return WantsOptimalPacing(GetMeasured().r);
 	}
 
-	void PrintDeviceMeasure()
+	std::string FormatDeviceMeasureLines()
 	{
 		const DeviceMeasure& d = GetCachedDeviceMeasure();
+		char line[1200];
+		std::string out;
 
-		// Dos lineas con los DENOMINADORES: que se midio, que no, y si la razon es
-		// coherente con los datos. `sin-medir=N/4` es la parte que hace que un
-		// "perfil=baja" se pueda leer como opinion sobre el hardware o como limitacion del
-		// lector, que es la diferencia entre un dato y una excusa. Sale en la misma linea
-		// el nombre de la clase y el flag, porque "desconocida" sin el flag se lee igual
-		// cuando el kernel no reporto el MIDR y cuando el nucleo existe pero no esta en la
-		// tabla — y esas dos cosas se arreglan en sitios distintos.
-		Console.WriteLn("Cenit equipo: perfil=%s razon=%s | nucleos=%s(%u) grandes=%u/%u clusters=%u | clase=%s(%s)",
+		// Cuatro lineas, UNA sola fuente de texto. Cada snprintf usa un buffer de
+		// 1200 que cubre con holgura la mas larga (la de midr: "Cenit equipo: midr "
+		// + clusters_dump, y clusters_dump esta topado a kMaxClusters*64 = 1024). Si
+		// alguna vez el dump creciera, snprintf trunca y la linea pierde el final —
+		// por eso el tamano se eligio contra el techo del dump, no al tanteo.
+		std::snprintf(line, sizeof(line),
+			"Cenit equipo: perfil=%s razon=%s | nucleos=%s(%u) grandes=%u/%u clusters=%u | clase=%s(%s)",
 			d.tier_name.c_str(), d.reason.c_str(),
 			YesNo(d.cores_measured), d.total_cores,
 			d.big_cores, d.total_cores, d.clusters,
 			YesNo(d.class_measured), d.big_class_name.c_str());
-		Console.WriteLn("Cenit equipo: reloj=%s(%llu kHz) ram=%s(%llu MB) disponible=%llu MB sin-medir=%u/4 coherente=%s",
+		out += line;
+		out += '\n';
+
+		std::snprintf(line, sizeof(line),
+			"Cenit equipo: reloj=%s(%llu kHz) ram=%s(%llu MB) disponible=%llu MB sin-medir=%u/4 coherente=%s",
 			YesNo(d.freq_measured), d.big_freq_khz,
 			YesNo(d.ram_measured), d.total_ram_mb,
 			d.avail_ram_mb, d.missing_fields, YesNo(d.coherent));
+		out += line;
+		out += '\n';
+
+		std::snprintf(line, sizeof(line),
+			"Cenit equipo: clusters usados=%u/%u impresos=%u recortado=%s",
+			static_cast<unsigned>(d.clusters), d.clusters_real, d.clusters_printed,
+			YesNo(d.clusters_dump_truncated));
+		out += line;
+		out += '\n';
+
+		std::snprintf(line, sizeof(line), "Cenit equipo: midr %s", d.clusters_dump.c_str());
+		out += line;
+		out += '\n';
+		return out;
+	}
+
+	void PrintDeviceMeasure()
+	{
+		const DeviceMeasure& d = GetCachedDeviceMeasure();
+
+		// Las cuatro lineas de datos salen de FormatDeviceMeasureLines, la MISMA
+		// funcion que consume el reporte del boton "Enviar registro" (native-lib).
+		// Se parten por \n y se escribe cada renglon con su propio Console.WriteLn
+		// para que el registro conserve el timestamp por linea de siempre: el texto
+		// es identico al que veia 0.6.37, lo unico que cambia es que ahora hay una
+		// sola copia del formateo en vez de cuatro llamadas sueltas.
+		const std::string lines = FormatDeviceMeasureLines();
+		std::string::size_type start = 0;
+		while (start < lines.size())
+		{
+			const std::string::size_type nl = lines.find('\n', start);
+			const std::string::size_type end = (nl == std::string::npos) ? lines.size() : nl;
+			if (end > start)
+				Console.WriteLn("%s", lines.substr(start, end - start).c_str());
+			if (nl == std::string::npos)
+				break;
+			start = nl + 1;
+		}
 
 		if (!d.coherent)
 		{
 			// Ruido, no un valor: si la ley y los datos se contradicen, el perfil que se
 			// esta aplicando no se puede explicar y hay que arreglar el recolector.
+			// Unica linea que NO forma parte de FormatDeviceMeasureLines: es un grito
+			// para el registro, no un hecho medido para el reporte.
 			Console.Error("Cenit equipo: INCOHERENCIA entre la razon y los datos medidos "
 				"— el perfil aplicado no se puede justificar, revisar el recolector");
 		}
-
-		// La linea de los MIDR crudos. Va al final porque es la que se lee cuando las
-		// banderas de arriba dicen NO: "clase=NO(desconocida)" sin numeros es una
-		// limitacion del lector sin nombre, y con ellos es una fila concreta de la tabla
-		// de CenitDeviceClass.h que falta. Los tres denominadores van separados porque son
-		// tres recortes distintos: cpuinfo dijo `reales`, de esos se agregaron `usados`
-		// (techo kMaxClusters) y el buffer de texto pudo escribir `impresos`.
-		Console.WriteLn("Cenit equipo: clusters usados=%u/%u impresos=%u recortado=%s",
-			static_cast<unsigned>(d.clusters), d.clusters_real, d.clusters_printed,
-			YesNo(d.clusters_dump_truncated));
-		Console.WriteLn("Cenit equipo: midr %s", d.clusters_dump.c_str());
 	}
 }
 
