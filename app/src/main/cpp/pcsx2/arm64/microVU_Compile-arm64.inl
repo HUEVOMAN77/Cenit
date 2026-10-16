@@ -1079,9 +1079,15 @@ void* mVUcompile(microVU& mVU, u32 startPC, uptr pState)
 				bool reenter = false;
 				for (u32 si = 0; !reenter && si < mVU.sbOpCount; si++)
 					reenter = (mVU.sbOpSlot[si] == jTarget / 8);
-				if (clean && !(jTgtUp & _Ebit_) && !reenter &&
-						mVUSuperblock::SbAskJunction(sbFrame, jTarget, true,
-							mVUcount, mVUcycles) >= 0)
+				// Cenit 0.6.38 — la conjuncion que estaba escrita aqui (clean &&
+				// !(jTgtUp & _Ebit_) && !reenter && SbAskJunction(...)) vive ahora en
+				// mVUSbElig::DecidePre, detras de SbAskJunctionPre. Mismo orden, mismo
+				// veredicto: lo unico que cambia es que las tres salidas negativas
+				// tienen casilla propia, y que el paso del E-bit y la revisita se
+				// siguen calculando arriba igual que antes (sin efectos secundarios,
+				// son lecturas), así que no se movio ni un termino de la ley.
+				if (mVUSuperblock::SbAskJunctionPre(sbFrame, jTarget, clean,
+						(jTgtUp & _Ebit_) != 0, reenter, mVUcount, mVUcycles) >= 0)
 				{
 					fused = true;
 					// El corte normal terminaria AQUI; la continue-analysis debe
