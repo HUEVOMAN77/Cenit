@@ -98,13 +98,13 @@ namespace mVUSbElig
 	// Un rechace es una causa terminal negativa. kPolicyPass no es terminal (es
 	// "todavia no sé") y kArmed no es rechace: las dos se excluyen para que
 	// `intentos == aceptados + Σ rechaces` no se cueza dos veces.
-	bool IsArmRejection(ArmCause c)
+	inline bool IsArmRejection(ArmCause c)
 	{
 		return c != ArmCause::kPolicyPass && c != ArmCause::kArmed;
 	}
 
 	// Un RESULTADO terminal (lo que consume un intento): todo menos kPolicyPass.
-	bool IsArmOutcome(ArmCause c)
+	inline bool IsArmOutcome(ArmCause c)
 	{
 		return c != ArmCause::kPolicyPass;
 	}
@@ -128,7 +128,7 @@ namespace mVUSbElig
 		uint16_t cycles_b;
 	};
 
-	ArmCause DecideArm(const ArmInput& in, const Policy& p)
+	inline ArmCause DecideArm(const ArmInput& in, const Policy& p)
 	{
 		// Orden literal del codigo que reemplaza (MvuSuperblock-arm64.cpp
 		// SbArmCompile 0.6.36): identidad, estructura, hotness, presupuesto.
@@ -182,7 +182,7 @@ namespace mVUSbElig
 
 	static const uint32_t kJunctionCauseCount = static_cast<uint32_t>(JunctionCause::kCount);
 
-	bool IsJunctionRejection(JunctionCause c)
+	inline bool IsJunctionRejection(JunctionCause c)
 	{
 		return c != JunctionCause::kJoined;
 	}
@@ -200,7 +200,7 @@ namespace mVUSbElig
 		bool target_is_self;
 	};
 
-	JunctionCause DecideJunction(const JunctionInput& in, const Policy& p)
+	inline JunctionCause DecideJunction(const JunctionInput& in, const Policy& p)
 	{
 		if (!in.slot_in_range)
 			return JunctionCause::kBadSlot;
@@ -242,7 +242,7 @@ namespace mVUSbElig
 
 	static const uint32_t kCloseCauseCount = static_cast<uint32_t>(CloseCause::kCount);
 
-	bool IsCloseRejection(CloseCause c)
+	inline bool IsCloseRejection(CloseCause c)
 	{
 		return c != CloseCause::kAdopted;
 	}
@@ -258,7 +258,7 @@ namespace mVUSbElig
 		uint32_t cycles;
 	};
 
-	CloseCause DecideClose(const CloseInput& in, const Policy& p)
+	inline CloseCause DecideClose(const CloseInput& in, const Policy& p)
 	{
 		if (!in.slot_in_range)
 			return CloseCause::kBadSlot;
@@ -305,7 +305,7 @@ namespace mVUSbElig
 
 	static const uint32_t kBucketCount = static_cast<uint32_t>(Bucket::kCount);
 
-	Bucket ArmBucketOf(ArmCause c)
+	inline Bucket ArmBucketOf(ArmCause c)
 	{
 		switch (c)
 		{
@@ -334,7 +334,7 @@ namespace mVUSbElig
 		return Bucket::kCold;
 	}
 
-	Bucket JunctionBucketOf(JunctionCause c)
+	inline Bucket JunctionBucketOf(JunctionCause c)
 	{
 		switch (c)
 		{
@@ -356,7 +356,7 @@ namespace mVUSbElig
 		return Bucket::kStruct;
 	}
 
-	Bucket CloseBucketOf(CloseCause c)
+	inline Bucket CloseBucketOf(CloseCause c)
 	{
 		switch (c)
 		{
@@ -377,7 +377,7 @@ namespace mVUSbElig
 		return Bucket::kStruct;
 	}
 
-	const char* ArmCauseName(ArmCause c)
+	inline const char* ArmCauseName(ArmCause c)
 	{
 		switch (c)
 		{
@@ -398,7 +398,7 @@ namespace mVUSbElig
 		return "?";
 	}
 
-	const char* JunctionCauseName(JunctionCause c)
+	inline const char* JunctionCauseName(JunctionCause c)
 	{
 		switch (c)
 		{
@@ -416,7 +416,7 @@ namespace mVUSbElig
 		return "?";
 	}
 
-	const char* CloseCauseName(CloseCause c)
+	inline const char* CloseCauseName(CloseCause c)
 	{
 		switch (c)
 		{
@@ -433,7 +433,7 @@ namespace mVUSbElig
 		return "?";
 	}
 
-	const char* BucketName(Bucket b)
+	inline const char* BucketName(Bucket b)
 	{
 		switch (b)
 		{
