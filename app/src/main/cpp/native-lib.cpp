@@ -157,11 +157,18 @@ static void ApplyHardwarePerformanceProfile()
 #ifdef __ANDROID__
     const AndroidDeviceDetection::GPUVendor vendor = AndroidDeviceDetection::DetectGPUVendor();
     const bool snapdragon = (vendor == AndroidDeviceDetection::GPUVendor::Qualcomm);
-    const bool high_end = snapdragon && AndroidDeviceDetection::IsHighEndSnapdragon();
 
-    Console.WriteLn("Perf profile: vendor=%d snapdragon=%d high_end=%d soc=%u",
-        static_cast<int>(vendor), static_cast<int>(snapdragon), static_cast<int>(high_end),
-        snapdragon ? AndroidDeviceDetection::GetQualcommSocModel() : 0u);
+    // Cenit 0.6.37: IsHighEndSnapdragon() SALE de esta funcion y del proyecto. Era el
+    // nombre con el que la marca decidia la cola de cuadro antes de mirar un numero del
+    // chip, y dejarla impresa aqui invitaba a leer el perfil de nuevo por apellido. El
+    // numero de modelo sigue en el log como dato (soc=%u), y lo que decide pasa a ser el
+    // perfil medido con su razon, que es lo unico que despues se puede discutir.
+    const AndroidDeviceDetection::DeviceMeasure& dm =
+        AndroidDeviceDetection::GetCachedDeviceMeasure();
+    Console.WriteLn("Perf profile: vendor=%d soc=%u | perfil medido=%s razon=%s",
+        static_cast<int>(vendor),
+        snapdragon ? AndroidDeviceDetection::GetQualcommSocModel() : 0u,
+        dm.tier_name.c_str(), dm.reason.c_str());
 
     // Speedhacks: these are the recommendations from the official compatibility
     // database for mid-tier ARM devices and they are what carries 30/60 fps on
@@ -232,50 +239,72 @@ static void ApplyHardwarePerformanceProfile()
     // ajusta en gama baja es el NIVEL: Medium (valor por defecto) -> Low (0),
     // el nivel más rápido de zstd. Guardar una estado no debe costar cuadros;
     // cambia tamaño, no fiabilidad.
-    if (AndroidDeviceDetection::GetDeviceTier() == 0)
-    {
+    //
+    // Cenit 0.6.37: la condición vive en CenitDeviceClass.h (las cuatro proyecciones
+    // Wants*) y este sitio solo aplica. Antes era UN `if (GetDeviceTier() == 0) ... else
+    // ...`, y con el tier de 0.6.36 ese `0` significaba "no está en la lista de nombres"
+    // — nunca "es de entrada", porque TODO Qualcomm salía >= 1 por apellido. El efecto
+    // sobre un Snapdragon 6/7 de entrada era exactamente el invertido: sin las
+    // protecciones de gama baja y CON la cola de cuadro optima, que es la que su propio
+    // comentario dice que no va en gama baja. Ahora cada escritura pregunta por su
+    // cuenta, sin else: son tres decisiones con motivos distintos, y atarlas a una sola
+    // rama era parte del problema.
+    if (AndroidDeviceDetection::DeviceWantsFastSavestate())
         s_settings_interface.SetIntValue("EmuCore", "SavestateCompressionRatio", 0);
 
-        // §2.2: en gama baja el ancho de banda es el recurso más escaso y el
-        // readback síncrono del MTGS es lo que más traba el pipeline. 3 =
-        // Unsynchronized: la lectura sigue HACIéndose (GSReadLocalMemoryUnsync,
-        // agua/reflejos siguen teniendo datos reales con ventana de carrera)
-        // pero el EE no espera al GPU. El 4 (Disabled) fue descartado porque en
-        // MTGS.cpp:289 devuelve MEMSET de ceros: rompe efectos enteros.
-        // Se escribe en la capa BASE, así que el orden del núcleo sigue siendo:
-        // base -> GameDB -> gamesettings/<serial>.ini. Un juego con reflejos
-        // problemáticos se excepciona desde GameIndex.yaml con HWDownloadMode
-        // (la infraestructura por-título ya existe) o desde el INI del propio
-        // juego, sin tocar el perfil. El aviso de arranque de VMManager.cpp:3659
-        // ("may break rendering in some games") sale a propósito: es honesto.
+    // §2.2: en gama baja el ancho de banda es el recurso más escaso y el
+    // readback síncrono del MTGS es lo que más traba el pipeline. 3 =
+    // Unsynchronized: la lectura sigue HACIéndose (GSReadLocalMemoryUnsync,
+    // agua/reflejos siguen teniendo datos reales con ventana de carrera)
+    // pero el EE no espera al GPU. El 4 (Disabled) fue descartado porque en
+    // MTGS.cpp:289 devuelve MEMSET de ceros: rompe efectos enteros.
+    // Se escribe en la capa BASE, así que el orden del núcleo sigue siendo:
+    // base -> GameDB -> gamesettings/<serial>.ini. Un juego con reflejos
+    // problemáticos se excepciona desde GameIndex.yaml con HWDownloadMode
+    // (la infraestructura por-título ya existe) o desde el INI del propio
+    // juego, sin tocar el perfil. El aviso de arranque de VMManager.cpp:3659
+    // ("may break rendering in some games") sale a propósito: es honesto.
+    if (AndroidDeviceDetection::DeviceWantsUnsyncedReadback())
         s_settings_interface.SetIntValue("EmuCore/GS", "HWDownloadMode", 3);
 
-        // BLOQUE 3 (0.6.6): pre-carga de texturas. "Full" (el default del core)
-        // sube a la GPU TODA textura que el juego toca, incluyendo las que nunca
-        // se dibujan en pantalla — en un teléfono con 4-6 GB eso son cientos de MB
-        // de VRAM compartida y micro-cortes cuando el cacheador purga. "Partial"
-        // (1) solo precarga las que van a salir: menos RAM, menos stutter en el
-        // primer contacto con una zona nueva. La clave real es "texture_preloading"
-        // en EmuCore/GS (Pcsx2Config.cpp:1086), y GS.cpp:958 recarga la caché al
-        // cambiarla, así que se puede tocar en caliente. El GameDB sigue mandando:
-        // los juegos que exigen Full lo fijan en su capa, esta escritura es solo
-        // el valor base.
+    // BLOQUE 3 (0.6.6): pre-carga de texturas. "Full" (el default del core)
+    // sube a la GPU TODA textura que el juego toca, incluyendo las que nunca
+    // se dibujan en pantalla — en un teléfono con 4-6 GB eso son cientos de MB
+    // de VRAM compartida y micro-cortes cuando el cacheador purga. "Partial"
+    // (1) solo precarga las que van a salir: menos RAM, menos stutter en el
+    // primer contacto con una zona nueva. La clave real es "texture_preloading"
+    // en EmuCore/GS (Pcsx2Config.cpp:1086), y GS.cpp:958 recarga la caché al
+    // cambiarla, así que se puede tocar en caliente. El GameDB sigue mandando:
+    // los juegos que exigen Full lo fijan en su capa, esta escritura es solo
+    // el valor base.
+    if (AndroidDeviceDetection::DeviceWantsPartialTexturePreload())
         s_settings_interface.SetIntValue("EmuCore/GS", "texture_preloading", 1);
-    }
-    else
-    {
-        // BLOQUE 2 (0.6.6): ritmo de cuadro. VsyncQueueSize=0 (lo que FullscreenUI
-        // llama "Optimal Frame Pacing") hace que el EE espere a que el GS termine
-        // CADA cuadro (MTGS.cpp:274) en vez de ir dos cuadros por delante. Menos
-        // input lag y el ritmo irregular desaparece cuando el teléfono DE VERDAD
-        // sobra para el juego. Justo por eso solo se fuerza en tier >= 1: en gama
-        // baja quitar los dos cuadros de amortiguación convierte cualquier pico
-        // del GPU en el EE durmiendo, y la velocidad de emulación cae. Con cola=2
-        // (el default del core) los picos se absorben. No hay riesgo de cuelgue:
-        // el GS publica el semáforo al vaciar el anillo incluso sin trabajo
-        // (MTGS.cpp:598).
+
+    // BLOQUE 2 (0.6.6): ritmo de cuadro. VsyncQueueSize=0 (lo que FullscreenUI
+    // llama "Optimal Frame Pacing") hace que el EE espere a que el GS termine
+    // CADA cuadro (MTGS.cpp:274) en vez de ir dos cuadros por delante. Menos
+    // input lag y el ritmo irregular desaparece cuando el teléfono DE VERDAD
+    // sobra para el juego. Justo por eso solo se fuerza en tier >= 1: en gama
+    // baja quitar los dos cuadros de amortiguación convierte cualquier pico
+    // del GPU en el EE durmiendo, y la velocidad de emulación cae. Con cola=2
+    // (el default del core) los picos se absorben. No hay riesgo de cuelgue:
+    // el GS publica el semáforo al vaciar el anillo incluso sin trabajo
+    // (MTGS.cpp:598).
+    //
+    // Cenit 0.6.37: `tier >= 1` era el defecto. Con el tier de 0.6.36, TODO Qualcomm
+    // devolvía >= 1 sin mirar el chip, así que un Snapdragon 6/7 de entrada perdía los
+    // dos cuadros de amortiguación — que es literalmente el cuadro que el párrafo de
+    // arriba describe como malo, y el log de referencia lo muestra con la GPU al 95 % y
+    // el regidor dictando GPU_BOUND. Desde ahora la cola se la gana quien cumple clase,
+    // par de nucleos, reloj y RAM (WantsOptimalPacing == tier alto medido). El teléfono
+    // de referencia (SM7325: 4 nucleos de clase rendimiento a 2.4 GHz, 7349 MB) sigue
+    // cumpliéndolo por medida, no por apellido.
+    //
+    // Nota de honestidad: esto NO es una mejora medida. La partida de referencia corrió
+    // con cola=0 y no corrió con cola=2, así que no puedo decir cuántos cuadros se
+    // ganaran en un 6/7; puedo decir que la decisión ya no la toma el nombre.
+    if (AndroidDeviceDetection::DeviceWantsOptimalPacing())
         s_settings_interface.SetIntValue("EmuCore/GS", "VsyncQueueSize", 0);
-    }
 
     // Renderer/upscale are NOT set here: MainActivity pushes the user's saved
     // values after initialize() (applyGlobalSettingsBatch), so a native write
