@@ -108,6 +108,25 @@ namespace AndroidDeviceDetection
 	// salio ese perfil.
 	void PrintDeviceMeasure();
 
+	// Cenit 0.6.38 paso 2 — las CUATRO lineas de datos ya formateadas, en una sola
+	// cadena terminada en \n, como texto plano. Es la MISMA fuente que usa
+	// PrintDeviceMeasure: existe para que el registro y el reporte no puedan decir
+	// cosas distintas del mismo telefono.
+	//
+	// Por que hace falta: PrintDeviceMeasure se llama una sola vez, al arrancar, y
+	// el reporte del boton "Enviar registro" lleva solo las ULTIMAS lineas del log
+	// (el logcat y emulog rotan). En el reporte real de 0.6.37 las cuatro lineas
+	// "Cenit equipo:" NO aparecieron — se fueron arriba del corte — y con ellas se
+	// perdio justo la linea `midr`, que es la unica forma de atribuir un
+	// clase=desconocida a una fila concreta de CenitDeviceClass.h que falta. Es el
+	// mismo defecto de denominador que se corrigio en el superbloque: un dato que
+	// solo vive en la ventana que rota es un dato que no se puede pedir.
+	//
+	// Que NO incluye: la linea de INCOHERENCIA. Esa va por Console.Error al registro
+	// y se deja ahi adrede — el reporte lleva los HECHOS medidos, y un perfil
+	// incoherente ya se puede leer de las propias banderas sin-medir/coherente.
+	std::string FormatDeviceMeasureLines();
+
 	// Las cuatro proyecciones que antes estaban escritas como `GetDeviceTier() == 0` y
 	// `tier >= 1` sueltos en native-lib.cpp. Viven aqui, rebotadas sobre la ley del
 	// header, para que el sitio de aplicacion no vuelva a tener una copia de la
