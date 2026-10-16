@@ -57,7 +57,7 @@
 # no prueba que los datos que el motor pasa a DecideArm sean los vivos (eso lo mira
 # el propio cierre impreso: un DESAJUSTE lo canta); no toca rendimiento.
 #
-# Uso: bash tools/arneses/mutacion_h14.sh  (RC=0 solo si los VEINTIDOS mutantes de
+# Uso: bash tools/arneses/mutacion_h14.sh  (RC=0 solo si los VEINTISEIS mutantes de
 # fase 1 cayeron en la comprobacion nombrada — m22 en la pata de enlace de h10 — y
 # las anclas de fase 2 aparecieron).
 # Requiere g++ en el host.
@@ -77,13 +77,14 @@ cd "$root" || exit 1
 SRC=app/src/main/cpp/pcsx2/arm64/MvuSbEligibility.h
 SB=app/src/main/cpp/pcsx2/arm64/MvuSuperblock-arm64.cpp
 MVU=app/src/main/cpp/pcsx2/arm64/microVU-arm64.cpp
+CMP=app/src/main/cpp/pcsx2/arm64/microVU_Compile-arm64.inl
 CML=app/src/main/cpp/pcsx2/CMakeLists.txt
 H10=tools/arneses/h10-src/hdr_tu.cpp
 TEST=tools/arneses/h14-src/elig_test.cpp
 BASE=tools/arneses/baseline.sh
 box=/tmp/h14mut
 
-for f in "$SRC" "$SB" "$MVU" "$CML" "$H10" "$TEST" "$BASE"; do
+for f in "$SRC" "$SB" "$MVU" "$CMP" "$CML" "$H10" "$TEST" "$BASE"; do
   [ -f "$f" ] || { echo "mutacion h14: no existe $f (ruta relativa al repo)"; exit 1; }
 done
 command -v g++ >/dev/null 2>&1 || { echo "mutacion h14: hace falta g++ en el host"; exit 1; }
@@ -343,6 +344,55 @@ m m21 'kDesync deja de ser rechace' \
   '		return c != ArmCause::kPolicyPass && c != ArmCause::kArmed && c != ArmCause::kDesync;' \
   'paridad arm: el viejo rechazo y el nuevo aprueba'
 
+# --- mutantes m23..m26: la cadena 4 (0.6.38), la puerta previa -------------------
+#
+# Cada uno rompe una de las cuatro cosas que esta cadena afirma, y las cuatro se
+# leen del mismo numero del log de 0.6.37 que la pidio (`union=ok(0/0)` con
+# construidos=0): que el ORDEN es el del cortocircuito, que `pregunto` no es
+# rechace, que la ley coincide con la conjuncion que reemplaza, y que todo rechace
+# tiene cubo. Un mutante de esta familia que no cante es un ancla decorativa, que
+# es justo el defecto que 0.6.36 encontro en su propia ancla de tallado.
+m m23 'previa: se invierte el orden E-bit/revisita' \
+  '		if (in.target_ebit)
+			return PreCause::kTargetEbit;
+		if (in.target_reenter)
+			return PreCause::kReenter;' \
+  '		if (in.target_reenter)
+			return PreCause::kReenter;
+		if (in.target_ebit)
+			return PreCause::kTargetEbit;' \
+  'previa: E-bit manda sobre revisita'
+
+m m24 'previa: una rama sucia pasa igual (se cae el !)' \
+  '		if (!in.branch_clean)
+			return PreCause::kDirty;' \
+  '		if (in.branch_clean)
+			return PreCause::kDirty;' \
+  'previa: rama sucia sola'
+
+m m25 'previa: pregunto pasa a ser rechace' \
+  '		return c != PreCause::kAsked;' \
+  '		return true;' \
+  'previa: pregunto no es rechace'
+
+# Nota sobre como se eligio este mutante, porque el primero que escribi NO servia:
+# quitar el `case PreCause::kDirty:` no rompe nada — el default de PreBucketOf
+# devuelve kStruct, que es justo el valor que tenia, así que el arnes quedaba verde
+# con la ley saboteada. Un mutante que no cambia ningun valor observable es peor que
+# no tenerlo: da una cuenta de "26 mutantes" que no significa 26 propiedades. Se
+# cambio por mover el cubo a un valor DISTINTO, que es lo que el informe sumaria mal.
+m m26 'previa: rama-sucia cambia de cubo (estructura -> frio)' \
+  '			case PreCause::kDirty:
+			case PreCause::kTargetEbit:
+			case PreCause::kReenter:
+				return Bucket::kStruct;' \
+  '			case PreCause::kDirty:
+				return Bucket::kCold;
+			case PreCause::kTargetEbit:
+			case PreCause::kReenter:
+				return Bucket::kStruct;' \
+  'previa: rama-sucia -> estructura'
+
 # --- mutante m22: la familia ODR, que ningun arnes de UN solo TU puede ver -------
 #
 # Historia del rojo, porque el mutante sin esa historia es decoracion: el CI de
@@ -491,14 +541,20 @@ ancla f12-puerta-se-limpia "$SB" 's_arm_gate.Clear();' \
 ancla f13-cubo-del-despacho "$SB" 'cubo[static_cast<u32>(mVUSbElig::Bucket::kDispatch)] =
 					s.dispatch_budget.load(std::memory_order::relaxed);' \
   'el rechazo de despacho volvio a mezclarse con el presupuesto de forma'
-# 14: los cuatro cierres se imprimen con el veredicto (ok/DESAJUSTE), no se calculan
-# en silencio.
+# 14: los cierres se imprimen con el veredicto (ok/DESAJUSTE), no se calculan en
+# silencio. Con la cadena 4 son cinco en el archivo de informe: cuatro con el
+# literal viejos y una con el cruzado, que es el unico cierre que ata la puerta
+# previa con la cadena de union. Se cuentan los dos patrones por separado porque
+# un "5" a secas no diria cual de las dos formas se rompio.
 total=$((total+1))
-if [ "$(grep -cF '[cierre=%s]' "$SB")" = "4" ] && [ "$(grep -cF 'puerta=%s' "$SB")" = "1" ]; then
-  echo "ANCLA f14-cuatro-cierres-de-informe-mas-el-de-la-consola: presentes (4 + 1)"
+if [ "$(grep -cF '[cierre=%s]' "$SB")" = "4" ] && \
+   [ "$(grep -cF '[cierre=%s cruzado=%s' "$SB")" = "1" ] && \
+   [ "$(grep -cF 'puerta=%s' "$SB")" = "1" ] && \
+   [ "$(grep -cF 'cruzado=%s}' "$SB")" = "1" ]; then
+  echo "ANCLA f14-cierres-del-informe-mas-el-de-la-consola: presentes (4 + 1 con cruzado + consola)"
   anchors=$((anchors+1))
 else
-  echo "ANCLA f14-cuatro-cierres: NO => hay una cadena cuyo cierre se calcula sin imprimirse"
+  echo "ANCLA f14-cierres: NO => hay una cadena cuyo cierre se calcula sin imprimirse"
   anclas_fallan=$((anclas_fallan+1))
 fi
 # 15: el resumen del emulog lleva los tres numeros de cobertura: es lo unico que
@@ -542,13 +598,44 @@ ancla f22-DecideArm-inline "$SRC" '	inline ArmCause DecideArm(const ArmInput& in
   'DecideArm volvio a ser una funcion libre sin inline: dos TU la definen'
 total=$((total+1))
 ninl=$(grep -c '^	inline ' "$SRC")
-if [ "$ninl" = "14" ]; then
-  echo "ANCLA f23-cuenta-de-inline: presente (14 funciones libres inline, que son las 14 declaraciones de la ley)"
+if [ "$ninl" = "18" ]; then
+  echo "ANCLA f23-cuenta-de-inline: presente (18 funciones libres inline: las 14 de siempre mas las 4 de la cadena previa)"
   anchors=$((anchors+1))
 else
-  echo "ANCLA f23-cuenta-de-inline: NO => el header dice $ninl funciones inline y la ley tiene 14"
+  echo "ANCLA f23-cuenta-de-inline: NO => el header dice $ninl funciones inline y la ley tiene 18"
   anclas_fallan=$((anclas_fallan+1))
 fi
+
+# --- 24..28: la cadena 4 (0.6.38), el cable de la puerta previa ------------------
+#
+# Lo que fijan, y lo que no: son TEXTO. No prueban que el telefono entre por ahi
+# (eso lo dice el log con `previa=ok(n/n)` y `cruzado=`), ni que los tres hechos
+# que el compilador pasa sean los bien leidos (eso lo mira el CI al compilar y el
+# diferencial de h14 contra la conjuncion original). Fijan que la puerta sigue
+# siendo el UNICO camino a SbAskJunction, que es justo la propiedad que hace
+# util el cierre cruzado.
+ancla f24-llamada-por-la-puerta "$CMP" 'if (mVUSuperblock::SbAskJunctionPre(sbFrame, jTarget, clean,' \
+  'el compilador volvio a decidir la union a mano: la cadena 4 queda sin llamador y el log dira previa=ok(0/0) para siempre'
+# Ancla de AUSENCIA, y es la importante de las cinco: si alguien re-abierte un
+# SbAskJunction directo, `pregunto` deja de ser el denominador de `pedidos` y el
+# cierre cruzado pasa a mentir por omision — el mismo defecto que esta cadena vino
+# a cerrar, reproducido por el propio arreglo.
+total=$((total+1))
+directos=$(grep -c 'SbAskJunction(sbFrame' "$CMP")
+if [ "$directos" = "0" ]; then
+  echo "ANCLA f25-nadie-salta-la-puerta: presente (cero llamadas directas a SbAskJunction en el compilador)"
+  anchors=$((anchors+1))
+else
+  echo "ANCLA f25-nadie-salta-la-puerta: NO => $directos llamadas directas: el cierre cruzado mentiria por omision"
+  anclas_fallan=$((anclas_fallan+1))
+fi
+ancla f26-cuenta-previa "$SB" 'st.pre_cause[static_cast<u32>(pcause)].fetch_add(1, std::memory_order_relaxed);' \
+  'la puerta previa dejo de tallar su causa: Σ pre_cause ya no cierra contra pre_total'
+ancla f27-testigo-de-contrato "$SB" 'return SbAskJunction(slot, targetPC_bytes, true, regionOps, regionCycles);' \
+  'SbAskJunctionPre ya no pasa el testigo limpio: u:rama-sucia dejaria de ser una senal de un segundo camino'
+ancla f28-cero-por-tamano-previo "$SB" 'for (u32 k = 0; k < mVUSbElig::kPreCauseCount; k++)
+					s.pre_cause[k].store(0);' \
+  'el vuelco de la cadena 4 volvio a ser a mano: un informe arrastraria la sesion anterior'
 
 echo
 echo "Limitacion escrita de esta fase: las anclas son de TEXTO, no de compilacion."
@@ -557,9 +644,9 @@ echo "compilacion variante conserve lpState — eso lo dice el CI al compilar y 
 echo "log al imprimir 'puerta{lento=.. stub=.. dejo=..}'. Lo que fijan es que el"
 echo "cable sigue teniendo la forma que Harness14 pinó; si cambia, esto ruida."
 echo
-echo "Total: $total casos (22 mutantes + $anchors anclas), no detectados: $undetected, anclas rotas: $anclas_fallan"
+echo "Total: $total casos (26 mutantes + $anchors anclas), no detectados: $undetected, anclas rotas: $anclas_fallan"
 if [ "$undetected" -eq 0 ] && [ "$anclas_fallan" -eq 0 ]; then
-  echo "RC=0: los veintidos mutantes cayeron en su comprobacion nombrada y las anclas del cable estan."
+  echo "RC=0: los veintiseis mutantes cayeron en su comprobacion nombrada y las anclas del cable estan."
   exit 0
 fi
 exit 1
