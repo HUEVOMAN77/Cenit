@@ -281,6 +281,97 @@ namespace mVUSbElig
 	}
 
 	// ------------------------------------------------------------------
+	// Cadena 4 — la PUERTA PREVIA: lo que el compilador juzga ANTES de que el
+	// motor sea preguntado (microVU_Compile-arm64.inl, corte por rama en modo
+	// variante).
+	//
+	// Por que existe esta cadena, dicha con el numero que la pidio. El log de un
+	// HUAWEI NCO-LX3 con God of War, 205 s, motor encendido (0.6.37):
+	//   vuSB: intentos=46379 construidos=0 uniones=0 ...
+	//   vuSB: cierre{arm=ok(46379/46379) union=ok(0/0) cierre=ok(4/4) puerta=ok}
+	//         a:quemado=22758 a:sin-arista=1386 a:bajo-piso=10078
+	//         a:ratio-fuera=12153 a:armado=4 c:cero-uniones=4
+	// Tres de las cuatro cadenas cierran y aun asi el log NO explica el
+	// construidos=0. La cadena 2 dice `union=ok(0/0)`: cero pedidos, cero causas.
+	// Un cero entre dos ceros es un cierre TRUE y una medida FALSE a la vez, y es
+	// la tercera vez en este proyecto que un denominador ausente se lee como
+	// respuesta: `lookups` en 0.6.35, `con-buffer` en 0.6.36, esto ahora.
+	//
+	// Que deja sin decir el (0/0): el motor se entera de una union solo cuando
+	// alguien llama a SbAskJunction. Antes de esa llamada, el compilador aplica
+	// TRES filtros locales en el corte por rama (rama sucia, E-bit en el objetivo,
+	// revisita del objetivo sobre un slot ya analizado). Con los tres cortan, la
+	// cadena 2 nunca se entera, y `pedidos=0` es compatible con dos situaciones
+	// que piden arreglos opuestos:
+	//   (a) el microcodigo de VU1 de este juego no tiene NINGUN corte de rama
+	//       limpia dentro de un area variante -> no hay material fusionable, y
+	//       tocar los filtros no sirve de nada;
+	//   (b) si lo hay, pero los tres filtros locales lo estan matando -> hay un
+	//       defecto de politica de fusion, y es corregible.
+	// Sin esta cadena, (a) y (b) dan el mismo log. Con ella se leen aparte.
+	//
+	// Que NO hace esta cadena: no se lleva la conjuncion `clean` del compilador.
+	// `clean` son diez terminos que leen el par rama/delay y el estado del kick, y
+	// moverlos a un header puro seria reescribir el nucleo semantico del corte en
+	// un ciclo que es de MEDICION. Aqui entra solo el RESULTADO ya calculado de
+	// tres comprobaciones, y la LEY de cual de las tres corto vive en este header
+	// para que el arnes la fuerce en host. La conjuncion sigue donde estaba; lo
+	// unico nuevo es que su veredicto se cuenta.
+	// ------------------------------------------------------------------
+	enum class PreCause : uint8_t
+	{
+		kDirty = 0,     // la rama o su delay slot no estan limpia (conjuncion clean)
+		kTargetEbit,    // el primer par del objetivo lleva E-bit: fin de bloque real
+		kReenter,       // el objetivo cae sobre un slot ya analizado en esta area
+		kAsked,         // paso los tres: se llamo a SbAskJunction
+		kCount
+	};
+
+	static const uint32_t kPreCauseCount = static_cast<uint32_t>(PreCause::kCount);
+
+	// kAsked no es rechace: es exactamente el evento que la cadena 2 cuenta como
+	// pedido. De ahi sale el unico cierre cruzado de este header (ver el informe).
+	inline bool IsPreRejection(PreCause c)
+	{
+		return c != PreCause::kAsked;
+	}
+
+	struct PreInput
+	{
+		bool branch_clean;  // resultado de la conjuncion `clean` del compilador
+		bool target_ebit;   // E-bit en el primer par del objetivo
+		bool target_reenter;// objetivo sobre un slot ya analizado en esta area
+	};
+
+	// Orden LITERAL del `if (clean && !(jTgtUp & _Ebit_) && !reenter && SbAsk...)`
+	// que reemplaza en la cuenta: es evaluacion en cortocircuito, así que el
+	// primer filtro que cae es el unico que se puede atribuir. Cambiar el orden
+	// cambiaria que se cuenta primero — igual que en las otras tres cadenas.
+	inline PreCause DecidePre(const PreInput& in)
+	{
+		if (!in.branch_clean)
+			return PreCause::kDirty;
+		if (in.target_ebit)
+			return PreCause::kTargetEbit;
+		if (in.target_reenter)
+			return PreCause::kReenter;
+		return PreCause::kAsked;
+	}
+
+	inline const char* PreCauseName(PreCause c)
+	{
+		switch (c)
+		{
+			case PreCause::kDirty: return "rama-sucia-previa";
+			case PreCause::kTargetEbit: return "objetivo-con-ebit";
+			case PreCause::kReenter: return "objetivo-revisita";
+			case PreCause::kAsked: return "pregunto";
+			case PreCause::kCount: break;
+		}
+		return "?";
+	}
+
+	// ------------------------------------------------------------------
 	// Nombre y cubo de cada causa. Una sola tabla: el informe imprime estas
 	// palabras y el clasificador de cubos deriva de la misma lista, así el
 	// numero que lee un usuario y el que agrega el informe no pueden divergir
@@ -374,6 +465,23 @@ namespace mVUSbElig
 			case CloseCause::kCount:
 				break;
 		}
+		return Bucket::kStruct;
+	}
+
+	inline Bucket PreBucketOf(PreCause c)
+	{
+		switch (c)
+		{
+			case PreCause::kDirty:
+			case PreCause::kTargetEbit:
+			case PreCause::kReenter:
+				return Bucket::kStruct;
+			case PreCause::kAsked:
+			case PreCause::kCount:
+				break;
+		}
+		// kAsked no es rechace y por eso no tiene cubo propio: es el evento que la
+		// cadena 2 cuenta como pedido, y darle un cubo lo contaria dos veces.
 		return Bucket::kStruct;
 	}
 
