@@ -339,6 +339,36 @@ namespace mVUSuperblock
 	int SbAskJunction(int slot, u32 targetPC_bytes, bool branchStructClean,
 		u32 regionOps, u32 regionCycles);
 
+	// Cenit 0.6.38 — LA UNICA puerta por la que el compilador pide una union.
+	//
+	// Existe porque entre el corte por rama del analisis variante y SbAskJunction
+	// habia TRES filtros locales (rama sucia, E-bit en el objetivo, revisita del
+	// objetivo) que decidian sin que el motor se enterara. Su resultado era
+	// invisible: el log de 0.6.37 dice `union=ok(0/0)`, y ese cero no distingue
+	// "el juego no tiene material fusionable" de "mis filtros lo estan matando" —
+	// dos diagnostico opuestos con el mismo numero. Ver el encabezado de la cadena
+	// 4 en MvuSbEligibility.h.
+	//
+	// Que hace, en este orden y ninguno otro: DecidePre con los tres resultados ya
+	// calculados por el llamador, tally de la causa, y SOLO si la ley dijo
+	// `pregunto` llama a SbAskJunction. Devuelve el indice de union o -1, con el
+	// mismo contrato que SbAskJunction: el llamador mantiene el corte normal.
+	//
+	// Por que el llamador deja de escribir `clean && !(ebit) && !reenter &&`: para
+	// que no exista una segunda copia de esa conjuncion. Es la leccion de DecideAsk
+	// (0.6.36) y de los cuatro cubos viejos (0.6.37) — dos lugares que deciden lo
+	// mismo siempre acaban diciendo cosas distintas. El ORDEN de DecidePre es
+	// literalmente el del cortocircuito que reemplaza, así que el veredicto no
+	// cambia; lo unico que cambia es que ahora se cuenta.
+	//
+	// Los TRES argumentos son hechos leidos por el compilador, no opiniones: la
+	// conjuncion `clean` (diez terminos sobre el par rama/delay y el kick), el bit
+	// E en la palabra superior del primer par del objetivo, y si el objetivo cae
+	// sobre un slot info[] ya analizado en esta area. Ninguna de las tres se mueve
+	// de donde esta: esta cadena mide, no refactoriza el nucleo del corte.
+	int SbAskJunctionPre(int slot, u32 targetPC_bytes, bool branch_clean,
+		bool target_ebit, bool target_reenter, u32 regionOps, u32 regionCycles);
+
 	// Cierre de la compilación variante (perf_and_return): junctions>=1 y
 	// area limpia -> adopcion interna (guarda hostEntry + metricas del area,
 	// estado VERIFY); si no, libera el slot y QUEMA el PC. Antes de ambos
@@ -491,6 +521,20 @@ namespace mVUSuperblock
 		// con un total suelto no se puede saber si el hook nuevo sirvio o no.
 		std::atomic<u64> arm_from[2]{};
 		std::atomic<u64> gate_closed{0};
+
+		// Cenit 0.6.38 — cadena 4: los tres filtros que el COMPILADOR aplica antes
+		// de que el motor sea preguntado. Su denominador es `pre_total` (cortes por
+		// rama en modo variante), y el cierre que firma el informe es
+		//     pre_total == Σ pre_cause(toda causa, pregunto incluida)
+		// Mas el UNICO cierre cruzado del sistema, que es lo que hace que esta
+		// cadena sirva para algo:
+		//     pre_cause[pregunto] == junction_requests
+		// Si algun dia alguien vuelve a llamar a SbAskJunction por un camino que no
+		// pasa por la puerta previa, ese cierre se abre y el informe lo canta. Sin
+		// el, `pregunto` seria un numero que se parece al pedido pero no esta
+		// atado a el — decoracion con forma de evidencia.
+		std::atomic<u64> pre_cause[mVUSbElig::kPreCauseCount]{};
+		std::atomic<u64> pre_total{0};      // cortes por rama considerados en variante
 
 		// Rechazo de presupuesto en el DESPACHO (SbResolve). Su denominador es el
 		// contador de despachos de la sonda, que vive en otro modulo, así que no
