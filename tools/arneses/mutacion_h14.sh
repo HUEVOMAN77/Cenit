@@ -12,12 +12,15 @@
 # las dos cosas que importan: por que no se armo nada, y si siquiera se miro. Este script rompe, una por una, las decisiones
 # que ese cambio introduce.
 #
-# FASE 1 — el encabezado puro (MvuSbEligibility.h). Veintiuna roturas PROPOSITAS
+# FASE 1 — el encabezado puro (MvuSbEligibility.h). Veintidos roturas PROPOSITAS
 #   en la ley: tumbar una guarda de cortocircuito (m1..m2), aflojar una comparacion
 #   (m3..m6, m9), quitar un techo o un piso (m7, m8), adelantar una comprobacion en
 #   la cadena (m10..m12), invertir la asimetria `>=`/`>` que el motor heredo
 #   (m13..m15), romper la puerta (m16..m19) y mentir en una etiqueta o en una
-#   clasificacion (m20, m21). Cada una tiene que dar un FALLO CON NOMBRE, y el
+#   clasificacion (m20, m21). Y m22 NO es de la ley: rompe el header de la misma
+#   forma que lo rompio el CI (una funcion libre sin `inline`) y tiene que caer en
+#   la pata de ENLACE de Harness10, no en este arnes. Cada una tiene que dar un
+#   FALLO CON NOMBRE, y el
 #   nombre se exige por texto: un rojo en otra comprobacion significa que el arnes
 #   capto el cambio por accidente, y un verde con el codigo roto significa que la
 #   comprobacion es decorativa.
@@ -54,8 +57,9 @@
 # no prueba que los datos que el motor pasa a DecideArm sean los vivos (eso lo mira
 # el propio cierre impreso: un DESAJUSTE lo canta); no toca rendimiento.
 #
-# Uso: bash tools/arneses/mutacion_h14.sh  (RC=0 solo si los DIECISEIS mutantes de
-# fase 1 cayeron en la comprobacion nombrada y las anclas de fase 2 aparecieron).
+# Uso: bash tools/arneses/mutacion_h14.sh  (RC=0 solo si los VEINTIDOS mutantes de
+# fase 1 cayeron en la comprobacion nombrada — m22 en la pata de enlace de h10 — y
+# las anclas de fase 2 aparecieron).
 # Requiere g++ en el host.
 #
 # Trampa heredada de h12/h13: la caja se limpia UNA vez y mut() es lo unico que
@@ -339,6 +343,59 @@ m m21 'kDesync deja de ser rechace' \
   '		return c != ArmCause::kPolicyPass && c != ArmCause::kArmed && c != ArmCause::kDesync;' \
   'paridad arm: el viejo rechazo y el nuevo aprueba'
 
+# --- mutante m22: la familia ODR, que ningun arnes de UN solo TU puede ver -------
+#
+# Historia del rojo, porque el mutante sin esa historia es decoracion: el CI de
+# 0.6.37 fallo con catorce `ld.lld: error: duplicate symbol` en este header. Las
+# funciones libres de MvuSbEligibility.h no eran `inline` y el header lo incluyen
+# MvuSuperblock-arm64.h y, por ese camino, cinco TU del motor. Harness14 dio
+# verde todo el ciclo: compila el header en UN TU, y la ODR solo se rompe al
+# ENLAZAR dos. O sea el arnes no era decorativo por maldad — era ciego por
+# construccion, y eso es peor, porque el verde se lee igual.
+#
+# La pata D de Harness10 (baseline.sh) cierra ese ciego enlazando DOS TU por cada
+# cabecera pura. Este mutante la prueba a ELLA, no a h14: por eso corre
+# `ARNES=h10 baseline.sh` en vez del binario de este arnes, y por eso su rojo
+# esperado es RC=1 nombrando la cabecera y `multiple definition`.
+#
+# Limitacion honesta: mut() escribe en la COPIA de la caja y el ejecutor de h14
+# compila desde esa caja; esta rotura necesita el archivo DEL REPO, porque h10 lo
+# trae el solo. Asi que aqui se sabotea el repo, se corre h10 y se RESTAURA. El
+# restore es incondicional y se comprueba: si quedara mutado, el resto de esta
+# corrida (y el arbol del usuario) estarian rotos, y eso se canta.
+total=$((total+1))
+ELIG_RELP=app/src/main/cpp/pcsx2/arm64/MvuSbEligibility.h
+cp "$ELIG_RELP" "$box/orig_elig.h"
+if python3 -c "
+import sys
+p=sys.argv[1]
+s=open(p).read()
+a='\tinline ArmCause DecideArm(const ArmInput& in, const Policy& p)'
+if s.count(a)!=1:
+    sys.stderr.write('ancla m22 no unica\n'); sys.exit(3)
+open(p,'w').write(s.replace(a,'\tArmCause DecideArm(const ArmInput& in, const Policy& p)',1))
+" "$ELIG_RELP"; then
+  h10out=$(ARNES=h10 bash tools/arneses/baseline.sh 2>&1); h10rc=$?
+  cp "$box/orig_elig.h" "$ELIG_RELP"
+  if [ "$h10rc" != "0" ] && printf '%s' "$h10out" | grep -q "MvuSbEligibility.h NO ES ENLAZABLE" \
+     && printf '%s' "$h10out" | grep -q "multiple definition of .mVUSbElig::DecideArm"; then
+    echo "MUTANTE m22 (DecideArm sin inline): DETECTADO por la pata de enlace de h10, con el simbolo nombrado"
+  else
+    echo "MUTANTE m22 (DecideArm sin inline): NO DETECTADO (RC=$h10rc) => la pata de enlace es decorativa"
+    printf '%s\n' "$h10out" | tail -4
+    undetected=$((undetected+1))
+  fi
+else
+  cp "$box/orig_elig.h" "$ELIG_RELP"
+  echo "MUTANTE m22: ANCLA ROTA => NO DETECTADO (el mutante no se aplico)"
+  undetected=$((undetected+1))
+fi
+if ! diff -q "$box/orig_elig.h" "$ELIG_RELP" >/dev/null; then
+  echo "m22: el repositorio NO quedo restaurado — abortando, no sigo con un arbol mutado"
+  exit 1
+fi
+
+
 echo
 echo "== fase 2: el cable (texto de microVU-arm64.cpp / MvuSuperblock-arm64.cpp) =="
 echo
@@ -477,6 +534,21 @@ ancla f20-politica-pineada "$H10" 'static_assert(mVUSuperblock::kSbPolicy.max_op
 # queriendo decir "no corri el arnes nuevo".
 ancla f21-h14-en-la-base "$BASE" '[ "$ONLY" = all ] || [ "$ONLY" = h14 ] && runh14' \
   'h14 no esta en la linea base: su verde no se obtiene corriendo baseline.sh'
+# 22: la firma ENLAZABLE del header, por escrito y contada. despues del rojo del CI
+# (14 duplicate symbol) la propiedad que sostiene el motor es que TODAS las funciones
+# libres del header sean inline: una decima quinta causa sin inline entra igual de
+# silenciosa en h14 (un solo TU) y solo la ve la pata de enlace de h10.
+ancla f22-DecideArm-inline "$SRC" '	inline ArmCause DecideArm(const ArmInput& in, const Policy& p)' \
+  'DecideArm volvio a ser una funcion libre sin inline: dos TU la definen'
+total=$((total+1))
+ninl=$(grep -c '^	inline ' "$SRC")
+if [ "$ninl" = "14" ]; then
+  echo "ANCLA f23-cuenta-de-inline: presente (14 funciones libres inline, que son las 14 declaraciones de la ley)"
+  anchors=$((anchors+1))
+else
+  echo "ANCLA f23-cuenta-de-inline: NO => el header dice $ninl funciones inline y la ley tiene 14"
+  anclas_fallan=$((anclas_fallan+1))
+fi
 
 echo
 echo "Limitacion escrita de esta fase: las anclas son de TEXTO, no de compilacion."
@@ -485,9 +557,9 @@ echo "compilacion variante conserve lpState — eso lo dice el CI al compilar y 
 echo "log al imprimir 'puerta{lento=.. stub=.. dejo=..}'. Lo que fijan es que el"
 echo "cable sigue teniendo la forma que Harness14 pinó; si cambia, esto ruida."
 echo
-echo "Total: $total casos (21 mutantes + $anchors anclas), no detectados: $undetected, anclas rotas: $anclas_fallan"
+echo "Total: $total casos (22 mutantes + $anchors anclas), no detectados: $undetected, anclas rotas: $anclas_fallan"
 if [ "$undetected" -eq 0 ] && [ "$anclas_fallan" -eq 0 ]; then
-  echo "RC=0: los veintiun mutantes cayeron en su comprobacion nombrada y las anclas del cable estan."
+  echo "RC=0: los veintidos mutantes cayeron en su comprobacion nombrada y las anclas del cable estan."
   exit 0
 fi
 exit 1

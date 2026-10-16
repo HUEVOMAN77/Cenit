@@ -182,10 +182,58 @@ runh10() { # arnes de SINTAXIS del area arm64: tres patas, y cada una cuenta.
     RC=1; return 1
   fi
 
+  # --- pata D: ENLACE de dos TU por cabecera pura (0.6.37) ---
+  #
+  # Que agrega esta pata y por que nace de un rojo real, no de una idea: la linea base
+  # hasta 0.6.37 SIEMPRE compilo cada cabecera pura en UN solo TU (h9..h15 son un .cpp
+  # por arnes, y la pata A usa -fsyntax-only). Un header de funciones libres sin `inline`
+  # pasa esa prueba tan verde como una casa, y estalla al enlazar. Eso fue exactamente lo
+  # que paso con MvuSbEligibility.h: lo incluian MvuSuperblock-arm64.h y, por el camino,
+  # cinco TU del motor — el CI lo canto con 14 `ld.lld: error: duplicate symbol` despues
+  # de seis minutos de build. Ningun arnes de host lo podia ver porque nada en host
+  # ENLAZABA dos TUs que compartieran el header.
+  #
+  # Cada cabecera pura se compila en DOS TU identicos + un main, y se ENLACA. Eso prueba
+  # una propiedad que la autocontencion (pata A) no mira: que el header puede estar
+  # incluido por mas de un .cpp sin duplicar simbolos. Es ODR, y en C++ puro se viola
+  # escribiendo una funcion libre sin `inline` — que es el defecto mas barato y mas
+  # facil de cometer de toda la familia.
+  #
+  # Que NO prueba: que los TU del motor enlacen entre si con el resto del arbol (eso es
+  # trabajo del CI, y necesita el NDK); que MvuSuperblock-arm64.h sea enlazable (NO esta
+  # en la lista a proposito: pide vixl/Console y su enlazabilidad la decide el CI). Y no
+  # prueba semantica ninguna: para eso estan h9..h15.
+  local l=0
+  local pure="$CPP/MvuSbLife.h $CPP/MvuSbIndex.h $CPP/MvuFastPath.h $CPP/MvuSbEligibility.h $GCEN/CenitPresentStats.h $ROOT/app/src/main/cpp/CenitDeviceClass.h"
+  for hp in $pure; do
+    local base=$(basename "$hp")
+    if [ ! -f "$hp" ]; then echo "h10: FALTA $base para la pata de enlace"; RC=1; return 1; fi
+    # Regla anti-copia-vieja: la caja ya tiene las seis del area arm64 que trajeron las
+    # patas A/C en esta misma corrida; las de fuera de esa lista (present y clasificacion)
+    # se copian aqui del repo, no del arnes.
+    if [ ! -f "$box/$base" ]; then
+      cp "$hp" "$box/" || { echo "h10: no se pudo copiar $base para la pata de enlace"; RC=1; return 1; }
+    fi
+    printf '#include "%s"\n' "$base" > "$box/lnk_a.cpp"
+    printf '#include "%s"\n' "$base" > "$box/lnk_b.cpp"
+    printf 'int main() { return 0; }\n' > "$box/lnk_m.cpp"
+    if ! "$CXX" -std=c++17 -Wall -Wextra -I"$box" -o "$box/lnk_exe" "$box/lnk_a.cpp" "$box/lnk_b.cpp" "$box/lnk_m.cpp" 2>"$box/lnk.err"; then
+      echo "h10: $base NO ES ENLAZABLE EN DOS TU (ODR: funciones libres sin inline, o variables con definicion)"
+      grep -oE "duplicate symbol: .*|multiple definition of .*|error: .*" "$box/lnk.err" | head -8
+      RC=1; return 1
+    fi
+    if [ -s "$box/lnk.err" ]; then
+      echo "h10: $base enlaza pero con avisos (con -Wall -Wextra no se dejan pasar)"
+      head -10 "$box/lnk.err"; RC=1; return 1
+    fi
+    l=$((l+1))
+  done
+
   # Recuento honesto: lo que el arnes AFIRMA. Cada static_assert es una comprobacion,
   # cada puntero de funcion es una firma atada, cada cabecera que compilo sola es una
-  # autocontencion, y el TU del motor limpio es una mas.
-  echo "Harness10: $((n + b + s + 1)) Comprobaciones, 0 Fallos"
+  # autocontencion, el TU del motor limpio es una mas, y cada cabecera pura que enlaza
+  # en dos TU es otra (nueve en total desde 0.6.37, antes seis).
+  echo "Harness10: $((n + b + s + 1 + l)) Comprobaciones, 0 Fallos (autocontenidas=$n enlazadas=$l)"
 }
 
 runh11() { # arnes de LOGICA del indice PC->hueco del superbloque (0.6.33).
