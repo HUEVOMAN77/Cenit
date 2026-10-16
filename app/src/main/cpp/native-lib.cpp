@@ -344,6 +344,34 @@ Java_com_izzy2lost_psx2_NativeApp_getDevicePerformanceTier(JNIEnv*, jclass)
 #endif
 }
 
+// Cenit 0.6.38 paso 2 — las cuatro lineas "Cenit equipo:" (perfil/razon, reloj/ram/
+// sin-medir/coherente, denominadores de clusters y la linea `midr` cruda) para el
+// boton "Enviar registro". Devuelve el MISMO texto que imprime PrintDeviceMeasure,
+// porque ambas llaman a FormatDeviceMeasureLines: no hay una segunda copia del
+// formateo que pueda decir algo distinto del registro.
+//
+// Por que un native y no leerlo del log: PrintDeviceMeasure corre una sola vez al
+// arrancar y el reporte solo lleva las ultimas lineas (el logcat y emulog rotan).
+// En el reporte real de 0.6.37 las cuatro lineas no llegaron — se fueron arriba
+// del corte — y con ellas se perdio la unica fila que permite atribuir un
+// clase=desconocida a una entrada concreta de la tabla de CenitDeviceClass.h. Un
+// dato que solo vive en la ventana que rota es un dato que no se puede pedir.
+//
+// Fuera de Android devuelve la cadena vacia: la clasificacion medida no existe, y
+// un "" hace que el lado Java omita la seccion en vez de imprimir una cabecera
+// inventada.
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getDeviceMeasureLines(JNIEnv* env, jclass)
+{
+#ifdef __ANDROID__
+    const std::string lines = AndroidDeviceDetection::FormatDeviceMeasureLines();
+    return env->NewStringUTF(lines.c_str());
+#else
+    return env->NewStringUTF("");
+#endif
+}
+
 // Fallback JNI access for content:// when SDL's Android env is not yet ready
 // (no JNI fallback)
 
