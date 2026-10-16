@@ -648,6 +648,21 @@ public class NativeApp {
         if (hasNoNativeBinary) return 0;
         try { return getDevicePerformanceTier(); } catch (Throwable t) { return 0; }
     }
+
+    // Cenit 0.6.38 paso 2 — las cuatro lineas "Cenit equipo:" ya formateadas, para
+    // la cabecera del reporte. Ver el native: es el MISMO texto que imprime el
+    // registro (una sola fuente, FormatDeviceMeasureLines). Se pide al nucleo en vez
+    // de leerlo del log porque el reporte solo lleva las ultimas lineas y estas se
+    // imprimen al arrancar, o sea se cortan.
+    public static native String getDeviceMeasureLines();
+    /** Lineas de equipo medido, o null si el binario nativo no esta o no devolvio nada. */
+    public static String safeGetDeviceMeasureLines() {
+        if (hasNoNativeBinary) return null;
+        try {
+            String s = getDeviceMeasureLines();
+            return (s == null || s.isEmpty()) ? null : s;
+        } catch (Throwable t) { return null; }
+    }
     
     // Audio output device (0 = follow system routing)
     public static native void setAudioOutputDevice(int deviceId);

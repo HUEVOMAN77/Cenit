@@ -4036,7 +4036,14 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         }
         snapshot.put("cenit", ver);
         snapshot.put("juego", safeCurrentGameLabel());
-        final String deviceHeader = formatDeviceHeader(snapshot);
+        // Cenit 0.6.38 paso 2 — el equipo MEDIDO va en la cabecera, no en el cuerpo:
+        // el log que se adjunta abajo esta recortado a las ultimas lineas y estas se
+        // imprimen al arrancar, así que si se dejaran solo en el registro no
+        // llegarian (fue exactamente lo que paso con la linea `midr` en el reporte de
+        // 0.6.37). Se pide una vez aqui, en el hilo de UI: es un valor cacheado, sin
+        // costo por lectura repetida.
+        final String measureLines = NativeApp.safeGetDeviceMeasureLines();
+        final String deviceHeader = formatDeviceHeader(snapshot, measureLines);
         // Captura para el lambda de abajo: `ver` se reasigna arriba, así que no es
         // efectivamente final y Java rechazaría usarlo dentro de la Runnable.
         final String reportVersion = ver;
@@ -4444,12 +4451,22 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         return true;
     }
 
-    private static String formatDeviceHeader(java.util.Map<String, String> info) {
+    private static String formatDeviceHeader(java.util.Map<String, String> info, String measureLines) {
         StringBuilder sb = new StringBuilder();
         sb.append("Reporte de Cenit\n");
         java.util.List<String> keys = new ArrayList<>(info.keySet());
         java.util.Collections.sort(keys);
         for (String k : keys) sb.append("  ").append(k).append(": ").append(info.get(k)).append('\n');
+        // Las lineas medidas del nucleo, tal cual las formateo el propio recolector
+        // (misma fuente que el registro). Se separan del bloque de propiedades de
+        // Build.* porque son otra cosa: lo que se LEYO del chip, no lo que el OEM
+        // declaro. Si el nativo no devolvio nada, se omite la seccion en vez de
+        // escribir una cabecera vacia que se leeria como "no tiene clusters".
+        if (measureLines != null && !measureLines.isEmpty()) {
+            sb.append("\n=== EQUIPO MEDIDO (fuente: nucleo, no log) ===\n");
+            sb.append(measureLines);
+            if (!measureLines.endsWith("\n")) sb.append('\n');
+        }
         sb.append('\n');
         return sb.toString();
     }
