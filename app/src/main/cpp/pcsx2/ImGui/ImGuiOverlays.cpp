@@ -110,6 +110,7 @@ SmallString s_vu_sb_line;
 SmallString s_build_line;
 SmallString s_pinning_line;
 SmallString s_soc_line;
+SmallString s_measure_line;
 SmallString s_gpu_debug_info_line;
 SmallString s_gpu_stats_line;
 SmallString s_speed_icon;
@@ -550,6 +551,27 @@ __ri void ImGuiManager::DrawPerformanceOverlay(float& position_y, float scale, f
 				s_soc_line.format("SoC={} ({}) | vendor={} | Profile={}",
 					soc_txt.c_str(), src_txt.c_str(), prof.gpu_vendor.c_str(), prof.profile);
 				DRAW_LINE(osd_font, font_size, s_soc_line.c_str(), white_color);
+
+				// Cenit 0.6.37: la linea de arriba dice Profile=1 y se queda ahi. Con el
+				// tier MEDIDO se puede decir tambien POR QUE, que es la unica forma de que
+				// un telefono distinto reporte algo util: "baja / frecuencia-no-leida" es
+				// una limitacion del lector, y "baja / nucleo-chico" es el chip. Los
+				// numeros salen con su marca de "no medido" (-) en lugar de un 0, para no
+				// repetir el centinela que ya se imprimio como si fuera un dato.
+				const AndroidDeviceDetection::DeviceMeasure& dm =
+					AndroidDeviceDetection::GetCachedDeviceMeasure();
+				// fmt::format temporario + c_str() = puntero colgado; se materializan las
+				// dos cadenas antes de armar la linea.
+				const std::string freq_txt = dm.freq_measured
+					? fmt::format("{}MHz", dm.big_freq_khz / 1000)
+					: std::string("-reloj");
+				const std::string ram_txt = dm.ram_measured
+					? fmt::format("{}MB", dm.total_ram_mb)
+					: std::string("-ram");
+				s_measure_line.format("Equipo={} ({}) nuc={}/{} reloj={} ram={} sin-medir={}",
+					dm.tier_name.c_str(), dm.reason.c_str(), dm.big_cores, dm.total_cores,
+					freq_txt.c_str(), ram_txt.c_str(), dm.missing_fields);
+				DRAW_LINE(osd_font, font_size, s_measure_line.c_str(), white_color);
 #endif
 			}
 
