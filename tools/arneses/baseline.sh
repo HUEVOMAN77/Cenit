@@ -380,13 +380,68 @@ runh14() { # arnes de LOGICA de la decision de elegibilidad del superbloque (0.6
   echo "$OUT" | grep -qE "el-viejo-llegaba-al-final=[1-9]" || { echo "h14: ningun caso llegaba al final de la cadena vieja"; RC=1; }
 }
 
+runh15() { # arnes de LOGICA de la clasificacion MEDIDA del equipo (0.6.37).
+  #
+  # Por que existe, en una linea: hasta 0.6.36 el perfil dependia del APELLIDO del
+  # chipset — dos listas de nombres y «cualquier Qualcomm es 1 o 2 segun su numero de
+  # modelo» —, asi que un Snapdragon 6 de entrada se llevaba la cola optima (el ajuste
+  # que peor le sienta cuando el GPU es el cuello) y un Dimensity nuevo no tenia a donde
+  # caer. Este arnes prueba la ley nueva (CenitDeviceClass.h: tabla MIDR -> clase,
+  # agregado de clusters con RETIRADA, cascada de trece razones, coherencia por campo),
+  # el barrido de invariantes (nunca 2x con un campo sin medir) y la PARIDAD contra una
+  # copia fiel de la ley de 0.6.36 sobre los mismos aparatos, con cada bajada nombrada.
+  #
+  # Que NO prueba, dicho para que nadie lea de mas en su verde:
+  #   - que el recolector lea BIEN /sys (cpuinfo_max_freq, no el campo que en este arbol
+  #     queda sin llenar), ni que la medida se calcule una sola vez, ni que native-lib
+  #     aplique las cuatro casillas en sus cuatro sitios, ni que el HUD imprima la fila.
+  #     host no puede abrir los archivos del telefono: son anclas de mutacion_h15.sh
+  #     fase 2, con su limitacion escrita.
+  #   - que un telefono alcance tal perfil. Los fixtures son fichas publicas; eso SOLO
+  #     lo dice el log del aparato.
+  local box=$WORK/h15
+  if [ -z "$CXX" ]; then
+    echo "h15: SIN COMPILAR - no hay g++ de host (CXX='$CXX'); la clasificacion medida del equipo NO se verifico en esta corrida"
+    RC=1
+    return
+  fi
+  rm -rf "$box"; mkdir -p "$box"
+  cp "$HERE/h15-src/dev_test.cpp" "$box/" || { echo "h15: no se pudo traer el arnes"; RC=1; return; }
+  # Regla anti-copia-vieja (heredada de h9/h12/h13/h14): el header se trae DEL REPO en
+  # cada corrida. Aqui vive en la raiz de cpp/, no en arm64/, porque lo incluye
+  # AndroidDeviceDetection.cpp — por eso la ruta es explicita y no $CPP.
+  local HDR=$ROOT/app/src/main/cpp/CenitDeviceClass.h
+  if [ ! -f "$HDR" ]; then echo "h15: FALTA CenitDeviceClass.h en el repo ($HDR)"; RC=1; return; fi
+  cp "$HDR" "$box/" || { echo "h15: no se pudo copiar CenitDeviceClass.h"; RC=1; return; }
+  if ! "$CXX" -std=c++17 -Wall -Wextra -O1 -I"$box" -o "$box/h15" "$box/dev_test.cpp" 2>"$box/compile.err"; then
+    echo "h15: FALLO DE COMPILACION"; head -40 "$box/compile.err"; RC=1; return
+  fi
+  if [ -s "$box/compile.err" ]; then
+    echo "h15: avisos del compilador (con -Wall -Wextra no se dejan pasar)"
+    head -20 "$box/compile.err"; RC=1
+  fi
+  OUT=$("$box/h15" 2>/dev/null | grep -E "Comprobaciones|FALLO|testigos")
+  echo "$OUT"
+  echo "$OUT" | grep -qE ", [1-9][0-9]* Fallos" && RC=1
+  echo "$OUT" | grep -q "Comprobaciones" || { echo "h15: el arnes no imprime recuento"; RC=1; }
+  echo "$OUT" | grep -q "testigos:" || { echo "h15: falta la linea de testigos"; RC=1; }
+  # Los tres testigos que tienen que ser no-cero, cada uno con su razon:
+  #   subio>0          — si medir no subio a NINGUN aparato, la mejora es declarativa.
+  #   gano-proteccion>0 — el defecto que se ataco (Qualcomm de entrada sin protecciones).
+  #   bajo>0           — si nadie bajo, la ley no esta retirando perfiles por apellido,
+  #                      o sea la paridad no se midio en las dos direcciones.
+  echo "$OUT" | grep -qE "subio=[1-9]" || { echo "h15: la clasificacion medida no subio a ningun aparato del arreglo"; RC=1; }
+  echo "$OUT" | grep -qE "gano-proteccion=[1-9]" || { echo "h15: ningun aparato gano protecciones: el defecto de entrada no esta cubierto"; RC=1; }
+  echo "$OUT" | grep -qE "bajo=[1-9]" || { echo "h15: la paridad no encontro ninguna bajada (los fixtures o la copia vieja estan mal)"; RC=1; }
+}
+
 ONLY=${ARNES:-all}
 case "$ONLY" in
-  all|h5|h6|h7|h8|h9|h10|h11|h12|h13|h14) ;;
+  all|h5|h6|h7|h8|h9|h10|h11|h12|h13|h14|h15) ;;
   # Un nombre mal escrito tiene que ruidar: si no, "corrí los arneses" se convierte
   # en "no corrí ninguno y volvi con RC=0", que es exactamente el verde vacio que
   # este script existe para evitar.
-  *) echo "baseline.sh: ARNES='$ONLY' no existe (valores: all h5 h6 h7 h8 h9 h10 h11 h12 h13 h14)"; exit 2 ;;
+  *) echo "baseline.sh: ARNES='$ONLY' no existe (valores: all h5 h6 h7 h8 h9 h10 h11 h12 h13 h14 h15)"; exit 2 ;;
 esac
 [ "$ONLY" = all ] || [ "$ONLY" = h5 ] && run h5 Harness5 GameLoadClassifier CenitLoadSample LoadPolicy LoadTrend CenitTelemetry
 [ "$ONLY" = all ] || [ "$ONLY" = h6 ] && run h6 Harness6 DynamicResolutionGovernor GameLoadClassifier AdaptiveProfile CenitLoadSample LoadPolicy LoadTrend CenitTelemetry GameSerialUtils
@@ -431,6 +486,12 @@ esac
 # un «construidos=0» futuro, y un contador por causas sin arnes es justo lo que
 # tuvimos — cuatro contadores sin arnes.
 [ "$ONLY" = all ] || [ "$ONLY" = h14 ] && runh14
+# h15 (0.6.37): la LEY de clasificacion MEDIDA del equipo y su PARIDAD con la lista de
+# nombres de 0.6.36. Entra por el mismo argumento que h14 y por uno propio: las cuatro
+# casillas de ajuste del telefono salen de aqui, y una de esas cuatro (la cola optima)
+# es la que en 0.6.36 se aplicaba por apellido a todo Qualcomm, incluso al de entrada,
+# que es justamente donde hace dano. Sin arnes, esa inversion seria una promesa.
+[ "$ONLY" = all ] || [ "$ONLY" = h15 ] && runh15
 
 # Verificadores que no necesitan javac: las tablas que cruzan la frontera JNI.
 # jnisig: cada `native` de NativeApp.java tiene su Java_...() con el mismo numero de
