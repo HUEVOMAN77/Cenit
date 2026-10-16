@@ -474,6 +474,12 @@ namespace mVUSuperblock
 					s.jun_cause[k].store(0);
 				for (u32 k = 0; k < mVUSbElig::kCloseCauseCount; k++)
 					s.close_cause[k].store(0);
+				// 0.6.38 — cadena 4, con el mismo criterio: por TAMANO de arreglo. Un
+				// pre_cause sin volver a cero dejaria en el informe la firma de la
+				// sesion anterior, que es un numero que miente.
+				for (u32 k = 0; k < mVUSbElig::kPreCauseCount; k++)
+					s.pre_cause[k].store(0);
+				s.pre_total.store(0);
 				s.junction_requests.store(0);
 				s.close_calls.store(0);
 				s.arm_from[0].store(0);
@@ -598,6 +604,37 @@ namespace mVUSuperblock
 				}
 				SbPrintf(f, "  [cierre=%s]\n",
 					(close_sum == s.close_calls.load(std::memory_order::relaxed)) ? "ok" : "DESAJUSTE");
+
+				// Cadena 4 (0.6.38) — la puerta previa del compilador. Se imprime
+				// DESPUES de la union y con su propio cierre, y ademas con el cruzado
+				// contra `pedidos`: una de las dos funciones de esta cadena es
+				// demostrar que no existe un segundo camino a SbAskJunction.
+				u64 pre_sum = 0;
+				for (u32 k = 0; k < mVUSbElig::kPreCauseCount; k++)
+				{
+					const u64 v = s.pre_cause[k].load(std::memory_order::relaxed);
+					pre_sum += v;
+					const mVUSbElig::PreCause c = static_cast<mVUSbElig::PreCause>(k);
+					if (mVUSbElig::IsPreRejection(c))
+						cubo[static_cast<u32>(mVUSbElig::PreBucketOf(c))] += v;
+				}
+				const u64 pre_asked =
+					s.pre_cause[static_cast<u32>(mVUSbElig::PreCause::kAsked)]
+						.load(std::memory_order::relaxed);
+				const u64 pre_total = s.pre_total.load(std::memory_order::relaxed);
+				const u64 pedidos2 = s.junction_requests.load(std::memory_order::relaxed);
+				SbPrintf(f, "%s causas previa(%" PRIu64 "):", tag, pre_total);
+				for (u32 k = 0; k < mVUSbElig::kPreCauseCount; k++)
+				{
+					const u64 v = s.pre_cause[k].load(std::memory_order::relaxed);
+					if (v == 0)
+						continue;
+					SbPrintf(f, " %s=%" PRIu64,
+						mVUSbElig::PreCauseName(static_cast<mVUSbElig::PreCause>(k)), v);
+				}
+				SbPrintf(f, "  [cierre=%s cruzado=%s(%" PRIu64 "/%" PRIu64 ")]\n",
+					(pre_sum == pre_total) ? "ok" : "DESAJUSTE",
+					(pre_asked == pedidos2) ? "ok" : "DESAJUSTE", pre_asked, pedidos2);
 
 				// Cubos derivados: los cuatro nombres de 0.6.36, ahora SUMADOS de las
 				// causas. Vivan o mueran, no pueden contradecir la linea de arriba.
@@ -1340,6 +1377,34 @@ namespace mVUSuperblock
 		return static_cast<int>(j);
 	}
 
+	// Cenit 0.6.38 — la puerta previa (cadena 4). Ver el contrato en
+	// MvuSuperblock-arm64.h y la ley en MvuSbEligibility.h.
+	//
+	// branchStructClean se pasa como CIERTO a SbAskJunction a proposito: la causa
+	// kDirty de la cadena 2 ya no es alcanzable por este camino, porque el filtro
+	// equivalente (la conjuncion `clean`) se juzgo arriba y corto antes. Eso hace
+	// que `u:rama-sucia` quede en 0 en cualquier log — y no por olvido: es un
+	// TESTIGO. Si algun dia vale > 0, significa que alguien llamo a SbAskJunction
+	// con la rama sucia, o sea que existe un segundo camino de union que no paso
+	// por esta puerta. Es el mismo uso que en 0.6.36 se le dio a `rejectExact`:
+	// un numero que en produccion debe ser 0, y que si no lo es no es una medida
+	// sino la senal de que una guarda se rompio.
+	int SbAskJunctionPre(int slot, u32 targetPC_bytes, bool branch_clean,
+		bool target_ebit, bool target_reenter, u32 regionOps, u32 regionCycles)
+	{
+		Stats& st = g_stats[1];
+		st.pre_total.fetch_add(1, std::memory_order_relaxed);
+
+		const mVUSbElig::PreInput pin{branch_clean, target_ebit, target_reenter};
+		const mVUSbElig::PreCause pcause = mVUSbElig::DecidePre(pin);
+		st.pre_cause[static_cast<u32>(pcause)].fetch_add(1, std::memory_order_relaxed);
+
+		if (pcause != mVUSbElig::PreCause::kAsked)
+			return -1;
+
+		return SbAskJunction(slot, targetPC_bytes, true, regionOps, regionCycles);
+	}
+
 	void SbCloseCompile(int slot, u32 startPC_bytes, void* hostEntry,
 		u32 junctions, bool areaBad, u32 nOps, u32 nCycles)
 	{
@@ -1825,12 +1890,15 @@ namespace mVUSuperblock
 
 		u64 arm[mVUSbElig::kArmCauseCount], jun[mVUSbElig::kJunctionCauseCount];
 		u64 cls[mVUSbElig::kCloseCauseCount];
+		u64 pre[mVUSbElig::kPreCauseCount];
 		for (u32 k = 0; k < mVUSbElig::kArmCauseCount; k++)
 			arm[k] = s.arm_cause[k].load(std::memory_order_relaxed);
 		for (u32 k = 0; k < mVUSbElig::kJunctionCauseCount; k++)
 			jun[k] = s.jun_cause[k].load(std::memory_order_relaxed);
 		for (u32 k = 0; k < mVUSbElig::kCloseCauseCount; k++)
 			cls[k] = s.close_cause[k].load(std::memory_order_relaxed);
+		for (u32 k = 0; k < mVUSbElig::kPreCauseCount; k++)
+			pre[k] = s.pre_cause[k].load(std::memory_order_relaxed);
 
 		// kPolicyPass no es un resultado: es "la politica dijo que si, falta la
 		// asignacion". Se excluye de la suma que cierra contra `intentos` porque su
@@ -1853,13 +1921,29 @@ namespace mVUSuperblock
 		const u64 stub = s.arm_from[1].load(std::memory_order_relaxed);
 		const u64 dejo = s.gate_closed.load(std::memory_order_relaxed);
 
+		// Cadena 4 (0.6.38): a diferencia de la 1, aqui TODAS las causas se suman
+		// contra el denominador, incluida `pregunto` — porque `pregunto` es un
+		// resultado terminal de la puerta (salio de ella), no un paso intermedio.
+		const u64 pre_total = s.pre_total.load(std::memory_order_relaxed);
+		u64 pre_sum = 0;
+		for (u32 k = 0; k < mVUSbElig::kPreCauseCount; k++)
+			pre_sum += pre[k];
+		// El cierre cruzado: lo que la puerta dejo pasar TIENE que ser exactamente
+		// lo que la cadena 2 conto como pedido. Es la unica comprobacion que ata la
+		// medicion nueva a la vieja; sin ella, `pregunto` y `pedidos` podrian
+		// discrepar para siempre y el log seguiria diciendo ok en las dos cadenas.
+		const bool cruzado_ok = (pre[static_cast<u32>(mVUSbElig::PreCause::kAsked)] == pedidos);
+
 		std::snprintf(out, cap,
 			"vuSB: cierre{arm=%s(%" PRIu64 "/%" PRIu64 ") union=%s(%" PRIu64 "/%" PRIu64
-			") cierre=%s(%" PRIu64 "/%" PRIu64 ") puerta=%s}",
+			") cierre=%s(%" PRIu64 "/%" PRIu64 ") puerta=%s previa=%s(%" PRIu64 "/%" PRIu64
+			") cruzado=%s}",
 			(arm_sum == intentos) ? "ok" : "DESAJUSTE", arm_sum, intentos,
 			(jun_sum == pedidos) ? "ok" : "DESAJUSTE", jun_sum, pedidos,
 			(cls_sum == cierres) ? "ok" : "DESAJUSTE", cls_sum, cierres,
-			(lenta + stub == intentos + dejo) ? "ok" : "DESAJUSTE");
+			(lenta + stub == intentos + dejo) ? "ok" : "DESAJUSTE",
+			(pre_sum == pre_total) ? "ok" : "DESAJUSTE", pre_sum, pre_total,
+			cruzado_ok ? "ok" : "DESAJUSTE");
 
 		// Causas no nulas, por cadena, en el ORDEN del enum. Ordenarlas por valor
 		// seria mas bonito y menos util: dos partidas con los mismos numeros las
@@ -1901,6 +1985,15 @@ namespace mVUSuperblock
 		{
 			if (cls[k])
 				app("c:", mVUSbElig::CloseCauseName(static_cast<mVUSbElig::CloseCause>(k)), cls[k]);
+		}
+		// Cadena 4, al final y con prefijo propio: sus numeros no compiten con los
+		// de la cadena 2, que es la que se leeria confundida con ella (`u:rama-sucia`
+		// y `p:rama-sucia-previa` son dos cosas distintas y tienen que poder
+		// escribirse las dos en la misma linea).
+		for (u32 k = 0; k < mVUSbElig::kPreCauseCount; k++)
+		{
+			if (pre[k])
+				app("p:", mVUSbElig::PreCauseName(static_cast<mVUSbElig::PreCause>(k)), pre[k]);
 		}
 	}
 
