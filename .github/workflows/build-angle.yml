@@ -90,13 +90,41 @@ jobs:
             ${{ env.ANGLE_DIR }}/out/Android/lib.unstripped/libGLESv2*.so
             Cenit-ANGLE-*.zip
 
+      # El runner de este job pasa por slimhub, que borra la CLI `gh` de la
+      # imagen: llamarla acá termina en «gh: command not found» y el pack se
+      # compila, se sube como artifact... y nunca llega a Release (pasó el
+      # 2026-10-23). Se publica por REST con curl, que sí queda disponible.
       - name: Publicar Release de ANGLE
         if: inputs.make_release
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
+          set -euo pipefail
           PACK=$(ls Cenit-ANGLE-*.zip)
           TAG="cenit-angle-$(date -u +%Y%m%d-%H%M)"
-          gh release create "$TAG" "$PACK" \
-            --title "Cenit ANGLE (Vulkan, arm64)" \
-            --notes "Librerías ANGLE compiladas por el CI de Cenit (rama main de chromium/angle, backend Vulkan, arm64). Son las que empaqueta el APK: build.yml baja el pack más reciente de este canal y lo mete en jniLibs antes de compilar, así que el interruptor «ANGLE (OpenGL sobre Vulkan)» de Ajustes funciona sin que tengas que importar nada a mano."
+          cat > /tmp/rel.json <<JSON
+          {
+            "tag_name": "$TAG",
+            "name": "Cenit ANGLE (Vulkan, arm64)",
+            "body": "Librerias ANGLE compiladas por el CI de Cenit (chromium/angle main, backend Vulkan, arm64). libEGL_angle.so y libGLESv2_angle.so son las que build.yml mete en jniLibs antes de compilar, asi que el interruptor ANGLE de Ajustes funciona sin importar nada a mano.",
+            "draft": false,
+            "prerelease": false
+          }
+          JSON
+          REL=$(curl -sS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$REPO/releases" \
+            --data-binary @/tmp/rel.json)
+          ID=$(printf '%s' "$REL" | grep -o '"id": *[0-9]*' | head -1 | tr -dc '0-9')
+          if [ -z "$ID" ]; then echo "no se pudo crear la release: $REL"; exit 1; fi
+          echo "release $TAG creada (id $ID)"
+          curl -sS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Content-Type: application/zip" \
+            -H "Accept: application/vnd.github+json" \
+            "https://uploads.github.com/repos/$REPO/releases/$ID/assets?name=$PACK" \
+            --data-binary @"$PACK" > /tmp/up.json
+          grep -q '"state": *"uploaded"' /tmp/up.json || { echo "fallo la subida: $(head -c 400 /tmp/up.json)"; exit 1; }
+          echo "pack $PACK publicado en $TAG"
