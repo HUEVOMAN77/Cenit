@@ -109,7 +109,7 @@ void GSgetInternalResolution(int* width, int* height);
 /// 0.6.25 no habia forma de distinguir "la reconstruccion no se activo" de
 /// "se activo y se ve mal", y eso costo un ciclo de medicion completo.
 void GSgetPresentEvidence(int* src_width, int* src_height, int* dst_width, int* dst_height, bool* easu_active,
-	int* easu_stages);
+	bool* nn_active, int* easu_stages);
 void GSgetStats(SmallStringBase& info);
 void GSgetMemoryStats(SmallStringBase& info);
 void GSgetTitleStats(std::string& info);

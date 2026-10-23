@@ -488,6 +488,12 @@ public final class SettingsScreenController {
         toggle(R.id.set_sw_easu, "easu_reconstruct", true,
                 checked -> NativeApp.setEASUReconstructAsync(checked));
 
+        // Cenit 0.6.41: upscaler neuronal (Anime4K v3.2 S, MIT) como opcion aparte.
+        // Encendido por defecto; si el driver no lo compila, Present cae a EASU en
+        // el mismo cuadro (el HUD y la linea "Cenit present:" dicen cual corrio).
+        toggle(R.id.set_sw_nn, "nn_upscale", true,
+                checked -> NativeApp.setNNUpscaleAsync(checked));
+
         // La posición del spinner ES el valor de la clave (ver arrays.xml). Como
         // con medio píxel y cuotas: el primer disparo del adaptador se ADOPTA sin
         // escribir, para no guardar "Óptima" en el teléfono de todo el mundo.
@@ -984,6 +990,7 @@ public final class SettingsScreenController {
         check(R.id.set_sw_vu_superblock, prefs.getBoolean("vu_superblock", false));
         check(R.id.set_sw_async_shaders, prefs.getBoolean("async_shader_compile", false));
         check(R.id.set_sw_easu, prefs.getBoolean("easu_reconstruct", true));
+        check(R.id.set_sw_nn, prefs.getBoolean("nn_upscale", true));
         setSpinner(R.id.set_sp_framequeue,
                 prefs.getInt("frame_queue", NativeApp.defaultFrameLatencyQueue()));
         setSpinner(R.id.set_sp_preload,

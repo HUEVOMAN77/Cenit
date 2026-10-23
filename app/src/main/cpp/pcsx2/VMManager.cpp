@@ -3726,14 +3726,14 @@ void VMManager::WarnAboutUnsafeSettings()
 			// la misma funcion que GSopen usa para resolver Auto, y esta memoizada).
 			// EASU solo existe en Vulkan, asi que con OGL elegido a mano el aviso
 			// viejo es el correcto y queda intacto.
-			const bool easu_pedida = EmuConfig.GS.EASUReconstruct &&
-			                         (EmuConfig.GS.Renderer == GSRendererType::VK ||
-			                             (EmuConfig.GS.Renderer == GSRendererType::Auto &&
-			                                 GSUtil::GetPreferredRenderer() == GSRendererType::VK));
-			if (easu_pedida)
+			const bool reconstruccion_pedida = (EmuConfig.GS.NNUpscale || EmuConfig.GS.EASUReconstruct) &&
+			                                   (EmuConfig.GS.Renderer == GSRendererType::VK ||
+			                                       (EmuConfig.GS.Renderer == GSRendererType::Auto &&
+			                                           GSUtil::GetPreferredRenderer() == GSRendererType::VK));
+			if (reconstruccion_pedida)
 			{
 				append(ICON_FA_TV,
-					TRANSLATE_SV("VMManager", "Resolution is below native and EASU reconstruction is on: expect a softer image than native (the log line 'Cenit present' says whether it ran)."));
+					TRANSLATE_SV("VMManager", "Resolution is below native and reconstruction (NN or EASU) is on: expect a softer image than native (the log line 'Cenit present' says whether it ran)."));
 			}
 			else
 			{

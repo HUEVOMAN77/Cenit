@@ -208,7 +208,13 @@ bool GSTexture::IsFeedbackFormat(Format format)
 
 bool GSTexture::IsShaderWriteFormat(Format format)
 {
-	return format == Format::Color || format == Format::DepthColor;
+	// Cenit 0.6.41: ColorHDR (RGBA16F) entra aqui por la cadena neuronal. Las
+	// convoluciones de Anime4K escriben valores negativos y la pasada siguiente
+	// los separa con max(x,0)/max(-x,0); en RGBA8 esos negativos se recortarian a
+	// cero y la red ya no seria la misma. R16G16B16A16_SFLOAT tiene soporte de
+	// storage image obligatorio en Vulkan, y el bucle de CheckFeatures ya exige
+	// VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT para todo formato listado aqui.
+	return format == Format::Color || format == Format::ColorHDR || format == Format::DepthColor;
 }
 
 void GSTexture::GenerateMipmapsIfNeeded()

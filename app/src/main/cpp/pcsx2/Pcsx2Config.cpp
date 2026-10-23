@@ -750,6 +750,12 @@ Pcsx2Config::GSOptions::GSOptions()
 	// evidencia, así que ON por defecto es seguro: solo cambia el camino
 	// sub-nativo en Vulkan, y el usuario la puede apagar.
 	EASUReconstruct = true;
+	// Cenit 0.6.41: cadena neuronal. Encendida por defecto porque es la razon por
+	// la que se agrego, pero cae sola: si el driver no compila las pasadas o
+	// alguna falla, Present usa EASU en el mismo cuadro. La eleccion es del
+	// usuario porque cuesta mas GPU que EASU y en un telefono flojo puede
+	// convertir 60 fps en 55; apagarla devuelve el camino anterior exacto.
+	NNUpscale = true;
 	DisableFramebufferFetch = false;
 	DisablePS2DepthQuantization = false;
 	DisableVertexShaderExpand = false;
@@ -1001,6 +1007,7 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
 	SettingsWrapBitBool(DisableShaderCache);
 	SettingsWrapBitBool(AsyncTFXPipelineCompile);
 	SettingsWrapBitBool(EASUReconstruct);
+	SettingsWrapBitBool(NNUpscale);
 	SettingsWrapBitBool(DisableFramebufferFetch);
 	SettingsWrapBitBool(DisablePS2DepthQuantization);
 	SettingsWrapBitBool(DisableVertexShaderExpand);

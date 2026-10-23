@@ -1188,6 +1188,19 @@ Java_com_izzy2lost_psx2_NativeApp_setEASUReconstruct(JNIEnv* env, jclass, jboole
     (void)env;
 }
 
+// Cenit 0.6.41: upscaler neuronal (Anime4K v3.2 S, MIT). Es una segunda opcion,
+// no un reemplazo obligatorio: cuando esta encendida Present prueba NN primero y
+// cae a EASU si el driver no la tiene compilada o una pasada falla. La decision
+// queda escrita en el HUD y en la linea "Cenit present:" del registro.
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setNNUpscale(JNIEnv* env, jclass, jboolean enabled)
+{
+    s_settings_interface.SetBoolValue("EmuCore/GS", "NNUpscale", enabled == JNI_TRUE);
+    if (VMManager::HasValidVM()) VMManager::ApplySettings();
+    (void)env;
+}
+
 // La misma condición que usa ApplyHardwarePerformanceProfile para decidir el
 // default de MTVU, expuesta a Java para que el default de la preferencia no
 // pueda divergir del del núcleo.

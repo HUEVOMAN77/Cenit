@@ -465,17 +465,20 @@ __ri void ImGuiManager::DrawPerformanceOverlay(float& position_y, float scale, f
 				// cuando en realidad no ejecutaba.
 				int sw, sh, dw, dh;
 				bool easu;
+				bool nn;
 				int easu_stages;
-				GSgetPresentEvidence(&sw, &sh, &dw, &dh, &easu, &easu_stages);
+				GSgetPresentEvidence(&sw, &sh, &dw, &dh, &easu, &nn, &easu_stages);
 				if (sw > 0 && dw > 0)
 				{
 					// El ratio lineal con dos decimales: es el numero que dice si se esta
 					// dentro del rango para el que FSR1 EASU fue escrito (AMD declara
 					// "1x to 4x AREA", o sea hasta 2x lineal). Tambien se muestra cuantas
 					// pasadas uso la cadena, para poder leer que cada una quedo <=2x.
+					// Cenit 0.6.41: el nombre dice cual de las dos cadenas corrio; antes
+					// de esta version solo existia EASU y el rotulo era fijo.
 					const float ratio = static_cast<float>(dw) / static_cast<float>(sw);
-					s_present_evidence_line.format("PRESENT {}x{} -> {}x{}  x{:.2f}  EASU {}{}", sw, sh, dw, dh, ratio,
-						easu ? "ON" : "OFF", easu ? fmt::format(" x{}", easu_stages) : "");
+					s_present_evidence_line.format("PRESENT {}x{} -> {}x{}  x{:.2f}  {} {}{}", sw, sh, dw, dh, ratio,
+						nn ? "NN" : "EASU", easu ? "ON" : "OFF", easu ? fmt::format(" x{}", easu_stages) : "");
 					// ON en verde, OFF en blanco para que se lea sin confundirse con un error.
 					s_present_evidence_color = easu ? IM_COL32(100, 255, 100, 255) : white_color;
 					DRAW_LINE(osd_font, font_size, s_present_evidence_line.c_str(), s_present_evidence_color);

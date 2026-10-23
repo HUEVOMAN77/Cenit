@@ -659,6 +659,17 @@ public class NativeApp {
         runNativeSettingAsync("setEASUReconstruct", () -> setEASUReconstruct(enabled));
     }
 
+    // --- Cenit 0.6.41: upscaler neuronal (Anime4K v3.2 S, MIT) ----------------
+    // Cuatro convoluciones 3x3 con ReLU y un depth-to-space por cada x2, como
+    // pasadas compute de Vulkan al lado de EASU. No hay runtime de inferencia ni
+    // binario nuevo: los pesos viajan dentro de los shaders. Cuando esta encendida
+    // se prueba primero y, si falla, Present cae a EASU en el mismo cuadro; por eso
+    // apagarla es exactamente "volver a 0.6.40". Solo Vulkan, en caliente.
+    public static native void setNNUpscale(boolean enabled);
+    public static void setNNUpscaleAsync(boolean enabled) {
+        runNativeSettingAsync("setNNUpscale", () -> setNNUpscale(enabled));
+    }
+
     public static native String getLogDirectory();
     /** Carpeta de logs según el núcleo, o null si el binario nativo no está. */
     public static String safeGetLogDirectory() {

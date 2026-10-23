@@ -59,7 +59,10 @@ enum : u32
 	// el presupuesto de draws, porque un pool de 8192 samplers seria memoria
 	// reservada de balde. Si aun asi se agota, DoEASU devuelve false y Present
 	// degrada al estirado normal: nunca corrompe el frame.
-	MAX_SAMPLER_DESCRIPTORS_PER_FRAME = 8,
+	// Cenit 0.6.41: la cadena neuronal reserva hasta cinco samplers por etapa (dos
+	// etapas, diez) y puede caer a EASU en el mismo cuadro si falla; 16 cubre ambos
+	// caminos sin cambiar el orden de magnitud del pool.
+	MAX_SAMPLER_DESCRIPTORS_PER_FRAME = 16,
 	MAX_DESCRIPTOR_SETS_PER_FRAME = MAX_DRAW_CALLS_PER_FRAME * 2,
 
 	VERTEX_BUFFER_SIZE = 32 * 1024 * 1024,
@@ -2473,6 +2476,12 @@ bool GSDeviceVK::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 	// m_features.easu_reconstruct queda false y Present toma el camino de siempre.
 	if (!CompileEASUPipelines())
 		Console.WriteLn("VK: EASU unavailable, sub-native scaling will use the normal path");
+
+	// Cenit 0.6.41: la cadena neuronal es igual de aditiva. Si el driver no puede
+	// con estas pasadas o falta un .glsl, Present sigue con EASU (que ya esta
+	// compilada arriba) o con el estirado normal.
+	if (!CompileNNPipelines())
+		Console.WriteLn("VK: NN upscaler unavailable, sub-native scaling will use EASU or the normal path");
 
 	if (!CompileImGuiPipeline())
 		return false;
@@ -5062,6 +5071,80 @@ bool GSDeviceVK::CompileEASUPipelines()
 	return true;
 }
 
+// Cenit 0.6.41: pipelines del upscaler neuronal (Anime4K v3.2 S).
+//
+// Comparten un unico descriptor set layout y pipeline layout, porque las cinco
+// pasadas leen y escriben lo mismo: una textura de entrada, una salida RGBA16F,
+// un sampler y (solo el depth-to-space) la imagen base del residual. El push
+// constant es un ivec4: offset xy y tamano zw de la entrada.
+//
+// Los shaders no incluyen cabeceras de AMD ni nada externo: los pesos viajan
+// como literales en el propio .glsl, que es lo que hace que la cadena no
+// dependa de librerias de inferencia.
+bool GSDeviceVK::CompileNNPipelines()
+{
+	static constexpr const char* s_shader_names[NUM_NN_PASSES] = {
+		"shaders/vulkan/nn_conv0.glsl",
+		"shaders/vulkan/nn_conv1.glsl",
+		"shaders/vulkan/nn_conv2.glsl",
+		"shaders/vulkan/nn_conv3.glsl",
+		"shaders/vulkan/nn_d2s.glsl",
+	};
+
+	VkDevice dev = m_device;
+	Vulkan::DescriptorSetLayoutBuilder dslb;
+	Vulkan::PipelineLayoutBuilder plb;
+
+	if (m_optional_extensions.vk_khr_push_descriptor)
+		dslb.SetPushFlag();
+	dslb.AddBinding(0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT);
+	dslb.AddBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT);
+	dslb.AddBinding(2, VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT);
+	dslb.AddBinding(3, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT);
+	if ((m_nn_ds_layout = dslb.Create(dev)) == VK_NULL_HANDLE)
+		return false;
+	Vulkan::SetObjectName(dev, m_nn_ds_layout, "NN descriptor layout");
+
+	plb.AddPushConstants(VK_SHADER_STAGE_COMPUTE_BIT, 0, NUM_NN_CONSTANTS * sizeof(u32));
+	plb.AddDescriptorSet(m_nn_ds_layout);
+	if ((m_nn_pipeline_layout = plb.Create(dev)) == VK_NULL_HANDLE)
+		return false;
+	Vulkan::SetObjectName(dev, m_nn_pipeline_layout, "NN pipeline layout");
+
+	for (int i = 0; i < NUM_NN_PASSES; i++)
+	{
+		std::optional<std::string> source = ReadShaderSource(s_shader_names[i]);
+		if (!source.has_value())
+		{
+			Console.ErrorFmt("VK: Failed to read {}", s_shader_names[i]);
+			return false;
+		}
+
+		VkShaderModule mod = g_vulkan_shader_cache->GetComputeShader(source->c_str());
+		ScopedGuard mod_guard = [this, &mod]() { vkDestroyShaderModule(m_device, mod, nullptr); };
+		if (mod == VK_NULL_HANDLE)
+		{
+			Console.ErrorFmt("VK: Failed to compile {}", s_shader_names[i]);
+			return false;
+		}
+
+		Vulkan::ComputePipelineBuilder cpb;
+		cpb.SetPipelineLayout(m_nn_pipeline_layout);
+		cpb.SetShader(mod, "main");
+		m_nn_pipelines[i] = cpb.Create(dev, g_vulkan_shader_cache->GetPipelineCache(true), false);
+		if (!m_nn_pipelines[i])
+		{
+			Console.ErrorFmt("VK: Failed to create NN pipeline {}", i);
+			return false;
+		}
+
+		Vulkan::SetObjectName(dev, m_nn_pipelines[i], "NN pipeline %d", i);
+	}
+
+	m_features.nn_upscale = true;
+	return true;
+}
+
 bool GSDeviceVK::CompileImGuiPipeline()
 {
 	const std::optional<std::string> glsl = ReadShaderSource("shaders/vulkan/imgui.glsl");
@@ -5391,6 +5474,74 @@ bool GSDeviceVK::DoEASU(GSTexture* sTex, GSTexture* dTex, const std::array<u32, 
 	return true;
 }
 
+// Cenit 0.6.41: una pasada del upscaler neuronal. Es DoEASU con un binding mas
+// (la base del residual) y un unico push constant de 16 bytes. El sampler se
+// elige por pasada y se lee en el momento del dispatch, no se guarda: igual que
+// en DoEASU, ClearSamplerCache reasigna el handle.
+//
+// Los shaders de convolucion no necesitan sampler, pero el binding 2 existe en
+// el layout compartido; se les enlaza el point sampler, que es lo que ya usa
+// EASU. La pasada final si muestrea, y ahi el filtro lineal es parte del
+// algoritmo (la base es el estirado bilineal sobre el que se suma el residual).
+bool GSDeviceVK::DoNNPass(GSTexture* sTex, GSTexture* baseTex, GSTexture* dTex, int pass,
+	const GSVector4i& src_rect)
+{
+	if (pass < 0 || pass >= NUM_NN_PASSES || m_nn_pipelines[pass] == VK_NULL_HANDLE)
+		return false;
+
+	g_perfmon.Put(GSPerfMon::TextureCopies, 1);
+
+	EndRenderPass();
+
+	GSTextureVK* const sTexVK = static_cast<GSTextureVK*>(sTex);
+	GSTextureVK* const dTexVK = static_cast<GSTextureVK*>(dTex);
+	GSTextureVK* const baseVK = baseTex ? static_cast<GSTextureVK*>(baseTex) : sTexVK;
+	VkCommandBuffer cmdbuf = GetCurrentCommandBuffer();
+
+	sTexVK->TransitionToLayout(cmdbuf, GSTextureVK::Layout::ShaderReadOnly);
+	if (baseVK != sTexVK)
+		baseVK->TransitionToLayout(cmdbuf, GSTextureVK::Layout::ShaderReadOnly);
+	dTexVK->TransitionToLayout(cmdbuf, GSTextureVK::Layout::ComputeReadWriteImage);
+
+	const VkSampler sampler = (pass == NN_PASS_D2S) ? m_linear_sampler : m_point_sampler;
+	Vulkan::DescriptorSetUpdateBuilder dsub;
+	if (m_optional_extensions.vk_khr_push_descriptor)
+	{
+		dsub.AddImageDescriptorWrite(VK_NULL_HANDLE, 0, sTexVK->GetView(), sTexVK->GetVkLayout());
+		dsub.AddStorageImageDescriptorWrite(VK_NULL_HANDLE, 1, dTexVK->GetView(), dTexVK->GetVkLayout());
+		dsub.AddSamplerDescriptorWrite(VK_NULL_HANDLE, 2, sampler);
+		dsub.AddImageDescriptorWrite(VK_NULL_HANDLE, 3, baseVK->GetView(), baseVK->GetVkLayout());
+		dsub.PushUpdate(cmdbuf, VK_PIPELINE_BIND_POINT_COMPUTE, m_nn_pipeline_layout, 0, false);
+	}
+	else
+	{
+		VkDescriptorSet ds = AllocateDescriptorSetFromFramePool(m_nn_ds_layout);
+		if (ds == VK_NULL_HANDLE) [[unlikely]]
+			return false;
+		dsub.AddImageDescriptorWrite(ds, 0, sTexVK->GetView(), sTexVK->GetVkLayout());
+		dsub.AddStorageImageDescriptorWrite(ds, 1, dTexVK->GetView(), dTexVK->GetVkLayout());
+		dsub.AddSamplerDescriptorWrite(ds, 2, sampler);
+		dsub.AddImageDescriptorWrite(ds, 3, baseVK->GetView(), baseVK->GetVkLayout());
+		dsub.Update(m_device);
+		vkCmdBindDescriptorSets(cmdbuf, VK_PIPELINE_BIND_POINT_COMPUTE, m_nn_pipeline_layout, 0, 1, &ds, 0, nullptr);
+	}
+
+	static constexpr int threadGroupWorkRegionDim = 8;
+	const int dispatchX = (dTex->GetWidth() + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
+	const int dispatchY = (dTex->GetHeight() + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
+
+	const std::array<u32, NUM_NN_CONSTANTS> consts = {static_cast<u32>(src_rect.x), static_cast<u32>(src_rect.y),
+		static_cast<u32>(src_rect.width()), static_cast<u32>(src_rect.height())};
+
+	vkCmdPushConstants(cmdbuf, m_nn_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+		NUM_NN_CONSTANTS * sizeof(u32), consts.data());
+	vkCmdBindPipeline(cmdbuf, VK_PIPELINE_BIND_POINT_COMPUTE, m_nn_pipelines[pass]);
+	vkCmdDispatch(cmdbuf, dispatchX, dispatchY, 1);
+
+	dTexVK->TransitionToLayout(cmdbuf, GSTextureVK::Layout::ShaderReadOnly);
+
+	return true;
+}
 void GSDeviceVK::DestroyResources()
 {
 	if (m_tfx_ubo_descriptor_set != VK_NULL_HANDLE)
@@ -5466,6 +5617,20 @@ void GSDeviceVK::DestroyResources()
 	if (m_easu_ds_layout != VK_NULL_HANDLE)
 		vkDestroyDescriptorSetLayout(m_device, m_easu_ds_layout, nullptr);
 	m_easu_ds_layout = VK_NULL_HANDLE;
+	// Cenit 0.6.41: la cadena neuronal, con la misma politica de "puede estar
+	// nulo si la compilacion fallo" que EASU.
+	for (VkPipeline& pipe : m_nn_pipelines)
+	{
+		if (pipe != VK_NULL_HANDLE)
+			vkDestroyPipeline(m_device, pipe, nullptr);
+		pipe = VK_NULL_HANDLE;
+	}
+	if (m_nn_pipeline_layout != VK_NULL_HANDLE)
+		vkDestroyPipelineLayout(m_device, m_nn_pipeline_layout, nullptr);
+	m_nn_pipeline_layout = VK_NULL_HANDLE;
+	if (m_nn_ds_layout != VK_NULL_HANDLE)
+		vkDestroyDescriptorSetLayout(m_device, m_nn_ds_layout, nullptr);
+	m_nn_ds_layout = VK_NULL_HANDLE;
 	if (m_imgui_pipeline != VK_NULL_HANDLE)
 		vkDestroyPipeline(m_device, m_imgui_pipeline, nullptr);
 

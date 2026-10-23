@@ -629,7 +629,16 @@
 
                             <TextView
                                 style="@style/Cenit.Settings.Caption"
-                                android:text="Cuando la resolución interna baja de 1x (escalones 0.5x y 0.75x del ajuste dinámico), reconstruye la imagen a la resolución de salida con FidelityFX FSR1 en lugar de simplemente estirarla: encadena pasadas EASU de hasta 2x cada una (el rango para el que AMD escribió el filtro) y aplica un enfoque RCAS después, todo dentro de la propia función — ya no necesita activar la nitidez CAS. Sale bastante más nítida que el estirado, pero no inventa detalle que nunca se renderizó: no se confunde con 1x nativo. Solo funciona en Vulkan y se nota únicamente por debajo de 1x. Con el HUD de resolución activo, la línea PRESENT muestra con números si la reconstrucción está corriendo (EASU ON, en verde) o no (EASU OFF). Encendida por defecto desde 0.6.26 y se aplica sin reiniciar. Si en tu teléfono estuvo reconstruyendo de verdad o solo estirando lo dice ahora una línea del registro al parar el juego: «Cenit present: con-buffer=… hecho=… fallado=…»." />
+                                android:text="Cuando la resolución interna baja de 1x (escalones 0.5x y 0.75x del ajuste dinámico), reconstruye la imagen a la resolución de salida con FidelityFX FSR1 en lugar de simplemente estirarla: encadena pasadas EASU de hasta 2x cada una (el rango para el que AMD escribió el filtro) y aplica un enfoque RCAS después, todo dentro de la propia función — ya no necesita activar la nitidez CAS. Sale bastante más nítida que el estirado, pero no inventa detalle que nunca se renderizó: no se confunde con 1x nativo. Solo funciona en Vulkan y se nota únicamente por debajo de 1x. Con el HUD de resolución activo, la línea PRESENT muestra con números si la reconstrucción está corriendo (EASU ON, en verde) o no (EASU OFF). Encendida por defecto desde 0.6.26 y se aplica sin reiniciar. Si en tu teléfono estuvo reconstruyendo de verdad o solo estirando lo dice ahora una línea del registro al parar el juego: «Cenit present: con-buffer=… hecho=… fallado=…». El upscaler neuronal de abajo tiene prioridad: EASU entra cuando ese no corre o está apagado." />
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/set_sw_nn"
+                                style="@style/Cenit.Settings.Switch"
+                                android:text="Upscaler neuronal (Anime4K, encendido por defecto)" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Una red neuronal de verdad (Anime4K v3.2, licencia MIT libre) que corre como pasadas compute de Vulkan junto a EASU: cuatro convoluciones 3x3 y un reensamblado 2x por cada duplicación de tamaño. No trae binarios nuevos ni runtime de inferencia: los pesos viajan dentro de los shaders, así que es código abierto de punta a punta. Se prueba primero cuando la imagen interna está por debajo de la salida; si tu GPU no la soporta o una pasada falla, el mismo cuadro cae a EASU sin que tengas que tocar nada. Cuesta más GPU que EASU: si notas caídas de cuadros en juegos pesados, apagala y volvés al camino anterior. El HUD muestra NN ON cuando corrió (y EASU ON cuando cayó a EASU). Solo Vulkan, y se aplica sin reiniciar." />
                         </LinearLayout>
                     </com.google.android.material.card.MaterialCardView>
                 </LinearLayout>

@@ -2332,6 +2332,11 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         // de arriba: es lo que sincroniza el INI antes de arrancar la VM. El gate
         // real (resolución interna menor que la de salida) vive en C++.
         NativeApp.setEASUReconstruct(prefs.getBoolean("easu_reconstruct", true));
+        // Cenit 0.6.41: upscaler neuronal. Encendido por defecto y con caida
+        // automatica a EASU si el driver no lo puede compilar, asi que el default
+        // no puede dejar la pantalla en negro; apagarlo devuelve el camino de
+        // 0.6.40 tal cual. Se re-aplica aqui por la misma razon que EASU.
+        NativeApp.setNNUpscale(prefs.getBoolean("nn_upscale", true));
         if (mDynRes != null) mDynRes.reset();
         AudioOutputPreference.apply(this);
     }

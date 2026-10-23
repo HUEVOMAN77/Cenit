@@ -258,7 +258,11 @@ GSDevice::~GSDevice()
 	pxAssert(m_pool[0].empty() && m_pool[1].empty() && !m_merge && !m_weavebob && !m_blend && !m_mad &&
 		!m_target_tmp && !m_cas &&
 		std::all_of(std::begin(m_easu_stage), std::end(m_easu_stage),
-			[](const GSTexture* t) { return t == nullptr; }));
+			[](const GSTexture* t) { return t == nullptr; }) &&
+		std::all_of(std::begin(m_nn_stage), std::end(m_nn_stage),
+			[](const GSTexture* t) { return t == nullptr; }) &&
+		std::all_of(std::begin(m_nn_tmp), std::end(m_nn_tmp),
+			[](const auto& pair) { return pair[0] == nullptr && pair[1] == nullptr; }));
 }
 
 GSVector2i GSDevice::GetPresentationSize() const
@@ -1020,6 +1024,13 @@ void GSDevice::ClearCurrent()
 	// asi que nadie vuelve a tocar estas texturas hasta que se vuelvan a crear.
 	for (int i = 0; i < MAX_EASU_STAGES; i++)
 		delete m_easu_stage[i];
+	// Cenit 0.6.41: misma politica para los scratch de la cadena neuronal.
+	for (int i = 0; i < MAX_NN_STAGES; i++)
+	{
+		delete m_nn_stage[i];
+		delete m_nn_tmp[i][0];
+		delete m_nn_tmp[i][1];
+	}
 
 	m_merge = nullptr;
 	m_weavebob = nullptr;
@@ -1029,6 +1040,12 @@ void GSDevice::ClearCurrent()
 	m_cas = nullptr;
 	for (int i = 0; i < MAX_EASU_STAGES; i++)
 		m_easu_stage[i] = nullptr;
+	for (int i = 0; i < MAX_NN_STAGES; i++)
+	{
+		m_nn_stage[i] = nullptr;
+		m_nn_tmp[i][0] = nullptr;
+		m_nn_tmp[i][1] = nullptr;
+	}
 }
 
 void GSDevice::Merge(GSTexture* sTex[3], GSVector4* sRect, GSVector4* dRect, const GSVector2i& fs, const GSRegPMODE& PMODE, const GSRegEXTBUF& EXTBUF, u32 c)
@@ -1412,6 +1429,100 @@ bool GSDevice::EASUChain(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_u
 
 		cur_tex = m_easu_stage[i];
 		cur_rect = GSVector4i(0, 0, stage_w, stage_h);
+	}
+
+	tex = cur_tex;
+	src_rect = cur_rect;
+	src_uv = GSVector4(0.0f, 0.0f, 1.0f, 1.0f);
+	if (stages_out)
+		*stages_out = stages;
+	return true;
+}
+
+// Cenit 0.6.41: cadena del upscaler neuronal.
+//
+// A diferencia de EASU, el modelo S de Anime4K no tiene un parametro de escala:
+// siempre produce exactamente 2x por pasada. Por eso la cuenta de etapas es
+// ceil(log2(ratio)) y cada salto duplica. Si el destino queda por debajo de la
+// salida de la ultima etapa (un 960x720 pidio dos etapas y quedan 1024x896), el
+// present reduce: bajar de tamano no vuelve a promediar como el estirado que
+// motiva toda esta funcion, y no se agrega una pasada mas solo para ajustar el
+// ultimo 6%.
+//
+// Los buffers intermedios son RGBA16F y no RGBA8 a proposito: las convoluciones
+// producen valores negativos, y las dos convoluciones siguientes usan
+// max(x, 0) / max(-x, 0) para separar canales. En 8 bits esos negativos se
+// recortarian a cero y la red dejaria de ser la red. El formato final tambien
+// queda en 16F; el present lo convierte al muestrear.
+bool GSDevice::NNUpscaleChain(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect,
+	int* stages_out)
+{
+	const int dst_width = static_cast<int>(std::ceil(draw_rect.z - draw_rect.x));
+	const int dst_height = static_cast<int>(std::ceil(draw_rect.w - draw_rect.y));
+	if (dst_width <= 0 || dst_height <= 0)
+		return false;
+	if (src_rect.width() <= 0 || src_rect.height() <= 0)
+		return false;
+
+	const float ratio_x = static_cast<float>(dst_width) / static_cast<float>(src_rect.width());
+	const float ratio_y = static_cast<float>(dst_height) / static_cast<float>(src_rect.height());
+	const float max_ratio = std::max(ratio_x, ratio_y);
+
+	int stages = static_cast<int>(std::ceil(std::log2(std::max(max_ratio, 1.0f))));
+	stages = std::clamp(stages, 1, MAX_NN_STAGES);
+
+	GSTexture* cur_tex = tex;
+	GSVector4i cur_rect = src_rect;
+
+	for (int i = 0; i < stages; i++)
+	{
+		const int in_w = cur_rect.width();
+		const int in_h = cur_rect.height();
+		const int out_w = in_w * 2;
+		const int out_h = in_h * 2;
+
+		for (int t = 0; t < 2; t++)
+		{
+			GSTexture*& tmp = m_nn_tmp[i][t];
+			if (tmp && tmp->GetWidth() == in_w && tmp->GetHeight() == in_h)
+				continue;
+
+			delete tmp;
+			tmp = CreateSurface(GSTexture::ShaderWriteTexture, in_w, in_h, 1, GSTexture::Format::ColorHDR);
+			if (!tmp)
+			{
+				Console.ErrorFmt("Failed to allocate NN convolution buffer {} ({}x{}).", t, in_w, in_h);
+				return false;
+			}
+		}
+
+		if (!m_nn_stage[i] || m_nn_stage[i]->GetWidth() != out_w || m_nn_stage[i]->GetHeight() != out_h)
+		{
+			delete m_nn_stage[i];
+			m_nn_stage[i] =
+				CreateSurface(GSTexture::ShaderWriteTexture, out_w, out_h, 1, GSTexture::Format::ColorHDR);
+			if (!m_nn_stage[i])
+			{
+				Console.ErrorFmt("Failed to allocate NN stage {} ({}x{}).", i + 1, out_w, out_h);
+				return false;
+			}
+		}
+
+		const GSVector4i conv_rect(0, 0, in_w, in_h);
+		GSTexture* const tmp0 = m_nn_tmp[i][0];
+		GSTexture* const tmp1 = m_nn_tmp[i][1];
+		if (!DoNNPass(cur_tex, nullptr, tmp0, 0, cur_rect) ||
+			!DoNNPass(tmp0, nullptr, tmp1, 1, conv_rect) ||
+			!DoNNPass(tmp1, nullptr, tmp0, 2, conv_rect) ||
+			!DoNNPass(tmp0, nullptr, tmp1, 3, conv_rect) ||
+			!DoNNPass(tmp1, cur_tex, m_nn_stage[i], NN_PASS_D2S, cur_rect))
+		{
+			Console.WarningFmt("Applying NN stage {} failed.", i + 1);
+			return false;
+		}
+
+		cur_tex = m_nn_stage[i];
+		cur_rect = GSVector4i(0, 0, out_w, out_h);
 	}
 
 	tex = cur_tex;

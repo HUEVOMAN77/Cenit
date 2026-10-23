@@ -103,7 +103,7 @@ void GSRenderer::Destroy()
 	// ser legible.
 	Console.WriteLn("Cenit present: con-buffer=%llu | nativo=%llu"
 	               " sub-nativo=%llu (apagado=%llu hecho=%llu fallado=%llu) | "
-	               "opcion=%s soporte-driver=%s | cierre=%s",
+	               "opcion=%s soporte-driver=%s | nn-opcion=%s nn-driver=%s | cierre=%s",
 		(unsigned long long)ps.frames, (unsigned long long)ps.by_reason[cenit_present::kNativo],
 		(unsigned long long)ps.SubNative(),
 		(unsigned long long)ps.by_reason[cenit_present::kSubApagado],
@@ -111,6 +111,8 @@ void GSRenderer::Destroy()
 		(unsigned long long)ps.by_reason[cenit_present::kSubFallado],
 		GSConfig.EASUReconstruct ? "ON" : "OFF",
 		(g_gs_device && g_gs_device->Features().easu_reconstruct) ? "si" : "NO",
+		GSConfig.NNUpscale ? "ON" : "OFF",
+		(g_gs_device && g_gs_device->Features().nn_upscale) ? "si" : "NO",
 		ps.Closes() ? "ok" : "DESAJUSTE");
 	GSCapture::EndCapture();
 }
@@ -753,16 +755,34 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
 			// literalmente "no sé qué pasó en tu teléfono". sub_native y gate_open se
 			// calculan con las mismas comparaciones que ya decidían, sin añadir ni
 			// quitar un solo camino: esto es contabilidad del if que ya existía.
+			// Cenit 0.6.41 — el camino neuronal va PRIMERO, y cae solo.
+			//
+			// Cuando el usuario pide reconstruccion y la imagen interna es mas
+			// chica que el destino, se intenta la cadena neuronal (Anime4K S: cuatro
+			// convoluciones y un depth-to-space por cada x2). Si el driver no la
+			// tiene compilada o una pasada falla, se cae a EASU en el MISMO cuadro,
+			// sin tocar la preferencia del usuario. Esa es la diferencia con el error
+			// de 0.6.25 (gate invisible): aca toda decision deja rastro en la linea
+			// "Cenit present:" y en el HUD, tanto si corrio NN como si corrio EASU.
+			const bool nn_gate_open = GSConfig.NNUpscale && g_gs_device->Features().nn_upscale;
 			const bool easu_gate_open = GSConfig.EASUReconstruct && g_gs_device->Features().easu_reconstruct;
 			const bool easu_sub_native =
 				current->GetWidth() < m_present_dst.x && current->GetHeight() < m_present_dst.y;
-			if (easu_gate_open && easu_sub_native)
-				easu_ran = g_gs_device->EASUChain(current, src_rect, src_uv, draw_rect, &easu_stages);
-			m_present_stats.Tally(easu_sub_native, easu_gate_open, easu_ran);
-			m_easu_active = easu_ran;
-			m_easu_stages = easu_stages;
+			bool nn_ran = false;
+			if (easu_sub_native)
+			{
+				if (nn_gate_open)
+					nn_ran = g_gs_device->NNUpscaleChain(current, src_rect, src_uv, draw_rect, &easu_stages);
+				if (!nn_ran && easu_gate_open)
+					easu_ran = g_gs_device->EASUChain(current, src_rect, src_uv, draw_rect, &easu_stages);
+			}
+			const bool reconstruct_ran = nn_ran || easu_ran;
+			m_present_stats.Tally(easu_sub_native, nn_gate_open || easu_gate_open, reconstruct_ran);
+			m_easu_active = reconstruct_ran;
+			m_nn_active = nn_ran;
+			m_easu_stages = reconstruct_ran ? easu_stages : 0;
 
-			if (easu_ran)
+			if (reconstruct_ran)
 			{
 				// RCAS sobre la imagen ya reconstruida. Sin esto, EASU solo se ve
 				// "suave": el filtro preserva bordes pero no los realza, y AMD lo dice
@@ -779,7 +799,7 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
 				g_gs_device->CAS(current, src_rect, src_uv, draw_rect, true, std::max(user_sharpness, 0.5f));
 			}
 
-			if (GSConfig.CASMode != GSCASMode::Disabled && !easu_ran)
+			if (GSConfig.CASMode != GSCASMode::Disabled && !reconstruct_ran)
 			{
 				static bool cas_log_once = false;
 				if (g_gs_device->Features().cas_sharpening)

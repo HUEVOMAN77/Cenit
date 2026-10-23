@@ -816,6 +816,12 @@ struct Pcsx2Config
 					// "Cenit present:" del registro dice si reconstruyó o estiró.
 					// No va en RestartOptionsAreEqual: se aplica en caliente.
 					EASUReconstruct : 1,
+					// Cenit 0.6.41: upscaler neuronal (Anime4K v3.2 S, MIT). Cuando
+					// esta encendida y el frame es sub-nativo, Present intenta esta
+					// cadena primero y cae a EASU si falla. Es mas cara que EASU; el
+					// usuario la apaga desde ajustes si le cuesta cuadros. No va en
+					// RestartOptionsAreEqual: se aplica en caliente.
+					NNUpscale : 1,
 					DisableFramebufferFetch : 1,
 					DisablePS2DepthQuantization : 1,
 					DisableVertexShaderExpand : 1,

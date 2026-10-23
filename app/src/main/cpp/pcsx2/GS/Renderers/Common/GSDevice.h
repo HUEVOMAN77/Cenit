@@ -1414,6 +1414,7 @@ public:
 		bool stencil_buffer       : 1; ///< Supports stencil buffer, and can use for DATE.
 		bool cas_sharpening       : 1; ///< Supports sufficient functionality for contrast adaptive sharpening.
 		bool easu_reconstruct     : 1; ///< Cenit 0.6.25: Vulkan compute capable of the EASU upscaler (see DoEASU).
+		bool nn_upscale           : 1; ///< Cenit 0.6.41: las cinco pasadas compute del upscaler neuronal estan compiladas (ver DoNNPass).
 		bool test_and_sample_depth: 1; ///< Supports concurrently binding the depth-stencil buffer for sampling and depth testing.
 		bool no_ps2_z_quantization: 1; ///< Skip PS2 32-bit-fixed Z floor (saves SPIR-V DepthReplacing → re-enables early-ZS on tilers).
 		bool depth_feedback       : 1; ///< Depth feedback loops can be done with DS directly (otherwise need to copy to separate RT).  Implies `feedback_loops`.
@@ -1493,6 +1494,11 @@ protected:
 	static constexpr u32 NUM_CAS_CONSTANTS = 12; // 8 plus src offset x/y, 16 byte alignment
 	// Cenit 0.6.25: EASU necesita cuatro uvec4 (con0..con3) = 64 bytes.
 	static constexpr u32 NUM_EASU_CONSTANTS = 16; // 4 x uvec4, empujados como push constants
+	// Cenit 0.6.41: la cadena neuronal empuja 4 enteros (offset xy y tamano zw).
+	static constexpr u32 NUM_NN_CONSTANTS = 4;
+	// Cuatro convoluciones (0..3) y la pasada final depth-to-space.
+	static constexpr int NN_PASS_D2S = 4;
+	static constexpr int NUM_NN_PASSES = 5;
 	static constexpr u32 EXPAND_BUFFER_SIZE = sizeof(u16) * 16383 * 6;
 
 	WindowInfo m_window_info;
@@ -1513,6 +1519,16 @@ protected:
 	// etapa cuyo tamano pedido sea distinto del que tiene.
 	static constexpr int MAX_EASU_STAGES = 8;
 	GSTexture* m_easu_stage[MAX_EASU_STAGES] = {};
+	// Cenit 0.6.41: scratch de la cadena neuronal. El modelo S de Anime4K hace x2
+	// exactos por pasada, asi que dos etapas cubren hasta 4x lineal (mas que el
+	// salto peor que produce el gobernador). m_nn_tmp[] son los dos buffers de
+	// convolucion a resolucion de ENTRADA de la etapa en curso: con cuatro
+	// convoluciones alcanza ping-pong, y se recrean solo si cambia el tamano.
+	// Son dos por etapa porque cada etapa trabaja a una resolucion distinta: con
+	// un solo par, en el caso de 2 etapas se destruia y recreaba cada frame.
+	static constexpr int MAX_NN_STAGES = 2;
+	GSTexture* m_nn_stage[MAX_NN_STAGES] = {};
+	GSTexture* m_nn_tmp[MAX_NN_STAGES][2] = {};
 	GSTexture* m_colclip_rt = nullptr; ///< Temp hw colclip texture
 	GSTexture* m_ds_as_rt = nullptr; ///< Depth as color
 
@@ -1541,6 +1557,18 @@ protected:
 	/// construyendo la clase sin tocar una linea. Quien no lo soporta devuelve false y
 	/// GSRenderer::Present deja el frame como estaba (ver `Features().easu_reconstruct`).
 	virtual bool DoEASU(GSTexture* sTex, GSTexture* dTex, const std::array<u32, NUM_EASU_CONSTANTS>& constants)
+	{
+		return false;
+	}
+
+	/// Cenit 0.6.41: una pasada del upscaler neuronal (Anime4K v3.2 S). `pass` es
+	/// 0..3 para las convoluciones y NN_PASS_D2S para el depth-to-space final.
+	/// `src_rect` dice donde vive la imagen de entrada dentro de `sTex` (borde
+	/// fijado fuera de el). En la pasada final `baseTex` es la imagen de la etapa
+	/// (la que recibe el residual); en las demas se ignora y puede ser nullptr.
+	/// Misma politica que DoEASU: default false, y solo Vulkan lo implementa.
+	virtual bool DoNNPass(GSTexture* sTex, GSTexture* baseTex, GSTexture* dTex, int pass,
+		const GSVector4i& src_rect)
 	{
 		return false;
 	}
@@ -1798,6 +1826,24 @@ public:
 	/// de diseno. `*stages_out` (opcional) informa cuantas pasadas se usaron.
 	/// Devuelve false sin tocar nada si alguna etapa falla y el llamante decide.
 	bool EASUChain(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect,
+		int* stages_out);
+
+	/// Cenit 0.6.41: reconstruccion con un upscaler NEURONAL real (Anime4K v3.2
+	/// Upscale_CNN_x2_S, MIT de bloc97), como alternativa a EASU. Misma firma y
+	/// mismo contrato que `EASUChain()`: reasigna tex/src_rect/src_uv solo si todo
+	/// salio bien; si una pasada falla devuelve false y el llamante decide (Present
+	/// cae a EASU y, si tampoco, al estirado de siempre).
+	///
+	/// Que es de verdad: cuatro convoluciones 3x3 con ReLU (la primera 4 canales,
+	/// las tres siguientes 8) y un depth-to-space x2 que suma el residual sobre la
+	/// base bilineal. Los pesos son fijos y viajan en el propio shader; no hay
+	/// dependencia nueva, ni binario, ni runtime de inferencia.
+	///
+	/// Por que una cadena y no una pasada: este modelo esta entrenado para x2
+	/// exactos. Se encadena hasta MAX_NN_STAGES veces (cada una duplica), lo que
+	/// cubre 4x lineal; un jump de 0.5x a 4x deja la imagen a 4x y el present la
+	/// reduce, que es un escalado hacia abajo y no vuelve a emborronar.
+	bool NNUpscaleChain(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect,
 		int* stages_out);
 
 	bool ResizeRenderTarget(GSTexture** t, int w, int h, bool preserve_contents, bool recycle);

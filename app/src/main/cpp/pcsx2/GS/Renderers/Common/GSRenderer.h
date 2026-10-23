@@ -34,7 +34,8 @@ protected:
 	// que es exactamente como se perdio un ciclo de medicion entero en 0.6.25.
 	GSVector2i m_present_src{0, 0};   ///< tamano del buffer interno que se presenta
 	GSVector2i m_present_dst{0, 0};   ///< tamano de destino en pantalla (draw_rect)
-	bool m_easu_active = false;       ///< la cadena EASU -> RCAS corri6 este frame
+	bool m_easu_active = false;       ///< la cadena de reconstruccion corrio este frame (NN o EASU)
+	bool m_nn_active = false;         ///< Cenit 0.6.41: fue la cadena neuronal la que corrio
 	int m_easu_stages = 0;            ///< cuantas pasadas uso la cadena (0 = no corrio)
 
 	// Cenit 0.6.36: el HUD dice el frame ACTUAL; esto dice la SESION, y es lo que
@@ -84,9 +85,13 @@ public:
 		GSVector2i src;
 		GSVector2i dst;
 		bool easu_active;
+		bool nn_active; ///< Cenit 0.6.41: si no, la que corrio (si corrio) fue EASU
 		int easu_stages;
 	};
-	PresentEvidence GetPresentEvidence() const { return {m_present_src, m_present_dst, m_easu_active, m_easu_stages}; }
+	PresentEvidence GetPresentEvidence() const
+	{
+		return {m_present_src, m_present_dst, m_easu_active, m_nn_active, m_easu_stages};
+	}
 
 	bool BeginCapture(std::string filename, const GSVector2i& size = GSVector2i(0, 0));
 	void EndCapture();

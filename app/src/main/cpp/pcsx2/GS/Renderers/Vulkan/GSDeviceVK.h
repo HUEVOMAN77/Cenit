@@ -570,6 +570,12 @@ private:
 	VkDescriptorSetLayout m_easu_ds_layout = VK_NULL_HANDLE;
 	VkPipelineLayout m_easu_pipeline_layout = VK_NULL_HANDLE;
 	VkPipeline m_easu_pipeline = VK_NULL_HANDLE;
+	// Cenit 0.6.41: cadena neuronal. Un solo layout para las cinco pasadas (cuatro
+	// convoluciones y el depth-to-space): 0 = entrada, 1 = salida RGBA16F, 2 =
+	// sampler, 3 = base del residual (solo la usa la pasada final).
+	VkDescriptorSetLayout m_nn_ds_layout = VK_NULL_HANDLE;
+	VkPipelineLayout m_nn_pipeline_layout = VK_NULL_HANDLE;
+	std::array<VkPipeline, NUM_NN_PASSES> m_nn_pipelines = {};
 	VkPipeline m_imgui_pipeline = VK_NULL_HANDLE;
 
 	GSHWDrawConfig::VSConstantBuffer m_vs_cb_cache;
@@ -594,6 +600,12 @@ private:
 	// (m_easu_pipeline != VK_NULL_HANDLE); por eso GSDevice::EASUChain mira su retorno
 	// en cada etapa.
 	bool DoEASU(GSTexture* sTex, GSTexture* dTex, const std::array<u32, NUM_EASU_CONSTANTS>& constants) final;
+
+	// Cenit 0.6.41: una pasada de la cadena neuronal. Igual que DoEASU, si el
+	// pipeline no existe devuelve false y GSDevice::NNUpscaleChain aborta sin
+	// tocar el frame.
+	bool DoNNPass(GSTexture* sTex, GSTexture* baseTex, GSTexture* dTex, int pass,
+		const GSVector4i& src_rect) final;
 
 	VkSampler GetSampler(GSHWDrawConfig::SamplerSelector ss);
 	void ClearSamplerCache() final;
@@ -659,6 +671,11 @@ private:
 	// (m_features.easu_reconstruct queda false y GSRenderer::Present toma el camino
 	// de siempre).
 	bool CompileEASUPipelines();
+
+	// Cenit 0.6.41: los cinco pipelines del upscaler neuronal. Mismo contrato que
+	// CompileEASUPipelines: si algo falla no se crea el device, la feature queda
+	// apagada y Present sigue por EASU o por el estirado de siempre.
+	bool CompileNNPipelines();
 
 	bool CompileImGuiPipeline();
 	void RenderImGui();
