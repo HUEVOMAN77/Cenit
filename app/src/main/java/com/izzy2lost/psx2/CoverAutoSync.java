@@ -79,9 +79,10 @@ final class CoverAutoSync {
         LinkedHashSet<String> serials = new LinkedHashSet<>();
         SharedPreferences.Editor serialEditor = prefs.edit();
         for (String gameUri : uris) {
-            String serial = GameSerialUtils.normalizeLibrarySerial(
-                    prefs.getString("serial:" + gameUri, null));
-            if (serial.isEmpty()) serial = GameSerialUtils.serialFromUri(gameUri);
+            // Mismo orden de resolución que el botón manual del diálogo de
+            // portadas: sin la lectura del disco, todo juego cuyo nombre no trae
+            // el código (God Hand.iso, por ejemplo) se quedaba sin carátula.
+            String serial = GameSerialUtils.resolveSerial(prefs, gameUri, true);
             if (serial.isEmpty()) continue;
             serialEditor.putString("serial:" + gameUri, serial);
             if (prefs.getBoolean("custom_cover:" + serial, false)) continue;

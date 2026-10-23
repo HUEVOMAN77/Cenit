@@ -471,6 +471,30 @@ public class NativeApp {
     public static void setMTVUAsync(boolean enabled) {
         runNativeSettingAsync("setMTVU", () -> setMTVU(enabled));
     }
+    // Cenit 0.6.39 — ANGLE: OpenGL ES sobre Vulkan usando las librerías
+    // empaquetadas en el APK (libEGL_angle/libGLESv2_angle). En Mali/MediaTek
+    // el driver OpenGL del sistema suele rendir muy por debajo de su Vulkan.
+    // El contexto se crea al arrancar el juego: aplica en el próximo arranque.
+    // getAngleStatus responde la verdad: 0 apagado, 1 pedido, 2 cargado,
+    // 3 pedido pero no disponible (se usó el EGL del sistema).
+    public static native void setAngleEnabled(boolean enabled);
+    public static void setAngleEnabledAsync(boolean enabled) {
+        runNativeSettingAsync("setAngleEnabled", () -> setAngleEnabled(enabled));
+    }
+    public static native int getAngleStatus();
+    // FXAA: suaviza bordes en la presentación. Cuesta casi nada en un móvil
+    // y se aplica en caliente (GSRenderer lee la bandera cada cuadro).
+    public static native void setFxaa(boolean enabled);
+    public static void setFxaaAsync(boolean enabled) {
+        runNativeSettingAsync("setFxaa", () -> setFxaa(enabled));
+    }
+    // Colchón del stream de audio (SPU2/BufferMS). 50 ms es el valor del núcleo;
+    // subirlo amortigua silencios y cortes en teléfonos cargados a cambio de algo
+    // más de retraso entre imagen y sonido.
+    public static native void setAudioBufferMs(int ms);
+    public static void setAudioBufferMsAsync(int ms) {
+        runNativeSettingAsync("setAudioBufferMs", () -> setAudioBufferMs(ms));
+    }
     public static boolean defaultMTVU() {
         // Misma pregunta que hace el perfil en C++ (std::thread::hardware_concurrency()
         // >= 3), respondida por el mismo sitio: si Java contara los núcleos por su

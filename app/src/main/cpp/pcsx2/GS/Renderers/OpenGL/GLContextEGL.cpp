@@ -14,8 +14,36 @@
 #include <optional>
 #include <vector>
 
+#ifdef __ANDROID__
+#include <dlfcn.h>
+#endif
+
 static DynamicLibrary s_egl_library;
 static std::atomic_uint32_t s_egl_refcount = 0;
+
+// Cenit 0.6.39 — ANGLE. Ver GLContextEGL.h.
+static std::atomic_bool s_angle_requested{false};
+static std::atomic_int s_angle_status{0};
+
+#ifdef __ANDROID__
+// libEGL_angle.so declara DT_NEEDED "libGLESv2.so". El enlazador resuelve esa
+// dependencia por SONAME contra una librería ya cargada, así que abrir primero
+// libGLESv2_angle.so con RTLD_GLOBAL la satisface aunque el archivo se llame
+// distinto. Además deja sus símbolos visibles para cualquier dlsym(RTLD_DEFAULT).
+static void* s_angle_gles_handle = nullptr;
+#endif
+
+void GLContextEGL_SetAngleEnabled(bool enabled)
+{
+	s_angle_requested.store(enabled, std::memory_order_release);
+	if (!enabled)
+		s_angle_status.store(0, std::memory_order_release);
+}
+
+int GLContextEGL_GetAngleStatus()
+{
+	return s_angle_status.load(std::memory_order_acquire);
+}
 
 static bool LoadEGL()
 {
@@ -24,6 +52,32 @@ static bool LoadEGL()
 	if (s_egl_refcount.fetch_add(1, std::memory_order_acq_rel) == 0)
 	{
 		pxAssert(!s_egl_library.IsOpen());
+
+#ifdef __ANDROID__
+		if (s_angle_requested.load(std::memory_order_acquire))
+		{
+			s_angle_status.store(1, std::memory_order_release);
+			Error angle_error;
+			if (!s_angle_gles_handle)
+				s_angle_gles_handle = dlopen("libGLESv2_angle.so", RTLD_NOW | RTLD_GLOBAL);
+
+			if (s_angle_gles_handle && s_egl_library.Open("libEGL_angle.so", &angle_error))
+			{
+				Console.WriteLn("EGL: usando ANGLE (OpenGL ES sobre Vulkan) desde las librerías del APK.");
+				s_angle_status.store(2, std::memory_order_release);
+				return true;
+			}
+
+			Console.ErrorFmt("EGL: ANGLE está pedido pero no se pudo cargar ({}). Se usa el EGL del sistema.",
+				s_angle_gles_handle ? angle_error.GetDescription() : "falta libGLESv2_angle.so");
+			s_angle_status.store(3, std::memory_order_release);
+			if (s_angle_gles_handle)
+			{
+				dlclose(s_angle_gles_handle);
+				s_angle_gles_handle = nullptr;
+			}
+		}
+#endif
 
 		std::string egl_libname = DynamicLibrary::GetVersionedFilename("libEGL");
 		Console.WriteLnFmt("Loading EGL from {}...", egl_libname);
@@ -37,6 +91,9 @@ static bool LoadEGL()
 			if (!s_egl_library.Open(egl_libname.c_str(), &error))
 				Console.ErrorFmt("Failed to load EGL: {}", error.GetDescription());
 		}
+
+		if (s_angle_requested.load(std::memory_order_acquire) && !s_angle_status.load())
+			s_angle_status.store(3, std::memory_order_release);
 	}
 
 	return s_egl_library.IsOpen();

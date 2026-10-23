@@ -9,6 +9,15 @@
 
 #include <span>
 
+// Cenit 0.6.39 — selección de driver EGL.
+// Con esto encendido, LoadEGL carga las librerías ANGLE empaquetadas en el APK
+// (libEGL_angle.so / libGLESv2_angle.so) en vez del EGL del sistema, y todas las
+// funciones GL entran por el eglGetProcAddress de ANGLE. Sólo Android las trae.
+void GLContextEGL_SetAngleEnabled(bool enabled);
+
+// 0 apagado · 1 pedido · 2 ANGLE cargado · 3 pedido pero no disponible (cayó al sistema).
+int GLContextEGL_GetAngleStatus();
+
 class GLContextEGL : public GLContext
 {
 public:

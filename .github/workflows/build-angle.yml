@@ -2,6 +2,14 @@ name: Build ANGLE Vulkan Android libs
 
 on:
   workflow_dispatch:
+    inputs:
+      make_release:
+        description: "Publicar el pack como Release (cenit-angle-*), que build.yml empaqueta en el APK"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
 
 jobs:
   build-angle-android:
@@ -56,6 +64,21 @@ jobs:
           cd "${ANGLE_DIR}"
           autoninja -C out/Android libEGL libGLESv2
 
+      - name: Empaquetar con los nombres que carga Cenit
+        run: |
+          cd "${ANGLE_DIR}/out/Android"
+          # GN en Android ya suele producir libEGL_angle/libGLESv2_angle (el
+          # sufijo existe justamente para poder empaquetarlas sin chocar con las
+          # del sistema). Normalizamos por si la rama main cambia los nombres.
+          EGL=$(ls libEGL*.so | grep -v unstripped | head -1)
+          GLES=$(ls libGLESv2*.so | grep -v unstripped | head -1)
+          echo "EGL=$EGL GLES=$GLES"
+          rm -rf /tmp/angle && mkdir -p /tmp/angle
+          cp "$EGL" /tmp/angle/libEGL_angle.so
+          cp "$GLES" /tmp/angle/libGLESv2_angle.so
+          (cd /tmp/angle && zip -9 "${GITHUB_WORKSPACE}/Cenit-ANGLE-$(date -u +%Y%m%d).zip" libEGL_angle.so libGLESv2_angle.so)
+          ls -la "${GITHUB_WORKSPACE}"/Cenit-ANGLE-*.zip
+
       - name: Upload ANGLE Vulkan libs
         uses: actions/upload-artifact@v4
         with:
@@ -65,3 +88,15 @@ jobs:
             ${{ env.ANGLE_DIR }}/out/Android/libGLESv2*.so
             ${{ env.ANGLE_DIR }}/out/Android/lib.unstripped/libEGL*.so
             ${{ env.ANGLE_DIR }}/out/Android/lib.unstripped/libGLESv2*.so
+            Cenit-ANGLE-*.zip
+
+      - name: Publicar Release de ANGLE
+        if: inputs.make_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PACK=$(ls Cenit-ANGLE-*.zip)
+          TAG="cenit-angle-$(date -u +%Y%m%d-%H%M)"
+          gh release create "$TAG" "$PACK" \
+            --title "Cenit ANGLE (Vulkan, arm64)" \
+            --notes "Librerías ANGLE compiladas por el CI de Cenit (rama main de chromium/angle, backend Vulkan, arm64). Son las que empaqueta el APK: build.yml baja el pack más reciente de este canal y lo mete en jniLibs antes de compilar, así que el interruptor «ANGLE (OpenGL sobre Vulkan)» de Ajustes funciona sin que tengas que importar nada a mano."

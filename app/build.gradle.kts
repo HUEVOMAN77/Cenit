@@ -65,11 +65,11 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.izzy2lost.psx2"
+        applicationId = "com.huevoman77.cenit"
         minSdk = 26
         targetSdk = 36
-        versionCode = 75
-        versionName = "0.6.38"
+        versionCode = 76
+        versionName = "0.6.39"
 
         externalNativeBuild {
             cmake {

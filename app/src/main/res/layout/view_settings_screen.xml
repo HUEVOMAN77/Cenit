@@ -260,6 +260,26 @@
                                 android:text="Controlador GPU personalizado"
                                 app:icon="@drawable/settings_24px" />
 
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/set_sw_angle"
+                                style="@style/Cenit.Settings.Switch"
+                                android:text="ANGLE (OpenGL sobre Vulkan)" />
+
+                            <TextView
+                                android:id="@+id/set_tv_angle_note"
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="En MediaTek y Mali, el OpenGL del sistema suele quedar muy por debajo de su Vulkan. Con esto encendido, el render OpenGL pasa por ANGLE —OpenGL ES traducido a Vulkan— usando las librerías que trae el APK. Sólo afecta al render OpenGL; se aplica al arrancar el juego, no a la partida que está delante. Si el APK no trae las librerías, Cenit lo dice y sigue con el driver del sistema." />
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/set_sw_fxaa"
+                                style="@style/Cenit.Settings.Switch"
+                                android:text="FXAA (suavizar bordes)" />
+
+                            <TextView
+                                android:id="@+id/set_tv_fxaa_note"
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="Antialiasing barato: suaviza los bordes dentados que deja el escalado de la PS2 sin pedir apenas GPU. Funciona con Vulkan y OpenGL, y se aplica al instante mientras el juego corre. Apagado por defecto porque en resoluciones muy bajas puede emborronar un poco el texto de los menús." />
+
                             <View style="@style/Cenit.Settings.Divider" />
 
                             <!-- Cenit 0.6.28: el interruptor maestro. Va PRIMERO de
@@ -757,6 +777,19 @@
 
                             <Spinner
                                 android:id="@+id/set_sp_audio_output"
+                                style="@style/Cenit.Settings.Spinner" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.FieldLabel"
+                                android:layout_marginTop="14dp"
+                                android:text="Colchón de audio" />
+
+                            <TextView
+                                style="@style/Cenit.Settings.Caption"
+                                android:text="El sonido guarda 50 ms de ventaja por defecto. Si en algún juego la música se corta o entran silencios con el móvil cargado, sube el colchón: amortigua esos cortes a cambio de unos milisegundos más de retraso entre imagen y sonido. Se aplica al momento, también con el juego abierto." />
+
+                            <Spinner
+                                android:id="@+id/set_sp_audio_buffer"
                                 style="@style/Cenit.Settings.Spinner" />
                         </LinearLayout>
                     </com.google.android.material.card.MaterialCardView>

@@ -577,6 +577,24 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         launchGamesFolderPicker(true);
     }
 
+    /** Quita una carpeta de la biblioteca: deja de escanearse y se suelta el permiso. */
+    private void removeGamesFolder(String folderUri) {
+        if (TextUtils.isEmpty(folderUri)) return;
+        SharedPreferences prefs = getSharedPreferences("app_prefs", MODE_PRIVATE);
+        java.util.ArrayList<String> folders = getGameFolderUris(prefs);
+        if (!folders.remove(folderUri)) return;
+        saveGameFolderUris(prefs, folders);
+        try {
+            getContentResolver().releasePersistableUriPermission(android.net.Uri.parse(folderUri),
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        } catch (SecurityException | IllegalArgumentException ignored) {}
+        Toast.makeText(this, folders.isEmpty()
+                ? "Carpeta quitada. Ya no quedan carpetas de juegos."
+                : "Carpeta quitada.", Toast.LENGTH_SHORT).show();
+        refreshHomeScreenData();
+        refreshGameLibraryCacheAsync();
+    }
+
     private void launchGamesFolderPicker(boolean addToLibrary) {
         mAddingGamesFolder = addToLibrary;
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
@@ -832,7 +850,13 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         JSONArray arr = new JSONArray();
         for (String folder : folders) arr.put(folder);
         SharedPreferences.Editor editor = prefs.edit().putString(PREF_GAMES_FOLDER_URIS, arr.toString());
-        if (!folders.isEmpty()) editor.putString(PREF_GAMES_FOLDER_URI, folders.get(0));
+        if (!folders.isEmpty()) {
+            editor.putString(PREF_GAMES_FOLDER_URI, folders.get(0));
+        } else {
+            // Sin esto, la preferencia antigua resucitaba la carpeta borrada en el
+            // siguiente arranque (getGameFolderUris la vuelve a añadir).
+            editor.remove(PREF_GAMES_FOLDER_URI);
+        }
         editor.apply();
     }
 
@@ -1044,6 +1068,11 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
             @Override
             public void onAddGamesFolder() {
                 addGamesFolder();
+            }
+
+            @Override
+            public void onRemoveGamesFolder(String folderUri) {
+                removeGamesFolder(folderUri);
             }
 
             @Override
@@ -2262,6 +2291,17 @@ public class MainActivity extends AppCompatActivity implements GamesCoverDialogF
         // el de MTVU pregunta al núcleo, no a Java, para no divergir del perfil.
         NativeApp.setFastCDVD(prefs.getBoolean("fast_cdvd", false));
         NativeApp.setMTVU(prefs.getBoolean("mtvu", NativeApp.defaultMTVU()));
+        // Cenit 0.6.39: ANGLE y FXAA. Ninguno lo escribe el perfil de hardware,
+        // pero el flag nativo de ANGLE vive en memoria del proceso y muere con
+        // él: hay que volver a pedirlo antes de que se cree el primer contexto
+        // GL. FXAA se re-escribe igual para que el ini y la preferencia no
+        // puedan divergir.
+        NativeApp.setAngleEnabled(prefs.getBoolean("angle_egl", false));
+        NativeApp.setFxaa(prefs.getBoolean("fxaa_enabled", false));
+        // Cenit 0.6.39: colchón de audio. Se re-escribe en cada arranque para que
+        // el INI y la preferencia no diverjan; el default (50 ms) es el del
+        // núcleo, así que quien no toque Ajustes no cambia nada.
+        NativeApp.setAudioBufferMs(prefs.getInt("audio_buffer_ms", 50));
         // Cenit 0.6.28: ventana de streaming del ISO. Se re-aplica en cada
         // arranque porque el suelo de buffer lo lee el lector CUANDO SE ABRE el
         // disco: un cambio a mitad de partida no reabre nada, así que la voluntad

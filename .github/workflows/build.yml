@@ -43,6 +43,28 @@ jobs:
                   echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> keystore.properties
                   echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> keystore.properties
 
+            - name: Empaquetar ANGLE si hay un pack publicado
+              # Cenit 0.6.39: el interruptor «ANGLE (OpenGL sobre Vulkan)» necesita
+              # libEGL_angle.so/libGLESv2_angle.so dentro del APK. Esas librerías
+              # las produce build-angle.yml y las publica en un release
+              # cenit-angle-*; acá se baja el pack más reciente, nada más. Si no
+              # existe todavía, el APK sale igual y el interruptor avisa que no
+              # hay librerías. Nunca debe tumbar el build.
+              continue-on-error: true
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  set -euo pipefail
+                  TAG=$(gh release list -R "$GITHUB_REPOSITORY" --limit 60 --json tagName --jq '.[].tagName' | grep '^cenit-angle-' | head -1 || true)
+                  if [ -z "${TAG:-}" ]; then echo "sin release de ANGLE todavía; el APK sale sin ANGLE"; exit 0; fi
+                  ASSET=$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep '^Cenit-ANGLE-' | head -1 || true)
+                  if [ -z "${ASSET:-}" ]; then echo "release $TAG sin zip de ANGLE; el APK sale sin ANGLE"; exit 0; fi
+                  mkdir -p app/src/main/jniLibs/arm64-v8a
+                  rm -rf /tmp/angle && mkdir -p /tmp/angle
+                  gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "$ASSET" -D /tmp/angle
+                  unzip -o "/tmp/angle/$ASSET" -d app/src/main/jniLibs/arm64-v8a
+                  ls -la app/src/main/jniLibs/arm64-v8a
+
             - name: Build debug APK
               if: github.event.inputs.build_type == 'debug'
               run: ./gradlew assembleDebug

@@ -1,0 +1,4 @@
+Esta carpeta la llena el CI.
+build.yml baja el pack Cenit-ANGLE-*.zip del release cenit-angle-* más reciente
+y lo descomprime acá como libEGL_angle.so + libGLESv2_angle.so antes de compilar.
+En local queda vacía a propósito: sin ANGLE el emulador usa el driver del sistema.

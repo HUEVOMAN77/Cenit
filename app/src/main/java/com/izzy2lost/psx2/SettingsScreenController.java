@@ -99,6 +99,10 @@ public final class SettingsScreenController {
     // Cenit 0.6.28: ventana de streaming del ISO — última posición mostrada, con
     // la guardia de adopción de siempre (el primer disparo del spinner es 0).
     private int isoBufferShown = -1;
+    // Cenit 0.6.39: colchón de audio. Misma guardia que el ISO: el primer
+    // onItemSelected siempre llega con la posición 0, y adoptarlo como elección
+    // del usuario borraría el valor guardado con solo abrir Ajustes.
+    private int audioBufferShown = -1;
     // Cenit 0.6.31 (Fase 1): modo del sintonizador mostrado. Mismo centinela y la
     // misma razón: el primer onItemSelected es posición 0 sea cual sea el valor
     // guardado, y adoptarlo como "no escrito" apagaría el tuner con solo abrir
@@ -308,6 +312,24 @@ public final class SettingsScreenController {
         // Resolución dinámica: el regidor lee la preferencia en cada tick y solo
         // necesita que le devuelvan el techo cuando se apaga con el juego corriendo.
         toggle(R.id.set_sw_dynres, "dynamic_res", true, null);
+
+        // Cenit 0.6.39 — ANGLE y FXAA (issue #4).
+        // ANGLE sólo cambia de dónde se carga EGL; el contexto se crea al
+        // arrancar el juego, así que se aplica en el próximo arranque.
+        // FXAA se aplica en caliente (GSRenderer lo consulta cada cuadro).
+        toggle(R.id.set_sw_angle, "angle_egl", false, checked -> {
+            NativeApp.setAngleEnabledAsync(checked);
+            if (checked) {
+                boolean packaged = new java.io.File(
+                        context.getApplicationInfo().nativeLibraryDir, "libEGL_angle.so").exists();
+                android.widget.Toast.makeText(context,
+                        packaged
+                                ? "ANGLE activado: OpenGL irá por Vulkan en el próximo juego."
+                                : "Este APK no trae las librerías ANGLE; se usará el driver del sistema.",
+                        android.widget.Toast.LENGTH_LONG).show();
+            }
+        });
+        toggle(R.id.set_sw_fxaa, "fxaa_enabled", false, NativeApp::setFxaaAsync);
 
         // 0.6.5 (invento Cenit): memoria por juego y turbo de cargas. El regidor
         // lee ambas preferencias en cada start(); no hay que notificarle nada.
@@ -704,6 +726,39 @@ public final class SettingsScreenController {
             AudioOutputPreference.setMode(context, position);
             AudioOutputPreference.apply(context);
         });
+
+        // Cenit 0.6.39: colchón del stream. La posición 0 es el default del
+        // núcleo (50 ms) y no escribe nada; el resto sube el margen antes de que
+        // el motor tenga que rellenar con silencio. Se aplica en caliente: el
+        // núcleo reabre el stream al ver cambiar StreamParameters.
+        spinner(R.id.set_sp_audio_buffer, R.array.audio_buffer_entries, position -> {
+            if (audioBufferShown < 0) { audioBufferShown = position; return; }
+            if (position == audioBufferShown) return;
+            final int ms = audioBufferMsFor(position);
+            prefs.edit().putInt("audio_buffer_ms", ms).apply();
+            NativeApp.setAudioBufferMsAsync(ms);
+            audioBufferShown = position;
+        });
+    }
+
+    /** Posición del spinner → milisegundos de colchón. */
+    static int audioBufferMsFor(int position) {
+        switch (position) {
+            case 1: return 75;
+            case 2: return 100;
+            case 3: return 150;
+            case 4: return 200;
+            default: return 50;
+        }
+    }
+
+    /** Milisegundos guardados → posición del spinner. */
+    static int audioBufferPositionFor(int ms) {
+        if (ms >= 200) return 4;
+        if (ms >= 150) return 3;
+        if (ms >= 100) return 2;
+        if (ms >= 75) return 1;
+        return 0;
     }
 
     private void bindPatches() {
@@ -840,6 +895,8 @@ public final class SettingsScreenController {
         if (masterNote != null)
             masterNote.setText(PlayabilityBundle.describe(PerfProfile.tier(context)));
         check(R.id.set_sw_dynres, prefs.getBoolean("dynamic_res", true));
+        check(R.id.set_sw_angle, prefs.getBoolean("angle_egl", false));
+        check(R.id.set_sw_fxaa, prefs.getBoolean("fxaa_enabled", false));
         check(R.id.set_sw_adaptive, prefs.getBoolean("adaptive_perf", true));
         check(R.id.set_sw_autoturbo, prefs.getBoolean("auto_turbo", false));
         // Cenit 0.6.31 (Fase 1): el modo, no una booleana. La lectura es por el
@@ -1062,6 +1119,8 @@ public final class SettingsScreenController {
         setSpinner(R.id.set_sp_aspect, prefs.getInt("aspect_ratio", 1));
         setSpinner(R.id.set_sp_edge_crop, edgeCropPixelsToIndex(prefs.getInt("edge_crop", 0)));
         setSpinner(R.id.set_sp_audio_output, AudioOutputPreference.getMode(context));
+        audioBufferShown = audioBufferPositionFor(prefs.getInt("audio_buffer_ms", 50));
+        setSpinner(R.id.set_sp_audio_buffer, audioBufferShown);
 
         check(R.id.set_sw_vsync, prefs.getBoolean("vsync_enabled", false));
         check(R.id.set_sw_load_textures, prefs.getBoolean("load_textures", false));

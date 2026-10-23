@@ -44,6 +44,7 @@ public final class HomeScreenController {
         void onPlayGame(String gameUri);
         void onGameLongPress(String gameTitle, String gameUri);
         void onAddGamesFolder();
+        void onRemoveGamesFolder(String folderUri);
         void onOpenSetup();
         void onOpenSettings();
         void onImportBios();
@@ -69,6 +70,8 @@ public final class HomeScreenController {
     private final List<HomeGameAdapter.Entry> entries = new ArrayList<>();
     // Último estado de escaneo publicado, para no reescribir el aviso al cambiar de pestaña.
     private boolean lastScanning = false;
+    // La tarjeta de "falta la BIOS" solo cabe en Inicio; Biblioteca la ignora.
+    private boolean statusWanted = false;
 
     private View root;
     private View statusCard;
@@ -211,9 +214,10 @@ public final class HomeScreenController {
             host.onRefreshLibrary();
         });
         if (tabFolders != null) tabFolders.setOnClickListener(v -> {
-            // "Carpetas" no es una vista propia: lleva directo a añadir una carpeta.
+            // "Carpetas" ya no abre el selector a ciegas: enseña qué carpetas
+            // sigue Cenit, deja quitarlas y añadir otra.
             tabFolders.setSelected(true);
-            host.onAddGamesFolder();
+            showFoldersDialog();
             mainHandler.postDelayed(() -> tabFolders.setSelected(false), 400);
         });
         // "Ajustes" ya no es una vista dentro del inicio: abre la pantalla completa.
@@ -235,7 +239,9 @@ public final class HomeScreenController {
     private static final int TAB_SETTINGS = 2;
     private int currentTab = TAB_HOME;
 
-    /** Inicio y Biblioteca muestran la rejilla; Ajustes solo marca el estado activo. */
+    /** Inicio y Biblioteca comparten la rejilla, pero no la cabecera: Inicio es el
+     *  panel de bienvenida (marca, estado, recientes) y Biblioteca es el catálogo
+     *  completo, sin adorno, con la búsqueda delante. Ajustes solo marca el estado. */
     private void selectTab(int tab) {
         currentTab = tab;
         boolean settings = tab == TAB_SETTINGS;
@@ -250,7 +256,43 @@ public final class HomeScreenController {
         setSelected(tabHome, tab == TAB_HOME);
         setSelected(tabLibrary, tab == TAB_LIBRARY);
         setSelected(tabSettings, settings);
+        applyTabChrome();
         if (!settings) renderEmpty();
+    }
+
+    /** Lo que distingue a Inicio de Biblioteca, para que no sean el mismo menú. */
+    private void applyTabChrome() {
+        boolean library = currentTab == TAB_LIBRARY;
+        setShown(root.findViewById(R.id.home_logo), !library);
+        setShown(root.findViewById(R.id.home_wordmark), !library);
+        setShown(root.findViewById(R.id.home_tagline), !library);
+        if (statusCard != null) {
+            statusCard.setVisibility(!library && statusWanted ? View.VISIBLE : View.GONE);
+        }
+        if (librarySectionTitle != null) {
+            librarySectionTitle.setText(library ? "TODOS TUS JUEGOS" : "TU BIBLIOTECA");
+        }
+        // En Biblioteca la búsqueda está siempre a la vista (es su única herramienta);
+        // en Inicio se queda detrás de la lupa para no cargar el panel.
+        if (searchRow != null) {
+            if (library) {
+                searchRow.setVisibility(View.VISIBLE);
+            } else if (searchRow.getVisibility() == View.VISIBLE) {
+                searchRow.setVisibility(View.GONE);
+                if (searchInput != null) searchInput.setText("");
+                if (adapter != null) adapter.setFilter("");
+            }
+        }
+        if (library) {
+            if (recentSectionHeader != null) recentSectionHeader.setVisibility(View.GONE);
+            if (recentRow != null) recentRow.setVisibility(View.GONE);
+        } else {
+            renderSections();
+        }
+    }
+
+    private static void setShown(@Nullable View view, boolean shown) {
+        if (view != null) view.setVisibility(shown ? View.VISIBLE : View.GONE);
     }
 
     private void setSelected(@Nullable View tab, boolean selected) {
@@ -390,13 +432,21 @@ public final class HomeScreenController {
                 int n = Math.min(nameSnapshot.length, uriSnapshot.length);
                 String[] serials = new String[n];
                 LinkedHashSet<String> serialSet = new LinkedHashSet<>();
+                SharedPreferences.Editor serialEditor = prefs.edit();
                 for (int i = 0; i < n; i++) {
-                    String serial = GameSerialUtils.normalizeLibrarySerial(
-                            prefs.getString("serial:" + uriSnapshot[i], null));
-                    if (serial.isEmpty()) serial = GameSerialUtils.serialFromUri(uriSnapshot[i]);
+                    // Preferencia, cabecera del disco y nombre del archivo: el
+                    // mismo orden que el botón manual de portadas. Antes solo se
+                    // probaba el nombre, y los juegos con nombres sin código se
+                    // quedaban sin carátula.
+                    String serial = GameSerialUtils.resolveSerial(prefs, uriSnapshot[i], true);
+                    if (!serial.isEmpty()
+                            && !serial.equals(prefs.getString("serial:" + uriSnapshot[i], null))) {
+                        serialEditor.putString("serial:" + uriSnapshot[i], serial);
+                    }
                     serials[i] = serial;
                     if (!serial.isEmpty()) serialSet.add(serial);
                 }
+                serialEditor.apply();
                 Map<String, String> cached = CoverCache.findValidCoverPaths(context, serialSet);
                 // Con "auto_covers" activo, lo que falte se descarga en segundo plano.
                 CoverAutoSync.maybeSyncAsync(context, uriSnapshot);
@@ -464,7 +514,8 @@ public final class HomeScreenController {
         } catch (Throwable ignored) {
             recents.clear();
         }
-        boolean show = !recents.isEmpty() && recentSectionHeader != null && recentRow != null;
+        boolean show = !recents.isEmpty() && recentSectionHeader != null && recentRow != null
+                && currentTab != TAB_LIBRARY;
         if (recentSectionHeader != null) recentSectionHeader.setVisibility(show ? View.VISIBLE : View.GONE);
         if (recentRow != null) recentRow.setVisibility(show ? View.VISIBLE : View.GONE);
         if (show) {
@@ -502,6 +553,89 @@ public final class HomeScreenController {
         return !GameFolders.list(context).isEmpty();
     }
 
+    /** Explica y permite administrar las carpetas que Cenit recorre buscando juegos. */
+    private void showFoldersDialog() {
+        final List<String> folders = GameFolders.list(context);
+        final int pad = dp(20);
+        final android.widget.LinearLayout box = new android.widget.LinearLayout(context);
+        box.setOrientation(android.widget.LinearLayout.VERTICAL);
+        box.setPadding(pad, dp(8), pad, 0);
+
+        TextView intro = new TextView(context);
+        intro.setText("Cenit busca aquí tus copias de PS2 (ISO, CHD o CSO). "
+                + "Una carpeta puede contener subcarpetas y se recuerda entre sesiones.");
+        intro.setTextSize(13f);
+        intro.setTextColor(context.getColor(R.color.home_muted));
+        box.addView(intro);
+
+        final androidx.appcompat.app.AlertDialog[] dialogRef =
+                new androidx.appcompat.app.AlertDialog[1];
+
+        if (folders.isEmpty()) {
+            TextView none = new TextView(context);
+            none.setText("Todavía no hay ninguna carpeta añadida.");
+            none.setTextSize(14f);
+            none.setPadding(0, dp(18), 0, dp(6));
+            box.addView(none);
+        } else {
+            for (String folderUri : folders) {
+                android.widget.LinearLayout row = new android.widget.LinearLayout(context);
+                row.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+                row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+                row.setPadding(0, dp(10), 0, dp(10));
+
+                TextView name = new TextView(context);
+                name.setText(folderLabel(folderUri));
+                name.setTextSize(14f);
+                name.setSingleLine(true);
+                name.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+                row.addView(name, new android.widget.LinearLayout.LayoutParams(
+                        0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+                TextView remove = new TextView(context);
+                remove.setText("Quitar");
+                remove.setTextSize(13f);
+                remove.setPadding(dp(12), dp(6), 0, dp(6));
+                remove.setTextColor(context.getColor(R.color.cenit_neon_blue));
+                remove.setOnClickListener(v -> {
+                    if (dialogRef[0] != null) dialogRef[0].dismiss();
+                    host.onRemoveGamesFolder(folderUri);
+                    mainHandler.post(this::showFoldersDialog);
+                });
+                row.addView(remove);
+
+                box.addView(row);
+            }
+        }
+
+        dialogRef[0] = new com.google.android.material.dialog.MaterialAlertDialogBuilder(context,
+                com.google.android.material.R.style.ThemeOverlay_Material3_MaterialAlertDialog)
+                .setTitle("Carpetas de juegos")
+                .setView(box)
+                .setPositiveButton("Añadir carpeta", (d, w) -> host.onAddGamesFolder())
+                .setNegativeButton("Cerrar", null)
+                .create();
+        dialogRef[0].show();
+    }
+
+    private String folderLabel(String folderUri) {
+        try {
+            android.net.Uri uri = android.net.Uri.parse(folderUri);
+            androidx.documentfile.provider.DocumentFile dir =
+                    androidx.documentfile.provider.DocumentFile.fromTreeUri(context, uri);
+            if (dir != null && dir.getName() != null && !dir.getName().isEmpty()) {
+                return dir.getName();
+            }
+            String last = uri.getLastPathSegment();
+            if (last != null) {
+                last = android.net.Uri.decode(last);
+                int colon = last.indexOf(':');
+                return colon >= 0 && colon + 1 < last.length() ? last.substring(colon + 1) : last;
+            }
+        } catch (Throwable ignored) {}
+        return folderUri;
+    }
+
     /** Estado de configuración: qué falta antes de poder jugar. */
     public void submitStatus(boolean hasBios, boolean hasDataFolder, boolean hasGamesFolder) {
         List<String> missing = new ArrayList<>();
@@ -510,9 +644,13 @@ public final class HomeScreenController {
         if (!hasGamesFolder) missing.add("una carpeta de juegos");
 
         if (missing.isEmpty()) {
+            statusWanted = false;
             if (statusCard != null) statusCard.setVisibility(View.GONE);
         } else {
-            if (statusCard != null) statusCard.setVisibility(View.VISIBLE);
+            statusWanted = true;
+            if (statusCard != null) {
+                statusCard.setVisibility(currentTab == TAB_LIBRARY ? View.GONE : View.VISIBLE);
+            }
             if (statusText != null) statusText.setText("Falta " + join(missing));
             if (statusAction != null) statusAction.setVisibility(View.VISIBLE);
         }

@@ -43,6 +43,7 @@
 #include "USB/USB.h"
 #include "MTGS.h"
 #include "GS/Renderers/Vulkan/VKLoader.h"
+#include "GS/Renderers/OpenGL/GLContextEGL.h" // Cenit 0.6.39: interruptor ANGLE
 #include "SDL3/SDL.h"
 #ifdef __aarch64__
 // Cenit 0.6.15 (Fase 1): sonda de trazas VU — header puro C++, sin vixl.
@@ -799,6 +800,65 @@ Java_com_izzy2lost_psx2_NativeApp_setFastCDVD(JNIEnv* env, jclass, jboolean enab
 {
     s_settings_interface.SetBoolValue("EmuCore/Speedhacks", "fastCDVD", enabled == JNI_TRUE);
     if (VMManager::HasValidVM()) VMManager::ApplySettings();
+}
+
+// ===========================================================================
+// Cenit 0.6.39 — ANGLE para OpenGL (issue #4: OpenGL en MediaTek).
+//
+// Enciende el camino que ya tiene el cargador de EGL (GLContextEGL.cpp): en vez
+// de abrir el libEGL del sistema, abre las libEGL_angle.so / libGLESv2_angle.so
+// empaquetadas en el APK. Como PCSX2 carga EGL y GLES con glad a través del
+// eglGetProcAddress de esa misma librería, con sólo cambiar la EGL el render
+// entero pasa por ANGLE sobre Vulkan. El contexto se crea al arrancar el juego:
+// se aplica en el próximo arranque, no en la partida que está delante.
+//
+// getAngleStatus devuelve qué pasó de verdad (0 apagado · 1 pedido · 2 ANGLE
+// cargado · 3 pedido pero no disponible). La UI lo usa para no mentir: si el
+// APK no trae las librerías, el interruptor lo dice en vez de fingir.
+// ===========================================================================
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setAngleEnabled(JNIEnv* env, jclass, jboolean enabled)
+{
+    GLContextEGL_SetAngleEnabled(enabled == JNI_TRUE);
+    Console.WriteLn("ANGLE: pedido=%d", enabled == JNI_TRUE ? 1 : 0);
+}
+
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_izzy2lost_psx2_NativeApp_getAngleStatus(JNIEnv*, jclass)
+{
+    return static_cast<jint>(GLContextEGL_GetAngleStatus());
+}
+
+// Cenit 0.6.39 — FXAA (issue #4). Ya existía en el núcleo (EmuConfig.GS.FXAA,
+// aplicado cada cuadro en GSRenderer::VSync) pero el puerto Android no lo
+// exponía. Se aplica en caliente con ApplySettings, como fastCDVD/MTVU.
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setFxaa(JNIEnv* env, jclass, jboolean enabled)
+{
+    s_settings_interface.SetBoolValue("EmuCore/GS", "fxaa", enabled == JNI_TRUE);
+    if (VMManager::HasValidVM()) VMManager::ApplySettings();
+}
+
+// ===========================================================================
+// Cenit 0.6.39 — colchón de audio (issue #4: la música se corta en algunos
+// juegos). El stream de Oboe se abre con 50 ms; en un móvil cargado eso se
+// queda corto y el motor rellena con silencio hasta recuperarse. El tamaño es
+// una preferencia de Java; aquí solo se escribe en SPU2/BufferMS y, si hay VM,
+// ApplySettings recrea el stream (SPU2::CheckForConfigChanges compara
+// StreamParameters y reabre). No se toca ningún otro camino de audio.
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_psx2_NativeApp_setAudioBufferMs(JNIEnv* env, jclass, jint ms)
+{
+    int clamped = ms;
+    if (clamped < 20) clamped = 20;
+    if (clamped > 250) clamped = 250;
+    s_settings_interface.SetIntValue("SPU2/Output", "BufferMS", clamped);
+    if (VMManager::HasValidVM()) VMManager::ApplySettings();
+    Console.WriteLn("SPU2: colchon de audio a %d ms", clamped);
 }
 
 extern "C"

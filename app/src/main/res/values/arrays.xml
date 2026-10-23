@@ -163,6 +163,18 @@
         <item>Dieciséis veces (2 MB)</item>
     </string-array>
 
+    <!-- Colchón del stream de audio (0.6.39). La posición se traduce a
+         milisegundos en el controlador (50 << ... no; tabla explícita): 50 ms es
+         el valor del núcleo y la posición 0, así que quien no lo toque no escribe
+         nada. Más colchón = menos silencios por carga en móviles lentos. -->
+    <string-array name="audio_buffer_entries">
+        <item>Estándar (50 ms)</item>
+        <item>Amplio (75 ms)</item>
+        <item>Estable (100 ms)</item>
+        <item>Muy estable (150 ms)</item>
+        <item>Máximo (200 ms)</item>
+    </string-array>
+
     <!-- Cola de cuadros (VsyncQueueSize), Cenit 0.6.6. La posición ES el valor
          de la clave: 0 = ritmo óptimo (menos input lag, más exigente), 1..n =
          n cuadros por delante. -->

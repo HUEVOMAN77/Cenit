@@ -1,5 +1,7 @@
 package com.izzy2lost.psx2;
 
+import android.content.SharedPreferences;
+
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -33,6 +35,28 @@ final class GameSerialUtils {
 
     static boolean isPs2Serial(String candidate) {
         return !normalizePs2Serial(candidate).isEmpty();
+    }
+
+    /**
+     * Serial completo de un juego, en el mismo orden que usa el diálogo de
+     * portadas: lo ya guardado, la cabecera del disco y, como último recurso, el
+     * nombre del archivo. La descarga automática solo miraba el nombre, así que
+     * los juegos con nombres sin código ("God Hand.iso") nunca recibían portada.
+     *
+     * allowNative solo debe ser true fuera del hilo de UI: abre el disco para
+     * leer su identificador.
+     */
+    static String resolveSerial(SharedPreferences prefs, String uriStr, boolean allowNative) {
+        if (uriStr == null || uriStr.isEmpty()) return "";
+        String serial = normalizeLibrarySerial(
+                prefs != null ? prefs.getString("serial:" + uriStr, null) : null);
+        if (serial.isEmpty() && allowNative) {
+            try {
+                serial = normalizeLibrarySerial(NativeApp.getGameSerialSafe(uriStr));
+            } catch (Throwable ignored) {}
+        }
+        if (serial.isEmpty()) serial = serialFromUri(uriStr);
+        return serial;
     }
 
     /**
