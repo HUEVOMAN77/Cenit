@@ -1,63 +1,46 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- ==========================================================================
-         Mandos en pantalla — paleta "neón fantasma" (0.6.34)
+         Mandos en pantalla — "cristal blanco" (0.6.42)
          ==========================================================================
-         El pedido fue que se vean como la captura del usuario (contornos finos
-         cian/magenta sobre negro, formas achaflanadas) pero MAS transparentes,
-         para que no tapen el juego. Dos reglas que se sostienen en estos valores:
+         Reemplaza la paleta neón cian/magenta de 0.6.34. La referencia del
+         usuario son aros blancos finos y translúcidos con los glifos de color;
+         el color deja de estar en el anillo y queda solo en el glifo. Dos
+         reglas que se sostienen en estos valores:
 
-         1) El RELLENO es prácticamente nada (#0… → 0-8 % de opacidad). Lo que se
-            ve es el contorno, no la pastilla. Un relleno de 25 % sobre un menú
-            brillante ya es una mancha.
-         2) El CONTORNO en reposo anda por el 45-55 % de opacidad y al presionar
-            sube a ~90 %. Es el único canal por el que el usuario sabe que tocó:
-            bajarlo más sería un mando que no responde, y subirlo en reposo sería
-            tapar el juego. El pressed es generoso a propósito; el reposo no.
-            La MISMA banda aplica a los glifos (Δ ○ ✕ □, la cruceta) y al texto de
-            las etiquetas: no es una ley de los anillos, es del mando entero.
+         1) El RELLENO es prácticamente nada (0 % en reposo). Lo que se ve es el
+            contorno, no la pastilla: el mando está encima del juego.
+         2) El CONTORNO en reposo anda por el 60 % y al presionar sube a ~95 %.
+            Es el único canal por el que el usuario sabe que tocó.
 
-         Cian y magenta no son decorativas: se alternan por familia de botones
-         (hombro izquierdo cian / derecho magenta, igual SELECT/START) para que
-         se lean como pares, igual que en la captura. -->
+         El rosa queda reservado a los gatillos (L2/R2): en la referencia son
+         los únicos anillos que no son blancos, y así se leen como analógicos
+         (media presión) y no como botones. -->
 
-    <!-- Neón base -->
-    <color name="neon_cyan">#FF35E7FF</color>
-    <color name="neon_magenta">#FFC24DFF</color>
+    <!-- Contornos. Blanco neutro para todo, rosa para los gatillos. -->
+    <color name="overlay_ring">#99FFFFFF</color>
+    <color name="overlay_ring_pressed">#F2FFFFFF</color>
+    <color name="overlay_ring_trigger">#99FFA6D9</color>
+    <color name="overlay_ring_trigger_pressed">#F0FFC2E6</color>
 
-    <!-- Contornos de las pastillas (L1/L2/R1/R2/SELECT/START). El estado
-         "reposo" es el alpha bajo del que habla la regla 2. -->
-    <color name="overlay_ring">#736B7FAD</color>
-    <color name="overlay_ring_pressed">#E694A8FF</color>
-    <color name="overlay_ring_cyan">#8C35E7FF</color>
-    <color name="overlay_ring_cyan_pressed">#F06FF2FF</color>
-    <color name="overlay_ring_magenta">#8CC24DFF</color>
-    <color name="overlay_ring_magenta_pressed">#F0DA8CFF</color>
-
-    <!-- Relleno: casi invisible en reposo, apenas insinuado al presionar. -->
+    <!-- Relleno: nada en reposo, apenas un velo al presionar. -->
     <color name="overlay_fill">#00000000</color>
-    <color name="overlay_fill_pressed">#14243458</color>
+    <color name="overlay_fill_pressed">#1AFFFFFF</color>
 
-    <!-- Texto de los botones (L1/L2/SELECT/…): legible sin ser un cartel. Mismo
-         presupuesto de la regla 2 que contornos y glifos (#8C = 55 %): la primera
-         versión de esta paleta lo dejaba en #B3 = 70 %, y el verificador lo dejó
-         pasar porque solo miraba los anillos. Una etiqueta al 70 % sobre un anillo
-         al 55 % es el mando pintándose dos veces. -->
-    <color name="overlay_text">#8CC2CBD8</color>
+    <!-- Texto de los botones (L1/L2/SELECT/…): mismo presupuesto que el anillo
+         en reposo para que el mando no se pinte dos veces. -->
+    <color name="overlay_text">#B8FFFFFF</color>
     <color name="overlay_text_pressed">#FFFFFFFF</color>
-    <color name="overlay_ripple">#2680A0FF</color>
+    <color name="overlay_ripple">#33FFFFFF</color>
 
     <!-- ==========================================================================
          Paleta del stick analógico (JoystickView lo pinta a mano en Canvas)
          ==========================================================================
-         En la captura el stick es un disco oscuro con un aro cian brillante y
-         un anillo exterior fino. Se baja el alfa de la base (antes #B3 = 70 %
-         de negro sólido, que era un parche opaco encima del juego) y se deja el
-         aro como lo único que se ve. -->
-    <color name="overlay_stick_ring">#8C35E7FF</color>
-    <color name="overlay_stick_ring_active">#F06FF2FF</color>
-    <color name="overlay_stick_ring_outer">#66C24DFF</color>
-    <color name="overlay_stick_base">#4D0B1018</color>
-    <color name="overlay_stick_knob_hi">#CC39445A</color>
-    <color name="overlay_stick_knob_lo">#CC0C1017</color>
+         En la referencia el stick es un aro blanco fino con una perla
+         translúcida dentro. Sin relleno oscuro: el juego se ve a través. -->
+    <color name="overlay_stick_ring">#99FFFFFF</color>
+    <color name="overlay_stick_ring_active">#F2FFFFFF</color>
+    <color name="overlay_stick_base">#14000000</color>
+    <color name="overlay_stick_knob_hi">#4DFFFFFF</color>
+    <color name="overlay_stick_knob_lo">#26FFFFFF</color>
 </resources>

@@ -25,26 +25,22 @@
     </style>
 
     <!-- ======================================================================
-         Mandos en pantalla — "neón fantasma" (0.6.34)
+         Mandos en pantalla — "cristal blanco" (0.6.42)
          ======================================================================
-         La forma de la captura del usuario no es una pastilla redondeada: son
-         alas con la punta exterior cortada en diagonal (L2 cortada a la
-         izquierda, L1 a la derecha, y espejado en R). Eso se modela con
-         cornerFamily="cut" sobre cada esquina, no con un radio.
+         Todos los botones son círculos de aro blanco fino, sin relleno, con el
+         color puesto SOLO en el glifo (△ verde, □ violeta, ○ rojo, ✕ azul). Es
+         lo que se ve en la referencia del usuario: el mando es un contorno, no
+         una pieza opaca encima del juego.
 
-         OJO con un orden que no es obvio: MaterialButton resuelve primero la
-         shapeAppearanceOverlay y DESPUES aplica app:cornerRadius si viene
-         setado, o sea el radio PISARÍA el corte. Por eso existe
-         PSX2.OverlayButton (padre común SIN radio ni shape) y las variantes de
-         ala/pétalo heredan de él y ponen SOLO shapeAppearanceOverlay, que
-         define las cuatro esquinas. Heredar de OverlayPill y "anular" el radio
-         con 0dp habría dado un rectángulo sin corte.
+         El rosa queda para L2/R2: son gatillos analógicos y en la referencia
+         son los únicos anillos que no son blancos.
 
-         Lo que cambió respecto a 0.6.33 en cuanto a transparencia: relleno
-         nulo y contorno al ~55 % en reposo. El pedido fue literal "más
-         transparencia para que no afecte", y el mando está encima del juego. -->
+         OJO con una trampa de MaterialButton: primero resuelve
+         shapeAppearanceOverlay y DESPUES aplica cornerRadius si viene setado.
+         Por eso acá se usa cornerRadius grande (100dp = círculo para cualquier
+         tamaño <=200dp) y no una forma compartida. -->
 
-    <!-- Base común de todo botón del overlay: sin forma, sin radio. -->
+    <!-- Base común de todo botón del overlay. -->
     <style name="PSX2.OverlayButton" parent="Widget.Material3.Button.UnelevatedButton">
         <item name="backgroundTint">@color/overlay_fill_sel</item>
         <item name="rippleColor">@color/overlay_ripple</item>
@@ -57,124 +53,32 @@
         <item name="android:insetBottom">0dp</item>
     </style>
 
-    <!-- Esquinas cortadas: ala izquierda (L2, R1) y ala derecha (L1, R2).
-         Cada estilo define las CUATRO esquinas a propósito: si se dejara alguna
-         sin definir, heredaría la forma fully-rounded del botón M3 y el corte
-         se vería a medias. -->
-    <style name="PSX2.Shape.WingLeft" parent="">
-        <item name="cornerFamilyTopLeft">cut</item>
-        <item name="cornerSizeTopLeft">13dp</item>
-        <item name="cornerFamilyBottomLeft">cut</item>
-        <item name="cornerSizeBottomLeft">13dp</item>
-        <item name="cornerFamilyTopRight">rounded</item>
-        <item name="cornerSizeTopRight">10dp</item>
-        <item name="cornerFamilyBottomRight">rounded</item>
-        <item name="cornerSizeBottomRight">10dp</item>
-    </style>
-
-    <style name="PSX2.Shape.WingRight" parent="">
-        <item name="cornerFamilyTopRight">cut</item>
-        <item name="cornerSizeTopRight">13dp</item>
-        <item name="cornerFamilyBottomRight">cut</item>
-        <item name="cornerSizeBottomRight">13dp</item>
-        <item name="cornerFamilyTopLeft">rounded</item>
-        <item name="cornerSizeTopLeft">10dp</item>
-        <item name="cornerFamilyBottomLeft">rounded</item>
-        <item name="cornerSizeBottomLeft">10dp</item>
-    </style>
-
-    <!-- Pétalos de la cruceta: cuadrado con las cuatro puntas cortadas, que es
-         como se ve en la captura (no un círculo suelto). -->
-    <style name="PSX2.Shape.Petal" parent="">
-        <item name="cornerFamily">cut</item>
-        <item name="cornerSize">9dp</item>
-    </style>
-
-    <!-- Pastilla fantasma (L3/R3, fast-forward y cualquier botón de texto).
-         Relleno transparente de verdad: lo que se ve es el contorno. -->
-    <style name="PSX2.OverlayPill" parent="PSX2.OverlayButton">
-        <item name="strokeColor">@color/overlay_ring_sel</item>
-        <item name="strokeWidth">1.5dp</item>
-        <item name="cornerRadius">12dp</item>
-        <item name="android:letterSpacing">0.08</item>
-        <item name="android:paddingLeft">14dp</item>
-        <item name="android:paddingRight">14dp</item>
-    </style>
-
-    <!-- Cuatro variantes: ala + color. El color no es adorno: cian y magenta se
-         alternan para que el par L2/L1 (y R1/R2) se lea de un golpe, igual que
-         en la captura. HEREDAN DE OverlayButton, no de OverlayPill: ver el aviso
-         de arriba sobre cornerRadius. -->
-    <style name="PSX2.OverlayPill.WingCyanLeft" parent="PSX2.OverlayButton">
-        <item name="shapeAppearanceOverlay">@style/PSX2.Shape.WingLeft</item>
-        <item name="strokeColor">@color/overlay_ring_cyan_sel</item>
-        <item name="strokeWidth">1.5dp</item>
-        <item name="android:letterSpacing">0.08</item>
-        <item name="android:paddingLeft">14dp</item>
-        <item name="android:paddingRight">14dp</item>
-    </style>
-
-    <style name="PSX2.OverlayPill.WingCyanRight" parent="PSX2.OverlayButton">
-        <item name="shapeAppearanceOverlay">@style/PSX2.Shape.WingRight</item>
-        <item name="strokeColor">@color/overlay_ring_cyan_sel</item>
-        <item name="strokeWidth">1.5dp</item>
-        <item name="android:letterSpacing">0.08</item>
-        <item name="android:paddingLeft">14dp</item>
-        <item name="android:paddingRight">14dp</item>
-    </style>
-
-    <style name="PSX2.OverlayPill.WingMagentaLeft" parent="PSX2.OverlayButton">
-        <item name="shapeAppearanceOverlay">@style/PSX2.Shape.WingLeft</item>
-        <item name="strokeColor">@color/overlay_ring_magenta_sel</item>
-        <item name="strokeWidth">1.5dp</item>
-        <item name="android:letterSpacing">0.08</item>
-        <item name="android:paddingLeft">14dp</item>
-        <item name="android:paddingRight">14dp</item>
-    </style>
-
-    <style name="PSX2.OverlayPill.WingMagentaRight" parent="PSX2.OverlayButton">
-        <item name="shapeAppearanceOverlay">@style/PSX2.Shape.WingRight</item>
-        <item name="strokeColor">@color/overlay_ring_magenta_sel</item>
-        <item name="strokeWidth">1.5dp</item>
-        <item name="android:letterSpacing">0.08</item>
-        <item name="android:paddingLeft">14dp</item>
-        <item name="android:paddingRight">14dp</item>
-    </style>
-
-    <!-- SELECT / START: pastilla redonda con anillo de su color. -->
-    <style name="PSX2.OverlayPill.Cyan" parent="PSX2.OverlayPill">
-        <item name="strokeColor">@color/overlay_ring_cyan_sel</item>
-    </style>
-
-    <style name="PSX2.OverlayPill.Magenta" parent="PSX2.OverlayPill">
-        <item name="strokeColor">@color/overlay_ring_magenta_sel</item>
-    </style>
-
-    <!-- Botón circular (pausa, L3/R3). -->
+    <!-- Botón circular: hombros, cruceta, faciales y los clics de stick. -->
     <style name="PSX2.OverlayCircle" parent="PSX2.OverlayButton">
         <item name="strokeColor">@color/overlay_ring_sel</item>
         <item name="strokeWidth">1.5dp</item>
-        <item name="cornerRadius">50dp</item>
+        <item name="cornerRadius">100dp</item>
         <item name="android:paddingLeft">0dp</item>
         <item name="android:paddingRight">0dp</item>
     </style>
 
-    <!-- Pétalo de la cruceta: sin cornerRadius, solo el overlay cortado. -->
-    <style name="PSX2.OverlayCircle.Petal" parent="PSX2.OverlayButton">
-        <item name="shapeAppearanceOverlay">@style/PSX2.Shape.Petal</item>
-        <item name="strokeColor">@color/overlay_ring_cyan_sel</item>
+    <!-- Gatillo (L2/R2): mismo círculo, anillo rosa. -->
+    <style name="PSX2.OverlayCircle.Trigger" parent="PSX2.OverlayCircle">
+        <item name="strokeColor">@color/overlay_ring_trigger_sel</item>
+    </style>
+
+    <!-- Pétalo de la cruceta. En 0.6.34 era un cuadrado con las puntas
+         cortadas; en la referencia son círculos sueltos como el resto. -->
+    <style name="PSX2.OverlayCircle.Petal" parent="PSX2.OverlayCircle" />
+
+    <!-- Etiqueta suelta (SELECT / START): pastilla con el mismo aro, letra
+         espaciada y sin relleno. -->
+    <style name="PSX2.OverlayPill" parent="PSX2.OverlayButton">
+        <item name="strokeColor">@color/overlay_ring_sel</item>
         <item name="strokeWidth">1.5dp</item>
-        <item name="android:paddingLeft">0dp</item>
-        <item name="android:paddingRight">0dp</item>
-    </style>
-
-    <!-- Faciales: anillo del color del glifo (triángulo/cruz cian,
-         círculo/cuadrado magenta). -->
-    <style name="PSX2.OverlayCircle.FaceCyan" parent="PSX2.OverlayCircle">
-        <item name="strokeColor">@color/overlay_ring_cyan_sel</item>
-    </style>
-
-    <style name="PSX2.OverlayCircle.FaceMagenta" parent="PSX2.OverlayCircle">
-        <item name="strokeColor">@color/overlay_ring_magenta_sel</item>
+        <item name="cornerRadius">100dp</item>
+        <item name="android:letterSpacing">0.14</item>
+        <item name="android:paddingLeft">18dp</item>
+        <item name="android:paddingRight">18dp</item>
     </style>
 </resources>

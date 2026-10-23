@@ -1,7 +1,6 @@
 package com.izzy2lost.psx2;
 
 import android.content.Context;
-import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -18,22 +17,13 @@ public class JoystickView extends View {
     }
 
     private final Paint basePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint innerRingPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint outerRingPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    // Arco magenta del borde exterior: en la referencia es lo que hace que el
-    // stick se lea como parte del mismo set que los hombros, no como un disco
-    // suelto. Es decorativo y se dibuja con sweepAngle fijo, sin estado.
-    private final Paint accentArcPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint knobPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint knobRimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private float centerX, centerY, radius, knobX, knobY, knobRadius;
     private boolean isDragging = false;
     private int activePointerId = MotionEvent.INVALID_POINTER_ID;
     private OnMoveListener listener;
-
-    // Textura de puntos de la perla: un bitmap pequeño que se repite sobre el
-    // degradado (grip estilo DualShock).
-    private Paint gripPaint;
 
     public JoystickView(Context ctx) { super(ctx); init(); }
     public JoystickView(Context ctx, AttributeSet attrs) { super(ctx, attrs); init(); }
@@ -49,57 +39,24 @@ public class JoystickView extends View {
         basePaint.setColor(baseFill);
         basePaint.setStyle(Paint.Style.FILL);
 
-        // Anillo interno fino (el "cráter" alrededor de la perla)
-        innerRingPaint.setColor(ring);
-        innerRingPaint.setStyle(Paint.Style.STROKE);
-        innerRingPaint.setStrokeWidth(dp(1));
-        innerRingPaint.setAlpha(120);
-
-        // Anillo exterior: el aro que se ve en reposo
+        // 0.6.42: un solo aro, fino y blanco, como en la referencia. Antes había
+        // un anillo interno y dos arcos magenta decorativos; el stick se leía
+        // como otra familia de mandos distinta a la de los botones.
         outerRingPaint.setColor(ring);
         outerRingPaint.setStyle(Paint.Style.STROKE);
-        outerRingPaint.setStrokeWidth(dp(2.5f));
-
-        // Arco de acento (magenta), dos tramos opuestos del borde exterior.
-        accentArcPaint.setColor(ContextCompat.getColor(getContext(),
-                R.color.overlay_stick_ring_outer));
-        accentArcPaint.setStyle(Paint.Style.STROKE);
-        accentArcPaint.setStrokeWidth(dp(3.5f));
-        accentArcPaint.setStrokeCap(Paint.Cap.ROUND);
+        outerRingPaint.setStrokeWidth(dp(2f));
 
         knobPaint.setStyle(Paint.Style.FILL);
         knobRimPaint.setStyle(Paint.Style.STROKE);
-        knobRimPaint.setStrokeWidth(dp(1));
+        knobRimPaint.setStrokeWidth(dp(1.5f));
         knobRimPaint.setColor(ringActive);
 
-        gripPaint = new Paint();
-        gripPaint.setShader(new android.graphics.BitmapShader(
-                makeGripBitmap(), android.graphics.Shader.TileMode.REPEAT,
-                android.graphics.Shader.TileMode.REPEAT));
-
-        // El shader del degradado de la perla se crea en onSizeChanged (necesita radios).
         this.knobHi = knobHi;
         this.knobLo = knobLo;
         setClickable(true);
     }
 
     private int knobHi, knobLo;
-
-    private static Bitmap makeGripBitmap() {
-        // Rejilla de puntos finos sobre fondo transparente, 12x12 px @hdpi-ish.
-        int size = 14;
-        Bitmap bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
-        Canvas c = new Canvas(bmp);
-        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        p.setColor(Color.argb(26, 255, 255, 255));
-        float r = size * 0.09f;
-        c.drawCircle(size * 0.25f, size * 0.25f, r, p);
-        c.drawCircle(size * 0.75f, size * 0.25f, r, p);
-        c.drawCircle(size * 0.50f, size * 0.50f, r, p);
-        c.drawCircle(size * 0.25f, size * 0.75f, r, p);
-        c.drawCircle(size * 0.75f, size * 0.75f, r, p);
-        return bmp;
-    }
 
     public void setOnMoveListener(OnMoveListener l) { this.listener = l; }
 
@@ -110,12 +67,13 @@ public class JoystickView extends View {
         centerY = h / 2f;
         // Make the visible base circle smaller relative to the view size
         radius = Math.min(w, h) * 0.36f;
-        knobRadius = radius * 0.46f;
-        // Degradado de la perla: luz arriba-izquierda, sombra abajo-derecha.
+        knobRadius = radius * 0.62f;
+        // Perla translúcida: apenas un velo blanco con luz arriba-izquierda, como
+        // el círculo interior de la referencia. No tapa el juego.
         knobPaint.setShader(new RadialGradient(
                 centerX - knobRadius * 0.35f, centerY - knobRadius * 0.45f, knobRadius * 1.9f,
-                new int[]{knobHi, knobLo, Color.argb(230, 4, 6, 10)},
-                new float[]{0f, 0.65f, 1f},
+                new int[]{knobHi, knobLo, Color.argb(0, 255, 255, 255)},
+                new float[]{0f, 0.75f, 1f},
                 Shader.TileMode.CLAMP));
         resetKnob();
     }
@@ -129,30 +87,11 @@ public class JoystickView extends View {
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        // Base del cráter
+        // Base del cráter y aro exterior: lo único que se ve en reposo.
         canvas.drawCircle(centerX, centerY, radius, basePaint);
-        // Anillo exterior (aro)
         canvas.drawCircle(centerX, centerY, radius, outerRingPaint);
-        // Dos arcos de acento en el borde, opuestos (centrados en 137° y 317°):
-        // el detalle que en la referencia hace que el stick pertenezca al mismo
-        // set neón que los hombros.
-        final float arc = radius + dp(2f);
-        final float boxL = centerX - arc, boxT = centerY - arc;
-        final float boxW = arc * 2f, boxH = arc * 2f;
-        canvas.drawArc(boxL, boxT, boxL + boxW, boxT + boxH, 110f, 55f, false, accentArcPaint);
-        canvas.drawArc(boxL, boxT, boxL + boxW, boxT + boxH, 290f, 55f, false, accentArcPaint);
-        // Anillo interior alrededor de la perla
-        canvas.drawCircle(centerX, centerY, radius * 0.78f, innerRingPaint);
-        // Perla: degradado + textura de puntos + borde iluminado
+        // Perla: velo translúcido con borde iluminado.
         canvas.drawCircle(knobX, knobY, knobRadius, knobPaint);
-        if (gripPaint != null) {
-            canvas.save();
-            android.graphics.Path clip = new android.graphics.Path();
-            clip.addCircle(knobX, knobY, knobRadius, android.graphics.Path.Direction.CW);
-            canvas.clipPath(clip);
-            canvas.drawCircle(knobX, knobY, knobRadius, gripPaint);
-            canvas.restore();
-        }
         canvas.drawCircle(knobX, knobY, knobRadius, knobRimPaint);
     }
 
