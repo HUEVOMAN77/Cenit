@@ -74,6 +74,9 @@ void GSRenderer::Reset(bool hardware_reset)
 	if (hardware_reset)
 		g_gs_device->ClearCurrent();
 
+	// Cenit 0.6.43: un juego nuevo arranca sin memoria del gate anterior.
+	m_nn_gate = {};
+
 	GSState::Reset(hardware_reset);
 }
 
@@ -632,6 +635,166 @@ void GSRenderer::EndPresentFrame()
 	ImGuiManager::NewFrame();
 }
 
+// Cenit 0.6.43 — el NN se apaga solo cuando cuesta cuadros, y se vuelve a probar.
+//
+// Medido en el Nova 10 con God of War: con NN, GPU 23.6 ms y 28 cuadros; sin NN,
+// 13.2 ms y 46 cuadros. La eleccion no puede ser del usuario a ciegas ("apagalo y
+// mira"), ni puede ser fija en el codigo ("en este telefono siempre apagado").
+//
+// Dos medidas, en este orden:
+//  1) SOSPECHA: uso de GPU >= 90 % durante medio segundo. Es la senal barata y
+//     la que atrapa el caso medido (92 % con NN, 55 % sin NN). Solo abre la
+//     sospecha; no decide.
+//  2) VEREDICTO: un sondeo de 1 s con el NN encendido, comparado contra el
+//     intervalo real entre cuadros medido mientras estuvo apagado. Si con NN se
+//     pierde mas de 15 % de cuadros, se apaga de nuevo. Esto no depende del
+//     vsync, del limite de cuadros ni del juego: mide lo unico que el usuario
+//     siente.
+//
+// Por que la espera crece (10 s, 20 s, 40 s... hasta 120 s): sin ella el gate
+// oscila. Con NN la GPU queda al 92 %, se apaga, baja al 55 %, se vuelve a
+// encender y sube otra vez. La asimetria es deliberada: sospechar es gratis,
+// encender sin medir cuesta cuadros. Un sondeo que sale bien deja el NN tranquilo
+// un minuto antes de que la sospecha pueda volver (ni dos, para no dejar un tramo
+// pesado sin revisar; ni dos segundos, para no encender y apagar en bucle).
+//
+// Sin tiempo de GPU (driver que no lo reporta) no se decide nada: un 0 % no es
+// evidencia de holgura, es ausencia de dato, y la preferencia manda.
+// NNUpscale tambien manda: si el usuario lo apaga, el gate se limpia.
+bool GSRenderer::UpdateNNGate()
+{
+	if (!GSConfig.NNUpscale || !g_gs_device->Features().nn_upscale)
+	{
+		m_nn_gate = {};
+		return false;
+	}
+
+	const u64 now = Common::Timer::GetCurrentValue();
+
+	// Intervalo real entre cuadros del estado en el que esta el gate AHORA.
+	// Los huecos de mas de 250 ms (pausa, carga, cambio de escena) se descartan:
+	// no describen la fluidez de juego y ensuciarian la comparacion.
+	if (m_nn_gate.last_present != 0)
+	{
+		const double delta = Common::Timer::ConvertValueToSeconds(now - m_nn_gate.last_present);
+		if (delta > 0.0 && delta <= 0.25)
+		{
+			if (m_nn_gate.probing)
+			{
+				m_nn_gate.probe_interval_sum += delta;
+				m_nn_gate.probe_frames++;
+			}
+			else if (m_nn_gate.suspended)
+			{
+				m_nn_gate.off_interval_sum += delta;
+				m_nn_gate.off_frames++;
+			}
+		}
+	}
+	m_nn_gate.last_present = now;
+
+	if (PerformanceMetrics::GetGPUAverageTime() <= 0.0f)
+		return m_nn_gate.suspended && !m_nn_gate.probing;
+
+	if (m_nn_gate.next_eval != 0 && now < m_nn_gate.next_eval)
+		return m_nn_gate.suspended && !m_nn_gate.probing;
+
+	static constexpr float kSuspectUsage = 90.0f; // % de GPU; medido 92 % con NN y 55 % sin NN
+	static constexpr double kCostlyRatio = 1.15;  // mas de 15 % de cuadros perdidos = costoso
+	static constexpr u32 kMinSamples = 20;        // menos de esto no es una comparacion, es ruido
+	static constexpr u32 kFirstBackoff = 10;
+	static constexpr u32 kMaxBackoff = 120;
+	static constexpr u32 kVerifiedSeconds = 60;
+	const u64 eval_interval = Common::Timer::ConvertSecondsToValue(0.5);
+	const u64 probe_interval = Common::Timer::ConvertSecondsToValue(1.0);
+	const float usage = PerformanceMetrics::GetGPUUsage();
+
+	if (m_nn_gate.probing)
+	{
+		// Cierra el sondeo: decide con cuadros, no con porcentajes de GPU.
+		m_nn_gate.probing = false;
+		const bool have_samples =
+			m_nn_gate.off_interval_valid && m_nn_gate.probe_frames >= kMinSamples;
+		const double probe_avg =
+			have_samples ? m_nn_gate.probe_interval_sum / static_cast<double>(m_nn_gate.probe_frames) : 0.0;
+		const bool costly = have_samples ? (probe_avg > m_nn_gate.off_interval_avg * kCostlyRatio) :
+										   (usage >= kSuspectUsage);
+
+		if (costly)
+		{
+			m_nn_gate.suspended = true;
+			m_nn_gate.backoff_seconds = std::min(std::max(m_nn_gate.backoff_seconds, kFirstBackoff) * 2u, kMaxBackoff);
+			m_nn_gate.next_eval = now + Common::Timer::ConvertSecondsToValue(m_nn_gate.backoff_seconds);
+			m_nn_gate.off_interval_sum = 0.0;
+			m_nn_gate.off_frames = 0;
+			m_nn_gate.suspensions++;
+			if (have_samples)
+			{
+				Console.WriteLnFmt(
+					"Cenit NN gate: el NN cuesta cuadros ({:.1f} -> {:.1f} ms), suspendido {} s (suspension #{}).",
+					m_nn_gate.off_interval_avg * 1000.0, probe_avg * 1000.0, m_nn_gate.backoff_seconds,
+					m_nn_gate.suspensions);
+			}
+			else
+			{
+				Console.WriteLnFmt(
+					"Cenit NN gate: GPU al {:.0f}% con NN y sin muestra de referencia, suspendido {} s (suspension #{}).",
+					usage, m_nn_gate.backoff_seconds, m_nn_gate.suspensions);
+			}
+			return true;
+		}
+
+		m_nn_gate.suspended = false;
+		m_nn_gate.backoff_seconds = 0;
+		m_nn_gate.verified_until = now + Common::Timer::ConvertSecondsToValue(kVerifiedSeconds);
+		m_nn_gate.next_eval = now + eval_interval;
+		if (have_samples)
+		{
+			Console.WriteLnFmt("Cenit NN gate: el NN no cuesta cuadros ({:.1f} -> {:.1f} ms), queda encendido.",
+				m_nn_gate.off_interval_avg * 1000.0, probe_avg * 1000.0);
+		}
+		else
+		{
+			Console.WriteLnFmt(
+				"Cenit NN gate: el NN queda encendido (GPU al {:.0f}%, sin referencia de cuadros).", usage);
+		}
+		return false;
+	}
+
+	if (!m_nn_gate.suspended)
+	{
+		if (usage < kSuspectUsage || now < m_nn_gate.verified_until)
+		{
+			m_nn_gate.next_eval = now + eval_interval;
+			return false;
+		}
+
+		m_nn_gate.suspended = true;
+		m_nn_gate.backoff_seconds = kFirstBackoff;
+		m_nn_gate.next_eval = now + Common::Timer::ConvertSecondsToValue(m_nn_gate.backoff_seconds);
+		m_nn_gate.off_interval_sum = 0.0;
+		m_nn_gate.off_frames = 0;
+		Console.WriteLnFmt("Cenit NN gate: GPU al {:.0f}% con NN, se suspende {} s para medir.",
+			usage, m_nn_gate.backoff_seconds);
+		return true;
+	}
+
+	// Suspendido y ya toco revisar: congela la referencia de como se juega sin NN
+	// y deja correr el NN una ventana para comparar peras con peras.
+	m_nn_gate.off_interval_valid = m_nn_gate.off_frames >= kMinSamples;
+	m_nn_gate.off_interval_avg =
+		m_nn_gate.off_interval_valid ?
+			m_nn_gate.off_interval_sum / static_cast<double>(m_nn_gate.off_frames) :
+			0.0;
+	m_nn_gate.probe_interval_sum = 0.0;
+	m_nn_gate.probe_frames = 0;
+	m_nn_gate.probing = true;
+	m_nn_gate.next_eval = now + probe_interval;
+	Console.WriteLnFmt("Cenit NN gate: probando el NN 1 s (sin NN se juega a {:.1f} ms/cuadro).",
+		m_nn_gate.off_interval_avg * 1000.0);
+	return false;
+}
+
 void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
 {
 	if (GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()))
@@ -764,7 +927,11 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
 			// sin tocar la preferencia del usuario. Esa es la diferencia con el error
 			// de 0.6.25 (gate invisible): aca toda decision deja rastro en la linea
 			// "Cenit present:" y en el HUD, tanto si corrio NN como si corrio EASU.
-			const bool nn_gate_open = GSConfig.NNUpscale && g_gs_device->Features().nn_upscale;
+			// Cenit 0.6.43: el gate puede suspender el NN aunque la preferencia siga
+			// encendida (ver UpdateNNGate). El HUD y "Cenit present:" siguen diciendo la
+			// verdad de lo que corrio; el log del gate dice por que no corrio.
+			const bool nn_auto_suspended = UpdateNNGate();
+			const bool nn_gate_open = GSConfig.NNUpscale && !nn_auto_suspended && g_gs_device->Features().nn_upscale;
 			const bool easu_gate_open = GSConfig.EASUReconstruct && g_gs_device->Features().easu_reconstruct;
 			const bool easu_sub_native =
 				current->GetWidth() < m_present_dst.x && current->GetHeight() < m_present_dst.y;

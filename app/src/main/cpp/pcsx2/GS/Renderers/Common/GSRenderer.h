@@ -38,6 +38,35 @@ protected:
 	bool m_nn_active = false;         ///< Cenit 0.6.41: fue la cadena neuronal la que corrio
 	int m_easu_stages = 0;            ///< cuantas pasadas uso la cadena (0 = no corrio)
 
+	// Cenit 0.6.43 — gate adaptativo del NN. En el Nova 10, con God of War, el NN
+	// lleva la GPU de 13.2 a 23.6 ms por cuadro: con la CPU sobrada, eso es la
+	// diferencia entre 46 y 28 cuadros. La preferencia del usuario no se toca; esto
+	// solo la SUSPENDE mientras la GPU ya este saturada, y la vuelve a probar cada
+	// tanto para no quedarse apagada por un tramo pesado que ya paso.
+	struct NNGateState
+	{
+		bool suspended = false;   ///< el NN esta suspendido por saturacion de GPU
+		bool probing = false;     ///< se dejo correr el NN de nuevo para medir si ahora alcanza
+		u32 backoff_seconds = 0;  ///< espera antes del proximo sondeo; crece si el sondeo vuelve a saturar
+		u64 next_eval = 0;        ///< timestamp (Common::Timer) del proximo punto de decision
+		u64 last_present = 0;     ///< timestamp del present anterior (para medir el intervalo real)
+		u64 verified_until = 0;   ///< hasta cuando no se vuelve a sospechar tras un sondeo que salio bien
+		u32 suspensions = 0;      ///< cuantas veces se suspendio en esta sesion (evidencia en el log)
+
+		// El veredicto del sondeo no es "usa poca GPU": es "sin NN se juega igual".
+		// Se compara el intervalo real entre cuadros con el NN apagado contra el del
+		// sondeo encendido. Es la unica medida que no depende del vsync, del limite
+		// de cuadros ni del juego.
+		double off_interval_sum = 0.0;   ///< suma de intervalos (s) con el NN suspendido
+		u32 off_frames = 0;
+		double probe_interval_sum = 0.0; ///< suma de intervalos (s) durante el sondeo
+		u32 probe_frames = 0;
+		double off_interval_avg = 0.0;   ///< referencia congelada al empezar el sondeo
+		bool off_interval_valid = false; ///< hubo suficientes cuadros para creerle a esa referencia
+	};
+	NNGateState m_nn_gate;
+	bool UpdateNNGate();
+
 	// Cenit 0.6.36: el HUD dice el frame ACTUAL; esto dice la SESION, y es lo que
 	// viaja en el registro. Sin esto, un log puede probar "hubo cuadros por debajo
 	// de 1x" (el regidor sostiene 0.5x) y no puede probar si EASU los reconstruyo,
