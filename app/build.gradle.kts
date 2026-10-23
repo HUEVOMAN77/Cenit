@@ -68,8 +68,8 @@ android {
         applicationId = "com.huevoman77.cenit"
         minSdk = 26
         targetSdk = 36
-        versionCode = 76
-        versionName = "0.6.39"
+        versionCode = 77
+        versionName = "0.6.40"
 
         externalNativeBuild {
             cmake {
