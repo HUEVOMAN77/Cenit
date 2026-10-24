@@ -69,16 +69,24 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 80
-        versionName = "0.6.43"
+        // Cenit 0.6.43: el build "edge" compila solo para Cortex-A78 (LSE/dotprod).
+        // No puede publicarse: en un arm64 viejo (A53) esas instrucciones son SIGILL.
+        // Se activa con -PcenitEdge, nunca desde el CI.
+        versionName = if (providers.gradleProperty("cenitEdge").isPresent) "0.6.43-edge" else "0.6.43"
 
         externalNativeBuild {
             cmake {
-                // Avoid LTO core on Android to prevent x86 objects from leaking into arm64 link.
                 arguments(
                     "-DANDROID=true",
                     "-DCMAKE_BUILD_TYPE=Release",
                     "-DANDROID_STL=c++_static",
                     "-DPCSX2_PROFILER=OFF",
+                    // Cenit 0.6.43: LTO del subconjunto que mas se beneficia (EE, VU,
+                    // GS, SPU2, IPU). Estuvo apagado por un x86 que se colaba en el
+                    // link arm64; la lista de fuentes ya esta separada por arquitectura
+                    // (pcsx2/CMakeLists.txt, ARCH_X86 vs ARCH_ARM64), asi que ese motivo
+                    // ya no aplica.
+                    "-DLTO_PCSX2_CORE=ON",
                     // Cenit 0.6.13 (revisión de ingeniería, prioridad 4): el CI
                     // necesita poder LEER la línea de compilación real de los
                     // archivos calientes (microVU, iR5900) para auditar si de
@@ -90,6 +98,10 @@ android {
                     // hornea aquí y se lee en BuildVersion::AppVersion.
                     "-DCENIT_APP_VERSION=${defaultConfig.versionName}"
                 )
+
+                if (providers.gradleProperty("cenitEdge").isPresent) {
+                    arguments("-DCENIT_EDGE_CPU=ON")
+                }
             }
         }
 
@@ -169,6 +181,11 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
+            // Cenit 0.6.43: -PcenitProfile deja los simbolos dentro del APK para que
+            // simpleperf pueda nombrar funciones al perfilar en el telefono. Solo local.
+            if (providers.gradleProperty("cenitProfile").isPresent) {
+                keepDebugSymbols.add("**/libemucore.so")
+            }
         }
         resources {
             excludes.addAll(

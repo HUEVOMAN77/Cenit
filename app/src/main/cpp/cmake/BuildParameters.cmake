@@ -16,6 +16,7 @@ option(ENABLE_VURUNNER "Enables building pcsx2-vurunner (headless VU microprogra
 option(ENABLE_EERUNNER "Enables building pcsx2-eerunner (headless EE JIT-vs-interpreter divergence localizer) by default.  It can still be built with `make pcsx2-eerunner` otherwise." OFF)
 option(ENABLE_SDL_FRONTEND "Enables building the SDL3 / kmsdrm frontend (pcsx2-sdl) by default.  It can still be built with `make pcsx2-sdl` otherwise." OFF)
 option(LTO_PCSX2_CORE "Enable LTO/IPO/LTCG on the subset of pcsx2 that benefits most from it but not anything else")
+option(CENIT_EDGE_CPU "Build the Android arm64 core for Cortex-A78 (ARMv8.2 + LSE + dotprod). Faster on the SD778G class; SIGILL on older arm64 devices. Never ship this APK.")
 option(USE_VTUNE "Plug VTUNE to profile GS JIT.")
 option(USE_PERF_JITDUMP "Emit Linux perf jitdump (jit-<pid>.dump) for recompiled JIT blocks; use with perf record/inject." OFF)
 option(USE_PERF_MAP "Emit simple /tmp/perf-<pid>.map symbol table for recompiled JIT blocks." OFF)
@@ -147,7 +148,14 @@ elseif("${CMAKE_HOST_SYSTEM_PROCESSOR}" STREQUAL "arm64" OR "${CMAKE_HOST_SYSTEM
 	elseif(ANDROID)
 		# Keep Play-distributed builds compatible with ARMv8.0 devices. The
 		# recompiler does not require CRC or LSE instructions.
-		add_compile_options("-march=armv8-a")
+		# Cenit 0.6.43: el build edge se compila SOLO para los nucleos del SD778G
+		# (Cortex-A78). No es publicable: en un A53 las instrucciones LSE son SIGILL.
+		if(CENIT_EDGE_CPU)
+			message(STATUS "Cenit: build EDGE para Cortex-A78 (armv8.2-a+lse+dotprod)")
+			add_compile_options("-mcpu=cortex-a78" "-march=armv8.2-a+dotprod+lse")
+		else()
+			add_compile_options("-march=armv8-a")
+		endif()
 	else()
 		# Require atomic rmw instructions (LSE, ARMv8.1+). This is the upstream
 		# default and targets the broad arm64 ecosystem. In-order ARMv8.0 cores
