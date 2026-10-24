@@ -68,11 +68,13 @@ android {
         applicationId = "com.huevoman77.cenit"
         minSdk = 26
         targetSdk = 36
-        versionCode = 80
-        // Cenit 0.6.43: el build "edge" compila solo para Cortex-A78 (LSE/dotprod).
-        // No puede publicarse: en un arm64 viejo (A53) esas instrucciones son SIGILL.
+        versionCode = 81
+        // Cenit 0.6.44: la cola de cuadros deja de ser 0 por defecto en gama alta y
+        // entra en "máxima jugabilidad" (ver native-lib.cpp y PlayabilityBundle).
+        // El build "edge" compila solo para Cortex-A78 (LSE/dotprod): no puede
+        // publicarse, en un arm64 viejo (A53) esas instrucciones son SIGILL.
         // Se activa con -PcenitEdge, nunca desde el CI.
-        versionName = if (providers.gradleProperty("cenitEdge").isPresent) "0.6.43-edge" else "0.6.43"
+        versionName = if (providers.gradleProperty("cenitEdge").isPresent) "0.6.44-edge" else "0.6.44"
 
         externalNativeBuild {
             cmake {

@@ -304,8 +304,19 @@ static void ApplyHardwarePerformanceProfile()
     // Nota de honestidad: esto NO es una mejora medida. La partida de referencia corrió
     // con cola=0 y no corrió con cola=2, así que no puedo decir cuántos cuadros se
     // ganaran en un 6/7; puedo decir que la decisión ya no la toma el nombre.
+    //
+    // Cenit 0.6.44: la cola 0 se deja solo para quien la pida a mano en Ajustes. Lo que
+    // mide el teléfono de referencia en la partida del 2026-10-23 es EE 61-65 % y GPU
+    // 64-69 % AL MISMO TIEMPO, con la GPU lejos del techo y el regidor todavía dictando
+    // GPU_BOUND en los picos. Con cola=0 eso es exactamente el párrafo de arriba: los
+    // dos esperas se suman en pared (cuadro = tiempo-EE + tiempo-GS) en vez de solaparse
+    // (cuadro = max(EE, GS)). Un 1 en vuelo ya rompe esa suma; 2 es el default del core
+    // y se queda en "máxima jugabilidad", donde el costo —una cuadro extra de latencia—
+    // está dicho en pantalla. No toca el reloj emulado: con VSync o con límite de cuadro
+    // puestos, la cola no sube de 100 % de velocidad, solo deja de perder cuadros por
+    // serialización.
     if (AndroidDeviceDetection::DeviceWantsOptimalPacing())
-        s_settings_interface.SetIntValue("EmuCore/GS", "VsyncQueueSize", 0);
+        s_settings_interface.SetIntValue("EmuCore/GS", "VsyncQueueSize", 1);
 
     // Renderer/upscale are NOT set here: MainActivity pushes the user's saved
     // values after initialize() (applyGlobalSettingsBatch), so a native write

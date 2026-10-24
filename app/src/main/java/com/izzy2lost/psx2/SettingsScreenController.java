@@ -501,6 +501,7 @@ public final class SettingsScreenController {
             if (frameQueueShown < 0) { frameQueueShown = position; return; }
             if (position == frameQueueShown) return;
             prefs.edit().putInt("frame_queue", position).apply();
+            PlayabilityBundle.rebaseline(prefs, PlayabilityBundle.KEY_FRAME_QUEUE);
             NativeApp.setFrameLatencyQueueAsync(position);
             frameQueueShown = position;
         });

@@ -38,6 +38,13 @@ import java.util.Map;
  * estaba por debajo, se queda como está, porque bajar de ahí es precisamente lo
  * que el regidor dinámico hace solo. Y lo restaura al apagar.
  *
+ * Desde 0.6.44 el paquete también escribe frame_queue (la cola de MTGS). Es la
+ * única palanca del tablero que da cuadros sin tocar ni un píxel ni el reloj
+ * emulado: con cola 0 el EE se queda esperando al GS en cada cuadro, y la medida
+ * de referencia (EE 61-65 % y GPU 64-69 % simultáneos, GPU sin techo) dice que ahí
+ * los dos tiempos se suman en vez de solaparse. Su costo es latencia de mando, y
+ * por eso va dicho en describe(), no callado.
+ *
  * Lo que NO toca, y por qué:
  *   - ee_cycle_rate / cuotas: bajar la CPU emulada es la decisión MÁS visible
  *     que hay (el juego pasa a ir más despacio de reloj). Es terreno del
@@ -63,6 +70,14 @@ public final class PlayabilityBundle {
 
     static final String KEY_UPSCALE = "upscale_multiplier";
     static final String KEY_ISO_BUFFER = "iso_buffer_kb";
+    // Cenit 0.6.44: la cola de cuadros entra en el paquete. Es la palanca que da
+    // cuadros SIN tocar la imagen ni el reloj emulado, y hasta ahora el modo no la
+    // movía: el teléfono de referencia corría con cola=0 (el default de gama alta
+    // hasta 0.6.43) y el log muestra EE 61-65 % y GPU 64-69 % a la vez, que con
+    // cola=0 es la espera del EE sobre el GS en cada cuadro.
+    static final String KEY_FRAME_QUEUE = "frame_queue";
+    /** Cuadros en vuelo que pone el modo: el default del core, el máximo amortiguado. */
+    static final int FRAME_QUEUE_FOR_ON = 2;
 
     private PlayabilityBundle() {}
 
@@ -139,6 +154,11 @@ public final class PlayabilityBundle {
      *  pasaba si se compartía el case "i" con iso_buffer_kb. */
     static int defaultIntFor(String key) {
         if (TUNER_MODE.equals(key)) return CpuVUTuner.DEFAULT_MODE;
+        // La cola no tiene un número fijo: su default vive en NativeApp y depende de
+        // la gama medida (2 en gama baja, 1 arriba). El valor solo se lee cuando la
+        // preferencia EXISTE; si no existe, la fotografía anota "0:" y apagar el modo
+        // borra la clave, que es lo que deja hablar al default.
+        if (KEY_FRAME_QUEUE.equals(key)) return NativeApp.defaultFrameLatencyQueue();
         return 128; // iso_buffer_kb: la ventana histórica del motor
     }
 
@@ -180,7 +200,7 @@ public final class PlayabilityBundle {
      * cdvd_precache ni el modo del sintonizador.
      */
     static final String[] BOOL_KEYS = { DYN_RES, ADAPTIVE, EASU, ASYNC_SHADERS, PRECACHE };
-    static final String[] INT_KEYS = { TUNER_MODE, KEY_ISO_BUFFER };
+    static final String[] INT_KEYS = { TUNER_MODE, KEY_ISO_BUFFER, KEY_FRAME_QUEUE };
 
     static String snapshot(SharedPreferences prefs) {
         final StringBuilder sb = new StringBuilder();
@@ -258,6 +278,7 @@ public final class PlayabilityBundle {
         ed.putString(PREF_SNAPSHOT, snap);   // antes de cualquier escritura
         for (Map.Entry<String, Boolean> e : want.entrySet()) ed.putBoolean(e.getKey(), e.getValue());
         ed.putInt(TUNER_MODE, tunerModeForOn());
+        ed.putInt(KEY_FRAME_QUEUE, FRAME_QUEUE_FOR_ON);
         ed.putFloat(KEY_UPSCALE, scale);
         ed.remove(KEY_ISO_BUFFER);           // que hable la regla de fábrica
         ed.putBoolean(PREF_ON, true);
@@ -269,10 +290,11 @@ public final class PlayabilityBundle {
         NativeApp.renderUpscalemultiplierAsync(scale);
         NativeApp.setEASUReconstructAsync(true);
         NativeApp.setAsyncShaderCompileAsync(true);
+        NativeApp.setFrameLatencyQueueAsync(FRAME_QUEUE_FOR_ON);
 
         Log.i(TAG, "modo maxima jugabilidad ON (" + summaryFor(want)
                 + " tuner_mode=" + CpuVUTuner.modeName(tunerModeForOn())
-                + " escala=" + scale + "x)");
+                + " escala=" + scale + "x cola=" + FRAME_QUEUE_FOR_ON + " cuadros)");
         return want;
     }
 
@@ -311,6 +333,13 @@ public final class PlayabilityBundle {
                 ed.remove(TUNER_MODE);
                 done.add(TUNER_MODE);
             }
+            // La cola, igual: se BORRA. Su default no es un número de este archivo,
+            // es el que NativeApp deduce de la gama medida, y escribir uno aqui sería
+            // plantar una preferencia que el usuario nunca puso.
+            if (prefs.contains(KEY_FRAME_QUEUE)) {
+                ed.remove(KEY_FRAME_QUEUE);
+                done.add(KEY_FRAME_QUEUE);
+            }
             ed.apply();
         }
         final SharedPreferences.Editor ed = prefs.edit();
@@ -322,6 +351,8 @@ public final class PlayabilityBundle {
         NativeApp.setEASUReconstructAsync(prefs.getBoolean(EASU, defaultBooleanFor(EASU)));
         NativeApp.setAsyncShaderCompileAsync(
                 prefs.getBoolean(ASYNC_SHADERS, defaultBooleanFor(ASYNC_SHADERS)));
+        NativeApp.setFrameLatencyQueueAsync(
+                prefs.getInt(KEY_FRAME_QUEUE, NativeApp.defaultFrameLatencyQueue()));
 
         Log.i(TAG, "modo maxima jugabilidad OFF, restauradas " + done.size() + " claves");
         return done;
@@ -401,6 +432,10 @@ public final class PlayabilityBundle {
             + "de shaders en segundo plano (un efecto que se estrena puede parpadear "
             + "uno o dos frames en vez de frenar el cuadro entero). Escala tope: "
             + scaleLabel(scaleFor(tier)) + "x en " + gama + ", y nunca por encima de la tuya. "
+            + "Cola de cuadros: " + FRAME_QUEUE_FOR_ON + " en vuelo, para que el CPU emulado "
+            + "deje de esperar al GPU en cada cuadro — es la palanca que más cuadros da y no "
+            + "toca la imagen, pero el mando se nota hasta " + FRAME_QUEUE_FOR_ON + " cuadros "
+            + "(unos 50 ms) más lento. "
             + "Precarga en memoria: "
             + precarga + ". "
             + "El modo NO escribe tus cuotas de CPU ni suelta Fast CDVD por sí "

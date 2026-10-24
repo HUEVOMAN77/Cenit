@@ -435,7 +435,7 @@ public class NativeApp {
         runNativeSettingAsync("setThreadPinning", () -> setThreadPinning(enabled));
     }
     // Cola de cuadros (0 = ritmo óptimo con menos input lag; 1..n = más
-    // amortiguación). Por defecto depende de la gama: 0 si el teléfono sobra.
+    // amortiguación). Por defecto depende de la gama: 2 en gama baja y 1 arriba.
     public static native void setFrameLatencyQueue(int frames);
     public static void setFrameLatencyQueueAsync(int frames) {
         runNativeSettingAsync("setFrameLatencyQueue", () -> setFrameLatencyQueue(frames));
@@ -446,11 +446,14 @@ public class NativeApp {
         runNativeSettingAsync("setTexturePreloading", () -> setTexturePreloading(level));
     }
     // El default de las dos anteriores sigue al hardware detectado por el núcleo.
-    // Gama baja (tier 0): cola=2 y pre-carga parcial. Gama media/alta: cola=0
-    // (ritmo óptimo) y pre-carga completa (2). Se escribe como clave por si el
-    // usuario la cambia en Ajustes; si no, el default vive aquí.
+    // Gama baja (tier 0): cola=2 y pre-carga parcial. Gama media/alta: cola=1
+    // (0.6.44: un cuadro en vuelo, no cero) y pre-carga completa (2). Se escribe
+    // como clave por si el usuario la cambia en Ajustes; si no, el default vive
+    // aquí. La cola 0 sigue existiendo como "Óptima" en el spinner: es la que hay
+    // que elegir cuando el teléfono SOBRA de verdad, porque con EE y GPU llenando
+    // a la vez el 0 los serializa y el cuadro cuesta la suma de los dos.
     public static int defaultFrameLatencyQueue() {
-        return safeGetDevicePerformanceTier() == 0 ? 2 : 0;
+        return safeGetDevicePerformanceTier() == 0 ? 2 : 1;
     }
     public static int defaultTexturePreloading() {
         return safeGetDevicePerformanceTier() == 0 ? 1 : 2;
